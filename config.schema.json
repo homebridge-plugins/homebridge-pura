@@ -1,5 +1,5 @@
 {
-  "pluginAlias": "PuraFragranceDiffuser",
+  "pluginAlias": "PuraSmartDiffuser",
   "pluginType": "platform",
   "singular": true,
   "strictValidation": false,
@@ -10,7 +10,7 @@
         "title": "Name",
         "type": "string",
         "required": true,
-        "default": "Pura Fragrance Diffuser"
+        "default": "Pura Smart Diffuser"
       },
       "username": {
         "title": "Username",

@@ -24,8 +24,8 @@ Add the following platform to your `config.json`:
 {
   "platforms": [
     {
-      "name": "Pura Fragrance Diffuser",
-      "platform": "PuraFragranceDiffuser",
+      "name": "Pura Smart Diffuser",
+      "platform": "PuraSmartDiffuser",
       "username": "your-pura-email@example.com",
       "password": "your-pura-password",
       "refreshInterval": 300
