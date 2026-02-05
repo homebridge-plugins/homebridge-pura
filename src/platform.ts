@@ -154,7 +154,8 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       return;
     }
 
-    const accessoryName = `${device.name} Bay ${bayNumber}`;
+    const deviceName = device.name || `Pura ${device.id}`;
+    const accessoryName = `${deviceName} Bay ${bayNumber}`;
     const uniqueId = `${device.id}-bay${bayNumber}`;
     const uuid = this.api.hap.uuid.generate(uniqueId);
 

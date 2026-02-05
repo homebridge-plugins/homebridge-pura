@@ -11,7 +11,7 @@ import {
   CognitoUserSession,
 } from 'amazon-cognito-identity-js';
 import fetch, { RequestInit } from 'node-fetch';
-import { PuraDevice, PuraAuthTokens } from './puraTypes.js';
+import { PuraBay, PuraDevice, PuraAuthTokens, PuraNightlight } from './puraTypes.js';
 
 // Defaults from pypura
 const DEFAULT_USER_POOL_ID = 'us-east-1_LaB718hYv'; // Base64 decoded from pypura
@@ -167,21 +167,74 @@ export class PuraApi {
   async getDevices(): Promise<PuraDevice[]> {
     try {
       const response = await this.makeRequest('GET', 'v2/users/devices') as Record<string, unknown>;
-      const devices = (response as { devices?: PuraDevice[] }).devices;
+      const devices = (response as { devices?: unknown[] }).devices;
+      const rawDevices: unknown[] = [];
       if (Array.isArray(devices)) {
-        return devices;
-      }
-      const flattened: PuraDevice[] = [];
-      for (const value of Object.values(response)) {
-        if (Array.isArray(value)) {
-          flattened.push(...(value as PuraDevice[]));
+        rawDevices.push(...devices);
+      } else {
+        for (const value of Object.values(response)) {
+          if (Array.isArray(value)) {
+            rawDevices.push(...value);
+          }
         }
       }
-      return flattened;
+      return rawDevices
+        .map((device) => this.normalizeDevice(device))
+        .filter((device): device is PuraDevice => device !== null);
     } catch (error) {
       this.log.error('Failed to get devices:', error);
       throw error;
     }
+  }
+
+  private normalizeDevice(device: unknown): PuraDevice | null {
+    if (!device || typeof device !== 'object') {
+      return null;
+    }
+    const record = device as Record<string, unknown>;
+    const id = (record.id || record.deviceId) as string | undefined;
+    if (!id) {
+      return null;
+    }
+
+    const displayName = record.displayName;
+    let name: string | undefined;
+    if (typeof displayName === 'string') {
+      name = displayName;
+    } else if (displayName && typeof displayName === 'object') {
+      const displayRecord = displayName as Record<string, unknown>;
+      if (typeof displayRecord.name === 'string') {
+        name = displayRecord.name;
+      } else if (typeof displayRecord.value === 'string') {
+        name = displayRecord.value;
+      }
+    }
+    if (!name && typeof record.deviceName === 'string') {
+      name = record.deviceName;
+    }
+
+    const firmwareVersion = (record.fwVersion || record.firmwareVersion) as string | undefined;
+    const deviceVersion = (record.deviceVer || record.version) as string | undefined;
+    const type = (record.type || record.model || 'Pura Diffuser') as string;
+
+    return {
+      id,
+      name: name ?? `Pura ${id}`,
+      type: String(type),
+      version: deviceVersion ?? '',
+      state: {
+        battery: (record.batteryRemaining || record.battery) as number | undefined,
+        firmwareVersion,
+        lastSeen: record.lastConnectedAt ? String(record.lastConnectedAt) : undefined,
+        online: (record.connected || record.online) as boolean | undefined,
+      },
+      bay1: record.bay1 as PuraBay | undefined,
+      bay2: record.bay2 as PuraBay | undefined,
+      nightlight: record.nightlight as PuraNightlight | undefined,
+      awayMode: record.awayMode as boolean | undefined,
+      ambientMode: record.ambientMode as boolean | undefined,
+      online: (record.connected || record.online) as boolean | undefined,
+    };
   }
 
   /**
