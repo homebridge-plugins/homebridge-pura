@@ -4,15 +4,15 @@
   "type": "module",
   "version": "1.0.0",
   "description": "Homebridge plugin for Pura smart fragrance diffusers",
-  "author": "pradeepmouli",
+  "author": "QandnotU",
   "license": "Apache-2.0",
-  "homepage": "https://github.com/pradeepmouli/homebridge-pura#readme",
+  "homepage": "https://github.com/QandnotU/homebridge-pura#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pradeepmouli/homebridge-pura.git"
+    "url": "https://github.com/QandnotU/homebridge-pura.git"
   },
   "bugs": {
-    "url": "https://github.com/pradeepmouli/homebridge-pura/issues"
+    "url": "https://github.com/QandnotU/homebridge-pura/issues"
   },
   "keywords": [
     "homebridge-plugin",

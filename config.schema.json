@@ -31,31 +31,6 @@
         "maximum": 3600,
         "default": 300,
         "description": "How often to refresh device status (30-3600 seconds)"
-      },
-      "userPoolId": {
-        "title": "Cognito User Pool ID (Advanced)",
-        "type": "string",
-        "required": false,
-        "description": "Override the default Cognito User Pool ID if Pura changes it"
-      },
-      "clientId": {
-        "title": "Cognito Client ID (Advanced)",
-        "type": "string",
-        "required": false,
-        "description": "Override the default Cognito Client ID if Pura changes it"
-      },
-      "baseUrl": {
-        "title": "API Base URL (Advanced)",
-        "type": "string",
-        "required": false,
-        "description": "Override the API base URL if Pura changes it"
-      },
-      "autoUpdateCognito": {
-        "title": "Auto-Update Cognito IDs (Advanced)",
-        "type": "boolean",
-        "required": false,
-        "default": true,
-        "description": "If authentication fails, fetch the latest Cognito IDs from the pypura PyPI release and retry once (requires outbound HTTPS to PyPI on failure)"
       }
     }
   }

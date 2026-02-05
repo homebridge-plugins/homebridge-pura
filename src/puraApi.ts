@@ -19,9 +19,6 @@ const DEFAULT_CLIENT_ID = '4iekubat0jb5iljfbaalsiqf9j'; // Base64 decoded from p
 const DEFAULT_BASE_URL = 'https://trypura.io/mobile/api/';
 
 export interface PuraApiOptions {
-  userPoolId?: string;
-  clientId?: string;
-  baseUrl?: string;
 }
 
 export class PuraApi {
@@ -33,9 +30,9 @@ export class PuraApi {
 
   constructor(log: Logging, options: PuraApiOptions = {}) {
     this.log = log;
-    const userPoolId = options.userPoolId || DEFAULT_USER_POOL_ID;
-    const clientId = options.clientId || DEFAULT_CLIENT_ID;
-    this.baseUrl = options.baseUrl || DEFAULT_BASE_URL;
+    const userPoolId = DEFAULT_USER_POOL_ID;
+    const clientId = DEFAULT_CLIENT_ID;
+    this.baseUrl = DEFAULT_BASE_URL;
 
     this.userPool = new CognitoUserPool({
       UserPoolId: userPoolId,
@@ -172,8 +169,18 @@ export class PuraApi {
    */
   async getDevices(): Promise<PuraDevice[]> {
     try {
-      const response = await this.makeRequest('GET', 'v2/users/devices') as { devices?: PuraDevice[] };
-      return response.devices || [];
+      const response = await this.makeRequest('GET', 'v2/users/devices') as Record<string, unknown>;
+      const devices = (response as { devices?: PuraDevice[] }).devices;
+      if (Array.isArray(devices)) {
+        return devices;
+      }
+      const flattened: PuraDevice[] = [];
+      for (const value of Object.values(response)) {
+        if (Array.isArray(value)) {
+          flattened.push(...(value as PuraDevice[]));
+        }
+      }
+      return flattened;
     } catch (error) {
       this.log.error('Failed to get devices:', error);
       throw error;

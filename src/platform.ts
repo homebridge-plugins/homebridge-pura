@@ -39,16 +39,9 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     }
 
     this.puraConfig = config as PuraConfig;
-    this.puraApi = new PuraApi(this.log, {
-      userPoolId: this.puraConfig.userPoolId,
-      clientId: this.puraConfig.clientId,
-      baseUrl: this.puraConfig.baseUrl,
-    });
+    this.puraApi = new PuraApi(this.log);
 
-    const userPoolId = this.puraConfig.userPoolId || '(default)';
-    const clientId = this.puraConfig.clientId ? `…${this.puraConfig.clientId.slice(-4)}` : '(default)';
-    const baseUrl = this.puraConfig.baseUrl || '(default)';
-    this.log.info('Pura API config:', { userPoolId, clientId, baseUrl });
+    this.log.info('Pura API config: using default baseUrl');
 
     this.log.debug('Finished initializing platform:', this.config.name);
 
@@ -117,14 +110,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   }
 
   private async tryAutoUpdateCognito(error: unknown): Promise<boolean> {
-    const autoUpdate = this.puraConfig.autoUpdateCognito !== false;
-    if (!autoUpdate) {
-      return false;
-    }
     if (this.attemptedCognitoUpdate) {
-      return false;
-    }
-    if (this.puraConfig.userPoolId || this.puraConfig.clientId) {
       return false;
     }
     if (!(error instanceof Error) || !error.message.toLowerCase().includes('authentication')) {

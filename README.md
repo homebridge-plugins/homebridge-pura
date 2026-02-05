@@ -1,5 +1,7 @@
 # Homebridge Pura
 
+![Pura Logo](Pura_black_Logo.jpg)
+
 A Homebridge plugin for Pura smart fragrance diffusers.
 
 This plugin allows you to control your Pura smart fragrance diffusers through Apple HomeKit. Each fragrance bay on your Pura device will appear as a separate fan in the Home app, where you can:
@@ -26,11 +28,7 @@ Add the following platform to your `config.json`:
       "platform": "PuraFragranceDiffuser",
       "username": "your-pura-email@example.com",
       "password": "your-pura-password",
-      "refreshInterval": 300,
-      "userPoolId": "us-east-1_LaB718hYv",
-      "clientId": "4iekubat0jb5iljfbaalsiqf9j",
-      "baseUrl": "https://trypura.io/mobile/api/",
-      "autoUpdateCognito": true
+      "refreshInterval": 300
     }
   ]
 }
@@ -41,10 +39,6 @@ Add the following platform to your `config.json`:
 - **username**: Your Pura app username (email address) - *required*
 - **password**: Your Pura app password - *required*
 - **refreshInterval**: How often to refresh device status in seconds (default: 300, min: 30, max: 3600)
-- **userPoolId**: Override the default Cognito User Pool ID (advanced)
-- **clientId**: Override the default Cognito Client ID (advanced)
-- **baseUrl**: Override the API base URL (advanced)
-- **autoUpdateCognito**: If authentication fails, fetch the latest Cognito IDs from the pypura PyPI release and retry once (advanced, default: true; requires outbound HTTPS to PyPI on failure)
 
 ## Features
 
@@ -79,7 +73,7 @@ If you encounter authentication errors:
 1. Verify your username and password are correct
 2. Check that your Pura account is active and can log in to the mobile app
 3. Ensure your internet connection is stable
-4. If the error mentions a Cognito client or user pool, either enable `autoUpdateCognito` (default) or set `clientId` and `userPoolId` to the latest values
+4. If the error mentions a Cognito client or user pool, the plugin will attempt to fetch the latest Cognito IDs from the pypura PyPI release and retry once (requires outbound HTTPS to PyPI on failure)
 
 ### Device Not Appearing
 
