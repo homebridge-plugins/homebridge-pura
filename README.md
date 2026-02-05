@@ -1,6 +1,6 @@
 # Homebridge Pura
 
-![Pura Logo](Pura_black_Logo.jpg)
+<img src="Pura_black_Logo.jpg" alt="Pura Logo" width="200" />
 
 A Homebridge plugin for Pura smart fragrance diffusers.
 
