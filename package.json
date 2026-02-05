@@ -1,5 +1,5 @@
 {
-  "name": "homebridge-pura",
+  "name": "@qandnotu/homebridge-pura",
   "displayName": "Pura Smart Fragrance Diffuser",
   "type": "module",
   "version": "1.0.4",
@@ -9,7 +9,7 @@
   "homepage": "https://github.com/QandnotU/homebridge-pura#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/QandnotU/homebridge-pura.git"
+    "url": "git+https://github.com/QandnotU/homebridge-pura.git"
   },
   "bugs": {
     "url": "https://github.com/QandnotU/homebridge-pura/issues"

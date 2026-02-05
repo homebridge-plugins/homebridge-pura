@@ -12,7 +12,7 @@ This plugin allows you to control your Pura smart fragrance diffusers through Ap
 
 ## Installation
 
-1. Install this plugin using: `npm install -g homebridge-pura`
+1. Install this plugin using: `npm install -g @qandnotu/homebridge-pura`
 2. Edit your `config.json` file (see sample config below)
 3. Run Homebridge
 
