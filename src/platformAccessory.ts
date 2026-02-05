@@ -31,9 +31,10 @@ export class PuraPlatformAccessory {
     this.bayNumber = accessory.context.bayNumber;
 
     // Set accessory information
+    const safeModel = this.device.type && this.device.type.length > 1 ? this.device.type : 'Pura Diffuser';
     this.accessory.getService(this.platform.Service.AccessoryInformation)!
       .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Pura')
-      .setCharacteristic(this.platform.Characteristic.Model, this.device.type || 'Pura Diffuser')
+      .setCharacteristic(this.platform.Characteristic.Model, safeModel)
       .setCharacteristic(this.platform.Characteristic.SerialNumber, this.device.id)
       .setCharacteristic(this.platform.Characteristic.FirmwareRevision, this.device.state?.firmwareVersion || '1.0.0');
 
@@ -64,8 +65,8 @@ export class PuraPlatformAccessory {
   private updateCurrentState() {
     const bay = this.getBay();
     if (bay) {
-      this.currentState.On = bay.active;
-      this.currentState.RotationSpeed = bay.intensity;
+      this.currentState.On = Boolean(bay.active);
+      this.currentState.RotationSpeed = Number.isFinite(bay.intensity) ? bay.intensity : 0;
       
       // Update HomeKit with current state
       this.service.updateCharacteristic(this.platform.Characteristic.On, this.currentState.On);

@@ -11,7 +11,7 @@ import {
   CognitoUserSession,
 } from 'amazon-cognito-identity-js';
 import fetch, { RequestInit } from 'node-fetch';
-import { PuraBay, PuraDevice, PuraAuthTokens, PuraNightlight } from './puraTypes.js';
+import { PuraBay, PuraDevice, PuraAuthTokens, PuraNightlight, PuraTimer, PuraFragrance } from './puraTypes.js';
 
 // Defaults from pypura
 const DEFAULT_USER_POOL_ID = 'us-east-1_LaB718hYv'; // Base64 decoded from pypura
@@ -172,7 +172,10 @@ export class PuraApi {
       if (Array.isArray(devices)) {
         rawDevices.push(...devices);
       } else {
-        for (const value of Object.values(response)) {
+        for (const [key, value] of Object.entries(response)) {
+          if (key === 'car') {
+            continue;
+          }
           if (Array.isArray(value)) {
             rawDevices.push(...value);
           }
@@ -220,7 +223,7 @@ export class PuraApi {
     return {
       id,
       name: name ?? `Pura ${id}`,
-      type: String(type),
+      type: this.normalizeModel(type),
       version: deviceVersion ?? '',
       state: {
         battery: (record.batteryRemaining || record.battery) as number | undefined,
@@ -228,12 +231,39 @@ export class PuraApi {
         lastSeen: record.lastConnectedAt ? String(record.lastConnectedAt) : undefined,
         online: (record.connected || record.online) as boolean | undefined,
       },
-      bay1: record.bay1 as PuraBay | undefined,
-      bay2: record.bay2 as PuraBay | undefined,
+      bay1: this.normalizeBay(record.bay1, 1),
+      bay2: this.normalizeBay(record.bay2, 2),
       nightlight: record.nightlight as PuraNightlight | undefined,
       awayMode: record.awayMode as boolean | undefined,
       ambientMode: record.ambientMode as boolean | undefined,
       online: (record.connected || record.online) as boolean | undefined,
+    };
+  }
+
+  private normalizeModel(value: unknown): string {
+    if (typeof value === 'string' && value.trim().length > 1) {
+      return value.trim();
+    }
+    if (typeof value === 'number') {
+      return `Model ${value}`;
+    }
+    return 'Pura Diffuser';
+  }
+
+  private normalizeBay(value: unknown, bayNumber: number): PuraBay | undefined {
+    if (!value || typeof value !== 'object') {
+      return undefined;
+    }
+    const record = value as Record<string, unknown>;
+    const active = record.active ?? record.enabled ?? record.on ?? record.isOn ?? false;
+    const intensity = record.intensity ?? record.level ?? record.strength ?? 0;
+    return {
+      id: typeof record.id === 'number' ? record.id : bayNumber,
+      name: typeof record.name === 'string' ? record.name : undefined,
+      active: Boolean(active),
+      intensity: Number.isFinite(Number(intensity)) ? Number(intensity) : 0,
+      timer: record.timer as PuraTimer | undefined,
+      fragrance: record.fragrance as PuraFragrance | undefined,
     };
   }
 
