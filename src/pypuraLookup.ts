@@ -3,7 +3,7 @@ import fetch from 'node-fetch';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import tar, { ReadEntry } from 'tar';
+import { list, ReadEntry } from 'tar';
 
 type CognitoConfig = {
   userPoolId: string;
@@ -41,7 +41,7 @@ const findSdistUrl = (payload: PyPIMetadata, version: string): string | null => 
 
 const extractConstFile = async (archivePath: string): Promise<string | null> => {
   let contents: string | null = null;
-  await tar.list({
+  await list({
     file: archivePath,
     onentry: (entry: ReadEntry) => {
       if (contents) {
