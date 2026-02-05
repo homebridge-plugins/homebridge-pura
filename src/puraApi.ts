@@ -18,9 +18,6 @@ const DEFAULT_USER_POOL_ID = 'us-east-1_LaB718hYv'; // Base64 decoded from pypur
 const DEFAULT_CLIENT_ID = '4iekubat0jb5iljfbaalsiqf9j'; // Base64 decoded from pypura
 const DEFAULT_BASE_URL = 'https://trypura.io/mobile/api/';
 
-export interface PuraApiOptions {
-}
-
 export class PuraApi {
   private userPool: CognitoUserPool;
   private cognitoUser: CognitoUser | null = null;
@@ -28,7 +25,7 @@ export class PuraApi {
   private readonly log: Logging;
   private readonly baseUrl: string;
 
-  constructor(log: Logging, options: PuraApiOptions = {}) {
+  constructor(log: Logging) {
     this.log = log;
     const userPoolId = DEFAULT_USER_POOL_ID;
     const clientId = DEFAULT_CLIENT_ID;
