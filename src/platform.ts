@@ -4,6 +4,7 @@ import { PuraPlatformAccessory } from './platformAccessory.js';
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
 import { PuraApi } from './puraApi.js';
 import { PuraDevice, PuraConfig } from './puraTypes.js';
+import { fetchLatestCognitoConfig } from './pypuraLookup.js';
 
 /**
  * PuraPlatform
@@ -21,6 +22,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   private readonly puraApi: PuraApi;
   private readonly puraConfig: PuraConfig;
   private refreshInterval: NodeJS.Timeout | null = null;
+  private attemptedCognitoUpdate = false;
 
   constructor(
     public readonly log: Logging,
@@ -37,7 +39,16 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     }
 
     this.puraConfig = config as PuraConfig;
-    this.puraApi = new PuraApi(this.log);
+    this.puraApi = new PuraApi(this.log, {
+      userPoolId: this.puraConfig.userPoolId,
+      clientId: this.puraConfig.clientId,
+      baseUrl: this.puraConfig.baseUrl,
+    });
+
+    const userPoolId = this.puraConfig.userPoolId || '(default)';
+    const clientId = this.puraConfig.clientId ? `…${this.puraConfig.clientId.slice(-4)}` : '(default)';
+    const baseUrl = this.puraConfig.baseUrl || '(default)';
+    this.log.info('Pura API config:', { userPoolId, clientId, baseUrl });
 
     this.log.debug('Finished initializing platform:', this.config.name);
 
@@ -73,7 +84,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   /**
    * Discover and register Pura devices
    */
-  async discoverDevices() {
+  async discoverDevices(): Promise<void> {
     try {
       // Authenticate with Pura
       this.log.info('Authenticating with Pura...');
@@ -97,8 +108,40 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       this.setupRefreshInterval();
 
     } catch (error) {
+      const retried = await this.tryAutoUpdateCognito(error);
+      if (retried) {
+        return this.discoverDevices();
+      }
       this.log.error('Failed to discover Pura devices:', error);
     }
+  }
+
+  private async tryAutoUpdateCognito(error: unknown): Promise<boolean> {
+    const autoUpdate = this.puraConfig.autoUpdateCognito !== false;
+    if (!autoUpdate) {
+      return false;
+    }
+    if (this.attemptedCognitoUpdate) {
+      return false;
+    }
+    if (this.puraConfig.userPoolId || this.puraConfig.clientId) {
+      return false;
+    }
+    if (!(error instanceof Error) || !error.message.toLowerCase().includes('authentication')) {
+      return false;
+    }
+
+    this.attemptedCognitoUpdate = true;
+    this.log.warn('Authentication failed. Attempting to fetch latest Cognito IDs from pypura...');
+    const latest = await fetchLatestCognitoConfig(this.log);
+    if (!latest) {
+      this.log.warn('Unable to refresh Cognito IDs from pypura.');
+      return false;
+    }
+
+    this.puraApi.updateCognitoConfig(latest.userPoolId, latest.clientId);
+    this.log.info(`Updated Cognito IDs from pypura ${latest.version}. Retrying authentication...`);
+    return true;
   }
 
   /**

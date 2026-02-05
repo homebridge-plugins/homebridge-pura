@@ -8,6 +8,10 @@ export interface PuraConfig extends PlatformConfig {
   username: string;
   password: string;
   refreshInterval?: number;
+  userPoolId?: string;
+  clientId?: string;
+  baseUrl?: string;
+  autoUpdateCognito?: boolean;
 }
 
 export interface PuraDevice {

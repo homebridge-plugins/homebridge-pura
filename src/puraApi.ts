@@ -13,23 +13,43 @@ import {
 import fetch, { RequestInit } from 'node-fetch';
 import { PuraDevice, PuraAuthTokens } from './puraTypes.js';
 
-// Constants from pypura
-const USER_POOL_ID = 'us-east-1_LaB718hYv'; // Base64 decoded from pypura
-const CLIENT_ID = '4ie4kbat0jb5iljfbaalsiqf9j'; // Base64 decoded from pypura
-const BASE_URL = 'https://trypura.io/mobile/api/';
+// Defaults from pypura
+const DEFAULT_USER_POOL_ID = 'us-east-1_LaB718hYv'; // Base64 decoded from pypura
+const DEFAULT_CLIENT_ID = '4iekubat0jb5iljfbaalsiqf9j'; // Base64 decoded from pypura
+const DEFAULT_BASE_URL = 'https://trypura.io/mobile/api/';
+
+export interface PuraApiOptions {
+  userPoolId?: string;
+  clientId?: string;
+  baseUrl?: string;
+}
 
 export class PuraApi {
   private userPool: CognitoUserPool;
   private cognitoUser: CognitoUser | null = null;
   private session: CognitoUserSession | null = null;
   private readonly log: Logging;
+  private readonly baseUrl: string;
 
-  constructor(log: Logging) {
+  constructor(log: Logging, options: PuraApiOptions = {}) {
     this.log = log;
+    const userPoolId = options.userPoolId || DEFAULT_USER_POOL_ID;
+    const clientId = options.clientId || DEFAULT_CLIENT_ID;
+    this.baseUrl = options.baseUrl || DEFAULT_BASE_URL;
+
     this.userPool = new CognitoUserPool({
-      UserPoolId: USER_POOL_ID,
-      ClientId: CLIENT_ID,
+      UserPoolId: userPoolId,
+      ClientId: clientId,
     });
+  }
+
+  updateCognitoConfig(userPoolId: string, clientId: string): void {
+    this.userPool = new CognitoUserPool({
+      UserPoolId: userPoolId,
+      ClientId: clientId,
+    });
+    this.cognitoUser = null;
+    this.session = null;
   }
 
   /**
@@ -112,7 +132,7 @@ export class PuraApi {
     endpoint: string,
     data?: unknown,
   ): Promise<unknown> {
-    const url = new URL(endpoint, BASE_URL).toString();
+    const url = new URL(endpoint, this.baseUrl).toString();
     
     const options: RequestInit = {
       method: method.toUpperCase(),

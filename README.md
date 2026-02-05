@@ -26,7 +26,11 @@ Add the following platform to your `config.json`:
       "platform": "PuraFragranceDiffuser",
       "username": "your-pura-email@example.com",
       "password": "your-pura-password",
-      "refreshInterval": 300
+      "refreshInterval": 300,
+      "userPoolId": "us-east-1_LaB718hYv",
+      "clientId": "4iekubat0jb5iljfbaalsiqf9j",
+      "baseUrl": "https://trypura.io/mobile/api/",
+      "autoUpdateCognito": true
     }
   ]
 }
@@ -37,6 +41,10 @@ Add the following platform to your `config.json`:
 - **username**: Your Pura app username (email address) - *required*
 - **password**: Your Pura app password - *required*
 - **refreshInterval**: How often to refresh device status in seconds (default: 300, min: 30, max: 3600)
+- **userPoolId**: Override the default Cognito User Pool ID (advanced)
+- **clientId**: Override the default Cognito Client ID (advanced)
+- **baseUrl**: Override the API base URL (advanced)
+- **autoUpdateCognito**: If authentication fails, fetch the latest Cognito IDs from the pypura PyPI release and retry once (advanced, default: true; requires outbound HTTPS to PyPI on failure)
 
 ## Features
 
@@ -71,6 +79,7 @@ If you encounter authentication errors:
 1. Verify your username and password are correct
 2. Check that your Pura account is active and can log in to the mobile app
 3. Ensure your internet connection is stable
+4. If the error mentions a Cognito client or user pool, either enable `autoUpdateCognito` (default) or set `clientId` and `userPoolId` to the latest values
 
 ### Device Not Appearing
 
