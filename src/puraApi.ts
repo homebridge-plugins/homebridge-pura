@@ -342,15 +342,22 @@ export class PuraApi {
   /**
    * Set device intensity
    */
-  async setIntensity(deviceId: string, bay: number, intensity: number): Promise<boolean> {
+  async setIntensity(deviceId: string, bay: number, intensity: number, controller?: string): Promise<boolean> {
     try {
-      const { apiIntensity, controller } = this.normalizeIntensity(intensity);
+      const { apiIntensity, controller: defaultController } = this.normalizeIntensity(intensity);
+      const resolvedController = controller || defaultController;
       const response = await this.makeRequest('POST', `devices/${deviceId}/intensity`, {
         bay,
-        controller,
+        controller: resolvedController,
         intensity: apiIntensity,
       }) as { success?: boolean };
-      this.log.info('Pura intensity response:', { deviceId, bay, intensity: apiIntensity, controller, success: response.success });
+      this.log.info('Pura intensity response:', {
+        deviceId,
+        bay,
+        intensity: apiIntensity,
+        controller: resolvedController,
+        success: response.success,
+      });
       return response.success === true;
     } catch (error) {
       this.log.error(`Failed to set intensity for device ${deviceId}:`, error);

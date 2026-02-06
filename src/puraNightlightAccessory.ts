@@ -66,10 +66,17 @@ export class PuraNightlightAccessory {
     const brightness = this.accessory.context.nightlightBrightness ?? 10;
     const color = this.device.nightlight?.color ?? 'ffffff';
     const controller = this.device.controller ?? 'default';
+    this.device.nightlight = {
+      ...(this.device.nightlight ?? { color, brightness }),
+      active: isOn,
+      brightness,
+      color,
+    };
     const success = await this.puraApi.setNightlight(this.device.id, isOn, brightness, color, controller);
     if (!success) {
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
+    this.service.updateCharacteristic(this.platform.Characteristic.On, isOn);
   }
 
   async getNightlight(): Promise<CharacteristicValue> {

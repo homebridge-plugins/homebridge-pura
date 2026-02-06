@@ -76,7 +76,14 @@ export class PuraPlatformAccessory {
         await this.puraApi.stopAll(this.device.id);
         await this.puraApi.setAwayMode(this.device.id, false);
         const alwaysOn = await this.puraApi.setAlwaysOn(this.device.id, this.bayNumber);
-        const success = alwaysOn && await this.puraApi.setIntensity(this.device.id, this.bayNumber, intensity);
+        const controller = this.device.controller || 'default';
+        this.platform.log.info('Pura control context:', {
+          deviceId: this.device.id,
+          bay: this.bayNumber,
+          controller,
+          diffusionMode: (this.device as any).diffusionMode,
+        });
+        const success = alwaysOn && await this.puraApi.setIntensity(this.device.id, this.bayNumber, intensity, controller);
         if (success) {
           this.currentState.On = true;
           this.currentState.RotationSpeed = intensity;
@@ -131,7 +138,14 @@ export class PuraPlatformAccessory {
       await this.puraApi.stopAll(this.device.id);
       await this.puraApi.setAwayMode(this.device.id, false);
       const alwaysOn = await this.puraApi.setAlwaysOn(this.device.id, this.bayNumber);
-      const success = alwaysOn && await this.puraApi.setIntensity(this.device.id, this.bayNumber, intensity);
+      const controller = this.device.controller || 'default';
+      this.platform.log.info('Pura control context:', {
+        deviceId: this.device.id,
+        bay: this.bayNumber,
+        controller,
+        diffusionMode: (this.device as any).diffusionMode,
+      });
+      const success = alwaysOn && await this.puraApi.setIntensity(this.device.id, this.bayNumber, intensity, controller);
       if (success) {
         this.currentState.RotationSpeed = intensity;
         this.currentState.On = true;
