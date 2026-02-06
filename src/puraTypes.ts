@@ -10,6 +10,7 @@ export interface PuraConfig extends PlatformConfig {
   refreshInterval?: number;
   cognitoRefreshInterval?: number;
   forceNightlightOffOnDiffuserOn?: boolean;
+  nightlightSyncMode?: 'diffuser' | 'device' | 'homekit';
 }
 
 export interface PuraDevice {

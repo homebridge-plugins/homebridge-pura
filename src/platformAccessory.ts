@@ -114,6 +114,7 @@ export class PuraPlatformAccessory {
           this.accessory.context.lastIntensity = intensity;
           this.accessory.context.lastBay = targetBay;
           this.platform.log.debug(`Successfully turned on ${this.accessory.displayName} with intensity ${intensity}`);
+          await this.syncNightlightWithDiffuser(true);
           if ((this.platform.config as PuraConfig).forceNightlightOffOnDiffuserOn) {
             await this.ensureNightlightOff();
           }
@@ -128,6 +129,7 @@ export class PuraPlatformAccessory {
         if (success) {
           this.currentState.On = false;
           this.platform.log.debug(`Successfully turned off ${this.accessory.displayName}`);
+          await this.syncNightlightWithDiffuser(false);
         } else {
           this.platform.log.error(`Failed to turn off ${this.accessory.displayName}`);
           throw new Error('Failed to turn off device');
@@ -171,6 +173,23 @@ export class PuraPlatformAccessory {
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private async syncNightlightWithDiffuser(isOn: boolean) {
+    const syncMode = (this.platform.config as PuraConfig).nightlightSyncMode ?? 'diffuser';
+    if (syncMode !== 'diffuser') {
+      return;
+    }
+    const nightUuid = this.platform.api.hap.uuid.generate(`${this.device.id}-nightlight`);
+    const nightAccessory = this.platform.accessories.get(nightUuid);
+    if (!nightAccessory) {
+      return;
+    }
+    nightAccessory.context.nightlightLastOn = isOn;
+    const service = nightAccessory.getService(this.platform.Service.Lightbulb);
+    if (service) {
+      service.updateCharacteristic(this.platform.Characteristic.On, isOn);
+    }
   }
 
   private async logDeviceSnapshot(label: string) {

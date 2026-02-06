@@ -49,34 +49,41 @@ export class PuraNightlightAccessory {
   }
 
   private updateState() {
+    const syncMode = (this.platform.config as { nightlightSyncMode?: string }).nightlightSyncMode ?? 'diffuser';
     const cachedOn = this.accessory.context.nightlightLastOn;
     const deviceActive = this.device.nightlight?.active;
-    const lightOn = typeof cachedOn === 'boolean'
-      ? cachedOn
-      : (typeof deviceActive === 'boolean' ? deviceActive : false);
+    const lightOn = syncMode === 'device'
+      ? (typeof deviceActive === 'boolean' ? deviceActive : false)
+      : (typeof cachedOn === 'boolean' ? cachedOn : false);
 
     const cachedBrightness = this.accessory.context.nightlightBrightness;
     const deviceBrightness = this.device.nightlight?.brightness;
-    const brightness = Number.isFinite(cachedBrightness)
-      ? cachedBrightness
-      : (Number.isFinite(deviceBrightness) ? deviceBrightness : 10);
+    const brightness = syncMode === 'device'
+      ? (Number.isFinite(deviceBrightness) ? deviceBrightness : 10)
+      : (Number.isFinite(cachedBrightness) ? cachedBrightness : 10);
 
     const cachedHue = this.accessory.context.nightlightHue;
     const cachedSaturation = this.accessory.context.nightlightSaturation;
     const deviceColor = this.device.nightlight?.color ?? 'ffffff';
     const { hue, saturation } = this.hexToHsv(deviceColor);
 
-    if (typeof cachedOn !== 'boolean' && typeof deviceActive === 'boolean') {
-      this.accessory.context.nightlightLastOn = deviceActive;
-    }
-    if (!Number.isFinite(cachedBrightness) && Number.isFinite(deviceBrightness)) {
-      this.accessory.context.nightlightBrightness = deviceBrightness;
-    }
-    if (!Number.isFinite(cachedHue)) {
+    if (syncMode === 'device') {
+      this.accessory.context.nightlightLastOn = lightOn;
+      if (Number.isFinite(deviceBrightness)) {
+        this.accessory.context.nightlightBrightness = deviceBrightness;
+      }
       this.accessory.context.nightlightHue = hue;
-    }
-    if (!Number.isFinite(cachedSaturation)) {
       this.accessory.context.nightlightSaturation = saturation;
+    } else {
+      if (!Number.isFinite(cachedBrightness) && Number.isFinite(deviceBrightness)) {
+        this.accessory.context.nightlightBrightness = deviceBrightness;
+      }
+      if (!Number.isFinite(cachedHue)) {
+        this.accessory.context.nightlightHue = hue;
+      }
+      if (!Number.isFinite(cachedSaturation)) {
+        this.accessory.context.nightlightSaturation = saturation;
+      }
     }
 
     this.service.updateCharacteristic(this.platform.Characteristic.On, lightOn);
