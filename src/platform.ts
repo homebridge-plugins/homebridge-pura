@@ -1,6 +1,7 @@
 import type { API, Characteristic, DynamicPlatformPlugin, Logging, PlatformAccessory, PlatformConfig, Service } from 'homebridge';
 
 import { PuraPlatformAccessory } from './platformAccessory.js';
+import { PuraNightlightAccessory } from './puraNightlightAccessory.js';
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
 import { PuraApi } from './puraApi.js';
 import { PuraDevice, PuraConfig } from './puraTypes.js';
@@ -136,37 +137,70 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   private async registerDevice(device: PuraDevice) {
     this.log.debug('Registering device:', device.name, device.id);
 
+    // Create accessory for each bay that exists
+    if (device.bay1) {
+      await this.registerBayAccessory(device, 1);
+    }
+    if (device.bay2) {
+      await this.registerBayAccessory(device, 2);
+    }
+
+    // Nightlight accessory (one per device)
+    await this.registerNightlightAccessory(device);
+  }
+
+  private async registerBayAccessory(device: PuraDevice, bayNumber: number) {
+    const bay = bayNumber === 1 ? device.bay1 : device.bay2;
+    if (!bay) {
+      return;
+    }
+
     const deviceName = device.name || `Pura ${device.id}`;
-    const accessoryName = deviceName.endsWith('Diffuser') ? deviceName : `${deviceName} Diffuser`;
-    const uuid = this.api.hap.uuid.generate(device.id);
+    const baseName = deviceName.endsWith('Diffuser') ? deviceName : `${deviceName} Diffuser`;
+    const accessoryName = `${baseName} Bay ${bayNumber}`;
+    const uniqueId = `${device.id}-bay${bayNumber}`;
+    const uuid = this.api.hap.uuid.generate(uniqueId);
 
-    // Check if accessory already exists
     const existingAccessory = this.accessories.get(uuid);
-
     if (existingAccessory) {
-      // Update existing accessory
       this.log.info('Restoring existing accessory from cache:', existingAccessory.displayName);
       existingAccessory.context.device = device;
+      existingAccessory.context.bayNumber = bayNumber;
       this.api.updatePlatformAccessories([existingAccessory]);
-
-      // Create the accessory handler
       (existingAccessory as any).handler = new PuraPlatformAccessory(this, existingAccessory, this.puraApi);
     } else {
-      // Create new accessory
       this.log.info('Adding new accessory:', accessoryName);
       const accessory = new this.api.platformAccessory(accessoryName, uuid);
-
-      // Store device info in context
       accessory.context.device = device;
-
-      // Create the accessory handler
+      accessory.context.bayNumber = bayNumber;
       (accessory as any).handler = new PuraPlatformAccessory(this, accessory, this.puraApi);
-
-      // Register the accessory
       this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
     }
 
-    // Track this UUID as discovered
+    this.discoveredCacheUUIDs.push(uuid);
+  }
+
+  private async registerNightlightAccessory(device: PuraDevice) {
+    const deviceName = device.name || `Pura ${device.id}`;
+    const baseName = deviceName.endsWith('Diffuser') ? deviceName : `${deviceName} Diffuser`;
+    const accessoryName = `${baseName} Nightlight`;
+    const uniqueId = `${device.id}-nightlight`;
+    const uuid = this.api.hap.uuid.generate(uniqueId);
+
+    const existingAccessory = this.accessories.get(uuid);
+    if (existingAccessory) {
+      this.log.info('Restoring existing accessory from cache:', existingAccessory.displayName);
+      existingAccessory.context.device = device;
+      this.api.updatePlatformAccessories([existingAccessory]);
+      (existingAccessory as any).handler = new PuraNightlightAccessory(this, existingAccessory, this.puraApi);
+    } else {
+      this.log.info('Adding new accessory:', accessoryName);
+      const accessory = new this.api.platformAccessory(accessoryName, uuid);
+      accessory.context.device = device;
+      (accessory as any).handler = new PuraNightlightAccessory(this, accessory, this.puraApi);
+      this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+    }
+
     this.discoveredCacheUUIDs.push(uuid);
   }
 
@@ -207,7 +241,13 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       const devices = await this.puraApi.getDevices();
       
       for (const device of devices) {
-        await this.updateDeviceAccessory(device);
+        if (device.bay1) {
+          await this.updateBayAccessory(device, 1);
+        }
+        if (device.bay2) {
+          await this.updateBayAccessory(device, 2);
+        }
+        await this.updateNightlightAccessory(device);
       }
     } catch (error) {
       this.log.debug('Device status refresh failed:', error);
@@ -226,14 +266,31 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   /**
    * Update a device accessory with fresh device data
    */
-  private async updateDeviceAccessory(device: PuraDevice) {
-    const uuid = this.api.hap.uuid.generate(device.id);
+  private async updateBayAccessory(device: PuraDevice, bayNumber: number) {
+    const uniqueId = `${device.id}-bay${bayNumber}`;
+    const uuid = this.api.hap.uuid.generate(uniqueId);
+    const accessory = this.accessories.get(uuid);
+
+    if (accessory) {
+      accessory.context.device = device;
+      accessory.context.bayNumber = bayNumber;
+      this.api.updatePlatformAccessories([accessory]);
+      const handler = (accessory as any).handler as PuraPlatformAccessory | undefined;
+      if (handler) {
+        handler.updateDevice(device);
+      }
+    }
+  }
+
+  private async updateNightlightAccessory(device: PuraDevice) {
+    const uniqueId = `${device.id}-nightlight`;
+    const uuid = this.api.hap.uuid.generate(uniqueId);
     const accessory = this.accessories.get(uuid);
 
     if (accessory) {
       accessory.context.device = device;
       this.api.updatePlatformAccessories([accessory]);
-      const handler = (accessory as any).handler as PuraPlatformAccessory | undefined;
+      const handler = (accessory as any).handler as PuraNightlightAccessory | undefined;
       if (handler) {
         handler.updateDevice(device);
       }

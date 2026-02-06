@@ -4,11 +4,10 @@
 
 A Homebridge plugin for Pura smart fragrance diffusers.
 
-This plugin allows you to control your Pura smart fragrance diffusers through Apple HomeKit. Each Pura device appears as a single fan accessory in the Home app, where you can:
+This plugin allows you to control your Pura smart fragrance diffusers through Apple HomeKit. Each Pura device exposes two fan accessories (one per bay) plus a nightlight accessory, where you can:
 
-- Turn the diffuser on/off
-- Adjust intensity
-- Select which bay to use
+- Turn a specific bay on/off
+- Adjust intensity per bay
 - Toggle the nightlight (color + brightness)
 - Monitor the current state of your diffusers
 
@@ -45,21 +44,20 @@ Add the following platform to your `config.json`:
 ## Features
 
 - **Multiple Device Support**: Automatically discovers all Pura devices on your account
-- **Simple Control**: One accessory per device with on/off control
-- **Bay Selector**: Switch between Bay 1 and Bay 2
+- **Bay Control**: Two fan accessories (Bay 1 and Bay 2)
+- **Mutual Exclusion**: Turning on one bay turns the other off
 - **Nightlight**: Toggle and control nightlight color/brightness
 - **Real-Time Status**: Automatically refreshes device status
 - **HomeKit Integration**: Full integration with Apple HomeKit and the Home app
 
 ## Usage
 
-Once configured, your Pura diffusers will appear in the Home app as fans. Each device will appear as a single accessory (e.g., "Living Room Pura Diffuser").
+Once configured, your Pura diffusers will appear in the Home app as two fan accessories (e.g., "Living Room Pura Diffuser Bay 1" and "Living Room Pura Diffuser Bay 2") plus a nightlight accessory.
 
 ### Controls
 
-- **Power**: Turn the diffuser on/off
-- **Fan Speed**: Adjust intensity
-- **Bay Selector**: Switch between Bay 1 and Bay 2
+- **Power**: Turn each bay on/off
+- **Fan Speed**: Adjust intensity per bay
 - **Nightlight**: Toggle and control color/brightness
 - **Power**: Turn the diffuser on/off
 
@@ -67,7 +65,7 @@ Once configured, your Pura diffusers will appear in the Home app as fans. Each d
 
 The plugin will automatically:
 - Discover all Pura devices on your account
-- Create one accessory per device
+- Create one accessory per bay plus a nightlight accessory per device
 - Update device status based on the configured refresh interval
 - Handle authentication and token refresh
 
