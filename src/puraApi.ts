@@ -395,18 +395,17 @@ export class PuraApi {
     deviceId: string,
     active: boolean,
     brightness = 10,
-    color = '#ffffff',
+    color = 'ffffff',
     controller = 'default',
   ): Promise<boolean> {
     try {
       const clamped = Math.max(0, Math.min(100, Number(brightness) || 0));
-      const scaledBrightness = active
-        ? Math.max(1, Math.min(10, Math.round((clamped / 100) * 10)))
-        : Math.max(0, Math.min(10, Math.round((clamped / 100) * 10)));
+      const scaledBrightness = Math.max(1, Math.min(10, Math.round((clamped / 100) * 10)));
+      const normalizedColor = color.replace('#', '');
       const response = await this.makeRequest('POST', `devices/${deviceId}/nightlight`, {
         active,
         brightness: scaledBrightness,
-        color,
+        color: normalizedColor,
         controller,
       }) as { success?: boolean };
       return response.success === true;
