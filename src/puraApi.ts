@@ -24,6 +24,7 @@ export class PuraApi {
   private session: CognitoUserSession | null = null;
   private readonly log: Logging;
   private readonly baseUrl: string;
+  private loggedRawDevice = false;
 
   constructor(log: Logging) {
     this.log = log;
@@ -212,8 +213,17 @@ export class PuraApi {
         name = displayRecord.value;
       }
     }
-    if (!name && typeof record.deviceName === 'string') {
-      name = record.deviceName;
+    const deviceName = typeof record.deviceName === 'string' ? record.deviceName : undefined;
+    if (!name && deviceName) {
+      name = deviceName;
+    }
+
+    if (!this.loggedRawDevice) {
+      const candidate = name || deviceName || (typeof record.deviceId === 'string' ? record.deviceId : '');
+      if (candidate.includes('Lounge')) {
+        this.loggedRawDevice = true;
+        this.log.info('DEBUG raw device sample:', JSON.stringify(record, null, 2));
+      }
     }
 
     const firmwareVersion = (record.fwVersion || record.firmwareVersion) as string | undefined;
