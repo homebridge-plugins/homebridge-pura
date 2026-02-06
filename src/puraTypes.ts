@@ -38,6 +38,7 @@ export interface PuraBay {
   name?: string;
   active: boolean;
   intensity: number;
+  activeAt?: number;
   timer?: PuraTimer;
   fragrance?: PuraFragrance;
 }

@@ -235,6 +235,23 @@ export class PuraApi {
     const defaultNightlight = (record.deviceDefaults as Record<string, unknown> | undefined)?.nightlight;
     const nightlight = (record.nightlight ?? defaultNightlight) as PuraNightlight | undefined;
 
+    const bay1 = this.normalizeBay(record, record.bay1, 1);
+    const bay2 = this.normalizeBay(record, record.bay2, 2);
+    if (bay1 && bay2 && bay1.active && bay2.active) {
+      const bay1Stamp = bay1.activeAt ?? 0;
+      const bay2Stamp = bay2.activeAt ?? 0;
+      const keepBay = bay1Stamp === bay2Stamp
+        ? (bay1.intensity >= bay2.intensity ? 1 : 2)
+        : (bay1Stamp > bay2Stamp ? 1 : 2);
+      if (keepBay === 1) {
+        bay2.active = false;
+        bay2.intensity = 0;
+      } else {
+        bay1.active = false;
+        bay1.intensity = 0;
+      }
+    }
+
     return {
       id,
       name: name ?? `Pura ${id}`,
@@ -248,8 +265,8 @@ export class PuraApi {
         lastSeen: record.lastConnectedAt ? String(record.lastConnectedAt) : undefined,
         online: (record.connected || record.online) as boolean | undefined,
       },
-      bay1: this.normalizeBay(record, record.bay1, 1),
-      bay2: this.normalizeBay(record, record.bay2, 2),
+      bay1,
+      bay2,
       nightlight,
       awayMode: record.awayMode as boolean | undefined,
       ambientMode: record.ambientMode as boolean | undefined,
@@ -272,8 +289,13 @@ export class PuraApi {
       return undefined;
     }
     const record = value as Record<string, unknown>;
-    const activeAt = Number(record.activeAt);
-    const active = record.active ?? record.enabled ?? record.on ?? record.isOn ?? (Number.isFinite(activeAt) && activeAt > 0);
+    const activeAtRaw = Number(record.activeAt);
+    const activeAt = Number.isFinite(activeAtRaw) && activeAtRaw > 0 ? activeAtRaw : undefined;
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const activeAtRecent = activeAt !== undefined &&
+      activeAt <= nowSeconds &&
+      (nowSeconds - activeAt) < 300;
+    const active = record.active ?? record.enabled ?? record.on ?? record.isOn ?? activeAtRecent;
     const intensityFromRecord = this.normalizeBayIntensity(record.intensity ?? record.level ?? record.strength);
     const intensityFromDefaults = this.normalizeBayIntensity(
       (parent.deviceDefaults as Record<string, unknown> | undefined)?.[`bay${bayNumber}Intensity`],
@@ -287,6 +309,7 @@ export class PuraApi {
       name: typeof record.name === 'string' ? record.name : undefined,
       active: Boolean(active),
       intensity: Math.max(0, Math.min(100, normalizedIntensity)),
+      activeAt,
       timer: record.timer as PuraTimer | undefined,
       fragrance: record.fragrance as PuraFragrance | undefined,
     };

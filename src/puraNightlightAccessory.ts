@@ -49,9 +49,13 @@ export class PuraNightlightAccessory {
   }
 
   private updateState() {
-    const lightOn = Boolean(this.device.nightlight?.active);
+    const cachedOn = this.accessory.context.nightlightLastOn === true;
+    const lightOn = typeof this.device.nightlight?.active === 'boolean'
+      ? this.device.nightlight.active
+      : cachedOn;
     const brightness = this.device.nightlight?.brightness ?? this.accessory.context.nightlightBrightness ?? 10;
     const { hue, saturation } = this.hexToHsv(this.device.nightlight?.color ?? 'ffffff');
+    this.accessory.context.nightlightLastOn = lightOn;
     this.accessory.context.nightlightBrightness = brightness;
     this.accessory.context.nightlightHue = hue;
     this.accessory.context.nightlightSaturation = saturation;
@@ -76,16 +80,21 @@ export class PuraNightlightAccessory {
     if (!success) {
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
+    this.accessory.context.nightlightLastOn = isOn;
     this.service.updateCharacteristic(this.platform.Characteristic.On, isOn);
   }
 
   async getNightlight(): Promise<CharacteristicValue> {
-    return Boolean(this.device.nightlight?.active);
+    if (typeof this.device.nightlight?.active === 'boolean') {
+      return this.device.nightlight.active;
+    }
+    return this.accessory.context.nightlightLastOn ?? false;
   }
 
   async setNightlightBrightness(value: CharacteristicValue) {
     const brightness = Math.max(0, Math.min(100, Number(value) || 0));
     this.accessory.context.nightlightBrightness = brightness;
+    this.accessory.context.nightlightLastOn = true;
     this.device.nightlight = {
       ...(this.device.nightlight ?? { color: 'ffffff', brightness }),
       brightness,
@@ -101,6 +110,7 @@ export class PuraNightlightAccessory {
   async setNightlightHue(value: CharacteristicValue) {
     const hue = Math.max(0, Math.min(360, Number(value) || 0));
     this.accessory.context.nightlightHue = hue;
+    this.accessory.context.nightlightLastOn = true;
     const saturation = this.accessory.context.nightlightSaturation ?? 0;
     const color = this.hsvToHex(hue, saturation);
     const brightness = this.accessory.context.nightlightBrightness ?? this.device.nightlight?.brightness ?? 10;
@@ -119,6 +129,7 @@ export class PuraNightlightAccessory {
   async setNightlightSaturation(value: CharacteristicValue) {
     const saturation = Math.max(0, Math.min(100, Number(value) || 0));
     this.accessory.context.nightlightSaturation = saturation;
+    this.accessory.context.nightlightLastOn = true;
     const hue = this.accessory.context.nightlightHue ?? 0;
     const color = this.hsvToHex(hue, saturation);
     const brightness = this.accessory.context.nightlightBrightness ?? this.device.nightlight?.brightness ?? 10;
