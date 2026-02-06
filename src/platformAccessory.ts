@@ -3,6 +3,7 @@ import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge
 import type { PuraPlatform } from './platform.js';
 import { PuraApi } from './puraApi.js';
 import { PuraDevice, PuraBay } from './puraTypes.js';
+import { PuraNightlightAccessory } from './puraNightlightAccessory.js';
 
 /**
  * Pura Platform Accessory
@@ -111,6 +112,7 @@ export class PuraPlatformAccessory {
           this.accessory.context.lastIntensity = intensity;
           this.accessory.context.lastBay = targetBay;
           this.platform.log.debug(`Successfully turned on ${this.accessory.displayName} with intensity ${intensity}`);
+          await this.ensureNightlightPreference();
         } else {
           this.platform.log.error(`Failed to turn on ${this.accessory.displayName}`);
           throw new Error('Failed to turn on device');
@@ -141,5 +143,22 @@ export class PuraPlatformAccessory {
     this.device = device;
     this.accessory.context.device = device;
     this.updateCurrentState();
+  }
+
+  private async ensureNightlightPreference() {
+    const nightUuid = this.platform.api.hap.uuid.generate(`${this.device.id}-nightlight`);
+    const nightAccessory = this.platform.accessories.get(nightUuid);
+    if (!nightAccessory) {
+      return;
+    }
+    const nightHandler = (nightAccessory as any).handler as PuraNightlightAccessory | undefined;
+    const nightOn = nightAccessory.context.nightlightLastOn === true;
+    if (!nightOn && nightHandler) {
+      try {
+        await nightHandler.setNightlight(false);
+      } catch (error) {
+        this.platform.log.debug(`Failed to keep nightlight off for ${this.accessory.displayName}:`, error);
+      }
+    }
   }
 }
