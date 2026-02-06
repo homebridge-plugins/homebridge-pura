@@ -222,6 +222,9 @@ export class PuraApi {
     const deviceVersion = (record.deviceVer || record.version) as string | undefined;
     const type = (record.type || record.model || 'Pura Diffuser') as string;
 
+    const defaultNightlight = (record.deviceDefaults as Record<string, unknown> | undefined)?.nightlight;
+    const nightlight = (record.nightlight ?? defaultNightlight) as PuraNightlight | undefined;
+
     return {
       id,
       name: name ?? `Pura ${id}`,
@@ -235,7 +238,7 @@ export class PuraApi {
       },
       bay1: this.normalizeBay(record, record.bay1, 1),
       bay2: this.normalizeBay(record, record.bay2, 2),
-      nightlight: record.nightlight as PuraNightlight | undefined,
+      nightlight,
       awayMode: record.awayMode as boolean | undefined,
       ambientMode: record.ambientMode as boolean | undefined,
       online: (record.connected || record.online) as boolean | undefined,
@@ -343,14 +346,18 @@ export class PuraApi {
     }
   }
 
-  private normalizeIntensity(intensity: number): { apiIntensity: number; controller: string } {
+  private normalizeIntensity(intensity: number): { apiIntensity: string; controller: string } {
     const clamped = Math.max(0, Math.min(100, Number(intensity) || 0));
-    let scaled = Math.round(clamped / 10);
-    if (clamped > 0 && scaled === 0) {
-      scaled = 1;
+    let apiIntensity: string = 'medium';
+    if (clamped <= 33) {
+      apiIntensity = 'subtle';
+    } else if (clamped <= 66) {
+      apiIntensity = 'medium';
+    } else {
+      apiIntensity = 'strong';
     }
     return {
-      apiIntensity: Math.max(0, Math.min(10, scaled)),
+      apiIntensity,
       controller: 'default',
     };
   }
@@ -379,6 +386,21 @@ export class PuraApi {
       return response.success === true;
     } catch (error) {
       this.log.error(`Failed to stop all for device ${deviceId}:`, error);
+      return false;
+    }
+  }
+
+  async setNightlight(deviceId: string, active: boolean, brightness = 10, color = 'ffffff'): Promise<boolean> {
+    try {
+      const response = await this.makeRequest('POST', `devices/${deviceId}/nightlight`, {
+        active,
+        brightness,
+        color,
+        controller: 'default',
+      }) as { success?: boolean };
+      return response.success === true;
+    } catch (error) {
+      this.log.error(`Failed to set nightlight for device ${deviceId}:`, error);
       return false;
     }
   }

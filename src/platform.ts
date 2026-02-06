@@ -137,7 +137,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     this.log.debug('Registering device:', device.name, device.id);
 
     const deviceName = device.name || `Pura ${device.id}`;
-    const accessoryName = deviceName;
+    const accessoryName = deviceName.endsWith('Diffuser') ? deviceName : `${deviceName} Diffuser`;
     const uuid = this.api.hap.uuid.generate(device.id);
 
     // Check if accessory already exists
