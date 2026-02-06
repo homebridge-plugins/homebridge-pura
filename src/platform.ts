@@ -23,7 +23,9 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   private readonly puraApi: PuraApi;
   private readonly puraConfig: PuraConfig;
   private refreshInterval: NodeJS.Timeout | null = null;
+  private cognitoRefreshInterval: NodeJS.Timeout | null = null;
   private attemptedCognitoUpdate = false;
+  private latestCognitoVersion: string | null = null;
 
   constructor(
     public readonly log: Logging,
@@ -60,6 +62,9 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     this.api.on('shutdown', () => {
       if (this.refreshInterval) {
         clearInterval(this.refreshInterval);
+      }
+      if (this.cognitoRefreshInterval) {
+        clearInterval(this.cognitoRefreshInterval);
       }
     });
   }
@@ -100,6 +105,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
 
       // Set up refresh interval
       this.setupRefreshInterval();
+      this.setupCognitoRefreshInterval();
 
     } catch (error) {
       const retried = await this.tryAutoUpdateCognito(error);
@@ -127,6 +133,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     }
 
     this.puraApi.updateCognitoConfig(latest.userPoolId, latest.clientId);
+    this.latestCognitoVersion = latest.version;
     this.log.info(`Updated Cognito IDs from pypura ${latest.version}. Retrying authentication...`);
     return true;
   }
@@ -217,6 +224,39 @@ export class PuraPlatform implements DynamicPlatformPlugin {
         await this.refreshDeviceStatus();
       } catch (error) {
         this.log.error('Failed to refresh device status:', error);
+      }
+    }, interval);
+  }
+
+  private setupCognitoRefreshInterval() {
+    const intervalSeconds = this.puraConfig.cognitoRefreshInterval ?? 3600;
+    if (intervalSeconds <= 0) {
+      this.log.debug('Cognito refresh interval disabled');
+      return;
+    }
+    const interval = intervalSeconds * 1000;
+    this.log.debug(`Setting up Cognito refresh interval: ${intervalSeconds} seconds`);
+    this.cognitoRefreshInterval = setInterval(async () => {
+      try {
+        const latest = await fetchLatestCognitoConfig(this.log);
+        if (!latest) {
+          return;
+        }
+        if (this.latestCognitoVersion === latest.version) {
+          return;
+        }
+        this.log.warn(`Detected new pypura version ${latest.version}; refreshing Cognito IDs...`);
+        this.puraApi.updateCognitoConfig(latest.userPoolId, latest.clientId);
+        this.latestCognitoVersion = latest.version;
+        try {
+          await this.puraApi.authenticate(this.puraConfig.username, this.puraConfig.password);
+          this.log.info('Re-authenticated with refreshed Cognito IDs.');
+          this.attemptedCognitoUpdate = false;
+        } catch (authError) {
+          this.log.warn('Re-authentication failed after Cognito refresh:', authError);
+        }
+      } catch (error) {
+        this.log.debug('Cognito refresh check failed:', error);
       }
     }, interval);
   }

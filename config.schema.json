@@ -31,6 +31,20 @@
         "maximum": 3600,
         "default": 300,
         "description": "How often to refresh device status (30-3600 seconds)"
+      },
+      "cognitoRefreshInterval": {
+        "title": "Cognito Refresh Interval (seconds)",
+        "type": "number",
+        "minimum": 0,
+        "maximum": 86400,
+        "default": 3600,
+        "description": "How often to check pypura for updated Cognito IDs (0 to disable)"
+      },
+      "forceNightlightOffOnDiffuserOn": {
+        "title": "Force Nightlight Off When Diffuser Turns On",
+        "type": "boolean",
+        "default": false,
+        "description": "If enabled, the plugin will send a nightlight off command right after turning on a diffuser."
       }
     }
   }
