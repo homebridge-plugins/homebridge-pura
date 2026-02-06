@@ -66,7 +66,8 @@ export class PuraPlatformAccessory {
     const bay = this.getBay();
     if (bay) {
       this.currentState.On = Boolean(bay.active);
-      this.currentState.RotationSpeed = Number.isFinite(bay.intensity) ? bay.intensity : 0;
+      const intensity = Number.isFinite(bay.intensity) ? bay.intensity : 0;
+      this.currentState.RotationSpeed = Math.max(0, Math.min(100, intensity));
       
       // Update HomeKit with current state
       this.service.updateCharacteristic(this.platform.Characteristic.On, this.currentState.On);
@@ -134,7 +135,7 @@ export class PuraPlatformAccessory {
    * Handle "SET" requests from HomeKit for RotationSpeed (intensity)
    */
   async setRotationSpeed(value: CharacteristicValue) {
-    const intensity = value as number;
+    const intensity = Math.max(0, Math.min(100, Number(value) || 0));
     this.platform.log.debug(`Set Characteristic RotationSpeed for ${this.accessory.displayName} ->`, intensity);
 
     try {

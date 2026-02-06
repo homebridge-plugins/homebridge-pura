@@ -256,12 +256,16 @@ export class PuraApi {
     }
     const record = value as Record<string, unknown>;
     const active = record.active ?? record.enabled ?? record.on ?? record.isOn ?? false;
-    const intensity = record.intensity ?? record.level ?? record.strength ?? 0;
+    const intensityRaw = record.intensity ?? record.level ?? record.strength ?? 0;
+    const intensityNumber = Number(intensityRaw);
+    const normalizedIntensity = Number.isFinite(intensityNumber)
+      ? (intensityNumber <= 10 ? intensityNumber * 10 : intensityNumber)
+      : 0;
     return {
       id: typeof record.id === 'number' ? record.id : bayNumber,
       name: typeof record.name === 'string' ? record.name : undefined,
       active: Boolean(active),
-      intensity: Number.isFinite(Number(intensity)) ? Number(intensity) : 0,
+      intensity: Math.max(0, Math.min(100, normalizedIntensity)),
       timer: record.timer as PuraTimer | undefined,
       fragrance: record.fragrance as PuraFragrance | undefined,
     };
@@ -272,16 +276,26 @@ export class PuraApi {
    */
   async setIntensity(deviceId: string, bay: number, intensity: number): Promise<boolean> {
     try {
+      const { apiIntensity, controller } = this.normalizeIntensity(intensity);
       const response = await this.makeRequest('POST', `devices/${deviceId}/intensity`, {
         bay,
-        controller: 'mobile',
-        intensity,
+        controller,
+        intensity: apiIntensity,
       }) as { success?: boolean };
       return response.success === true;
     } catch (error) {
       this.log.error(`Failed to set intensity for device ${deviceId}:`, error);
       return false;
     }
+  }
+
+  private normalizeIntensity(intensity: number): { apiIntensity: string; controller: string } {
+    const clamped = Math.max(0, Math.min(100, Number(intensity) || 0));
+    const scaled = Math.round(clamped / 10);
+    return {
+      apiIntensity: String(scaled),
+      controller: 'default',
+    };
   }
 
   /**
