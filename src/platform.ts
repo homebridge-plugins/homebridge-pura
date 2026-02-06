@@ -88,6 +88,16 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       this.log.info('Discovering Pura devices...');
       const devices = await this.puraApi.getDevices();
       this.log.info('DEBUG bay1 sample:', JSON.stringify(devices[0]?.bay1, null, 2));
+      const lounge = devices.find((device) => device.name?.includes('Lounge'));
+      if (lounge) {
+        this.log.info('DEBUG Lounge device:', JSON.stringify({
+          controller: (lounge as any).controller,
+          diffusionMode: (lounge as any).diffusionMode,
+          timer: (lounge as any).timer,
+          schedules: (lounge as any).schedules,
+          bay2: lounge.bay2,
+        }, null, 2));
+      }
       this.log.info(`Found ${devices.length} Pura device(s)`);
 
       // Register each device
