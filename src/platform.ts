@@ -1,7 +1,6 @@
 import type { API, Characteristic, DynamicPlatformPlugin, Logging, PlatformAccessory, PlatformConfig, Service } from 'homebridge';
 
 import { PuraPlatformAccessory } from './platformAccessory.js';
-import { PuraNightlightAccessory } from './puraNightlightAccessory.js';
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
 import { PuraApi } from './puraApi.js';
 import { PuraDevice, PuraConfig } from './puraTypes.js';
@@ -147,8 +146,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     // Single diffuser accessory (On/Off)
     await this.registerDiffuserAccessory(device);
 
-    // Nightlight accessory (one per device)
-    await this.registerNightlightAccessory(device);
+    // No nightlight accessory (diffuser switch only)
   }
 
   private async registerDiffuserAccessory(device: PuraDevice) {
@@ -175,29 +173,6 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     this.discoveredCacheUUIDs.push(uuid);
   }
 
-  private async registerNightlightAccessory(device: PuraDevice) {
-    const deviceName = device.name || `Pura ${device.id}`;
-    const baseName = deviceName.endsWith('Diffuser') ? deviceName : `${deviceName} Diffuser`;
-    const accessoryName = `${baseName} Nightlight`;
-    const uniqueId = `${device.id}-nightlight`;
-    const uuid = this.api.hap.uuid.generate(uniqueId);
-
-    const existingAccessory = this.accessories.get(uuid);
-    if (existingAccessory) {
-      this.log.info('Restoring existing accessory from cache:', existingAccessory.displayName);
-      existingAccessory.context.device = device;
-      this.api.updatePlatformAccessories([existingAccessory]);
-      (existingAccessory as any).handler = new PuraNightlightAccessory(this, existingAccessory, this.puraApi);
-    } else {
-      this.log.info('Adding new accessory:', accessoryName);
-      const accessory = new this.api.platformAccessory(accessoryName, uuid);
-      accessory.context.device = device;
-      (accessory as any).handler = new PuraNightlightAccessory(this, accessory, this.puraApi);
-      this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
-    }
-
-    this.discoveredCacheUUIDs.push(uuid);
-  }
 
   /**
    * Remove accessories that are no longer present
@@ -270,7 +245,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       
       for (const device of devices) {
         await this.updateDiffuserAccessory(device);
-        await this.updateNightlightAccessory(device);
+        // No nightlight accessory
       }
     } catch (error) {
       this.log.debug('Device status refresh failed:', error);
@@ -304,18 +279,5 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     }
   }
 
-  private async updateNightlightAccessory(device: PuraDevice) {
-    const uniqueId = `${device.id}-nightlight`;
-    const uuid = this.api.hap.uuid.generate(uniqueId);
-    const accessory = this.accessories.get(uuid);
-
-    if (accessory) {
-      accessory.context.device = device;
-      this.api.updatePlatformAccessories([accessory]);
-      const handler = (accessory as any).handler as PuraNightlightAccessory | undefined;
-      if (handler) {
-        handler.updateDevice(device);
-      }
-    }
-  }
+  // Nightlight accessory removed
 }

@@ -45,32 +45,6 @@
         "type": "boolean",
         "default": false,
         "description": "If enabled, the plugin will send a nightlight off command right after turning on a diffuser."
-      },
-      "nightlightSyncMode": {
-        "title": "Nightlight Sync Mode",
-        "type": "string",
-        "default": "diffuser",
-        "oneOf": [
-          {
-            "title": "Mirror Diffuser (Recommended)",
-            "enum": [
-              "diffuser"
-            ]
-          },
-          {
-            "title": "Follow Pura Device",
-            "enum": [
-              "device"
-            ]
-          },
-          {
-            "title": "HomeKit Only",
-            "enum": [
-              "homekit"
-            ]
-          }
-        ],
-        "description": "Controls how the nightlight accessory stays in sync. 'diffuser' mirrors diffuser on/off, 'device' uses Pura API state, and 'homekit' only changes when you toggle it in HomeKit."
       }
     }
   }
