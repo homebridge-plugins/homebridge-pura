@@ -81,6 +81,7 @@ export class PuraPlatformAccessory {
 
     try {
       if (isOn) {
+        await this.logDeviceSnapshot('before-on');
         const preferredBay = this.accessory.context.lastBay;
         const targetBay = preferredBay && (preferredBay === 1 ? this.device.bay1 : this.device.bay2)
           ? preferredBay
@@ -115,6 +116,7 @@ export class PuraPlatformAccessory {
           if ((this.platform.config as PuraConfig).forceNightlightOffOnDiffuserOn) {
             await this.ensureNightlightOff();
           }
+          await this.logDeviceSnapshot('after-on');
         } else {
           this.platform.log.error(`Failed to turn on ${this.accessory.displayName}`);
           throw new Error('Failed to turn on device');
@@ -167,6 +169,30 @@ export class PuraPlatformAccessory {
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private async logDeviceSnapshot(label: string) {
+    try {
+      const devices = await this.puraApi.getDevices();
+      const match = devices.find((device) => device.id === this.device.id);
+      if (!match) {
+        this.platform.log.debug(`Pura device snapshot ${label}: device not found for ${this.device.id}`);
+        return;
+      }
+      this.platform.log.debug(`Pura device snapshot ${label}:`, JSON.stringify({
+        id: match.id,
+        name: match.name,
+        controller: match.controller,
+        diffusionMode: match.diffusionMode,
+        awayMode: match.awayMode,
+        ambientMode: match.ambientMode,
+        nightlight: match.nightlight,
+        bay1: match.bay1,
+        bay2: match.bay2,
+      }, null, 2));
+    } catch (error) {
+      this.platform.log.debug(`Failed to capture Pura device snapshot ${label}:`, error);
+    }
   }
 
 }
