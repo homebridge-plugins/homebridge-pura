@@ -90,11 +90,11 @@ export class PuraPlatformAccessory {
           throw new Error('No bay data available');
         }
         const candidateIntensity = bay?.intensity;
-        const intensity = Math.max(1, Math.min(100,
+        const intensity = Math.max(1, Math.min(100, (
           this.accessory.context.lastIntensity ??
-          (Number.isFinite(candidateIntensity) ? candidateIntensity : 0) ||
-          60,
-        ));
+          (Number.isFinite(candidateIntensity) ? candidateIntensity : 0) ??
+          60
+        )));
         await this.puraApi.stopAll(this.device.id);
         await this.puraApi.setAwayMode(this.device.id, false);
         const alwaysOn = await this.puraApi.setAlwaysOn(this.device.id, targetBay);
