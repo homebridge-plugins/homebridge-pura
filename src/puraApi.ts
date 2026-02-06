@@ -230,6 +230,7 @@ export class PuraApi {
       name: name ?? `Pura ${id}`,
       type: this.normalizeModel(type),
       version: deviceVersion ?? '',
+      controller: typeof record.controller === 'string' ? record.controller : undefined,
       state: {
         battery: (record.batteryRemaining || record.battery) as number | undefined,
         firmwareVersion,
@@ -390,13 +391,23 @@ export class PuraApi {
     }
   }
 
-  async setNightlight(deviceId: string, active: boolean, brightness = 10, color = 'ffffff'): Promise<boolean> {
+  async setNightlight(
+    deviceId: string,
+    active: boolean,
+    brightness = 10,
+    color = '#ffffff',
+    controller = 'default',
+  ): Promise<boolean> {
     try {
+      const clamped = Math.max(0, Math.min(100, Number(brightness) || 0));
+      const scaledBrightness = active
+        ? Math.max(1, Math.min(10, Math.round((clamped / 100) * 10)))
+        : Math.max(0, Math.min(10, Math.round((clamped / 100) * 10)));
       const response = await this.makeRequest('POST', `devices/${deviceId}/nightlight`, {
         active,
-        brightness,
+        brightness: scaledBrightness,
         color,
-        controller: 'default',
+        controller,
       }) as { success?: boolean };
       return response.success === true;
     } catch (error) {

@@ -4,10 +4,12 @@
 
 A Homebridge plugin for Pura smart fragrance diffusers.
 
-This plugin allows you to control your Pura smart fragrance diffusers through Apple HomeKit. Each Pura device appears as a single air purifier accessory in the Home app, where you can:
+This plugin allows you to control your Pura smart fragrance diffusers through Apple HomeKit. Each Pura device appears as a single fan accessory in the Home app, where you can:
 
 - Turn the diffuser on/off
-- Toggle the nightlight
+- Adjust intensity
+- Select which bay to use
+- Toggle the nightlight (color + brightness)
 - Monitor the current state of your diffusers
 
 ## Installation
@@ -44,18 +46,21 @@ Add the following platform to your `config.json`:
 
 - **Multiple Device Support**: Automatically discovers all Pura devices on your account
 - **Simple Control**: One accessory per device with on/off control
-- **Nightlight**: Optional nightlight toggle
+- **Bay Selector**: Switch between Bay 1 and Bay 2
+- **Nightlight**: Toggle and control nightlight color/brightness
 - **Real-Time Status**: Automatically refreshes device status
 - **HomeKit Integration**: Full integration with Apple HomeKit and the Home app
 
 ## Usage
 
-Once configured, your Pura diffusers will appear in the Home app as air purifiers. Each device will appear as a single accessory (e.g., "Living Room Pura Diffuser").
+Once configured, your Pura diffusers will appear in the Home app as fans. Each device will appear as a single accessory (e.g., "Living Room Pura Diffuser").
 
 ### Controls
 
 - **Power**: Turn the diffuser on/off
-- **Nightlight**: Toggle the nightlight
+- **Fan Speed**: Adjust intensity
+- **Bay Selector**: Switch between Bay 1 and Bay 2
+- **Nightlight**: Toggle and control color/brightness
 - **Power**: Turn the diffuser on/off
 
 ### Device Management

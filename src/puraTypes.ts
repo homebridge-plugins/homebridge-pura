@@ -16,6 +16,7 @@ export interface PuraDevice {
   type: string;
   version: string;
   state: PuraDeviceState;
+  controller?: string;
   bay1?: PuraBay;
   bay2?: PuraBay;
   nightlight?: PuraNightlight;
