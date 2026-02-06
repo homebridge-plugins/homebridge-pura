@@ -47,7 +47,7 @@ export class PuraPlatformAccessory {
     const activeBay = this.getActiveBay();
     this.currentState.On = activeBay ? Boolean(activeBay.active) : false;
     if (activeBay) {
-      this.accessory.context.lastBay = activeBay.id;
+      this.accessory.context.lastBay = activeBay === this.device.bay1 ? 1 : 2;
       if (Number.isFinite(activeBay.intensity) && activeBay.intensity > 0) {
         this.accessory.context.lastIntensity = activeBay.intensity;
       }
@@ -117,6 +117,7 @@ export class PuraPlatformAccessory {
             await this.ensureNightlightOff();
           }
           await this.logDeviceSnapshot('after-on');
+          await this.logDeviceSnapshot('after-on-post');
         } else {
           this.platform.log.error(`Failed to turn on ${this.accessory.displayName}`);
           throw new Error('Failed to turn on device');
