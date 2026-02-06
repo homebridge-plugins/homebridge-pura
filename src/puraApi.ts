@@ -402,6 +402,18 @@ export class PuraApi {
     }
   }
 
+  async setAwayMode(deviceId: string, awayMode: boolean): Promise<boolean> {
+    try {
+      const response = await this.makeRequest('POST', `devices/${deviceId}/awayMode`, {
+        awayMode,
+      }) as { success?: boolean };
+      return response.success === true;
+    } catch (error) {
+      this.log.error(`Failed to set away mode for device ${deviceId}:`, error);
+      return false;
+    }
+  }
+
   async setNightlight(
     deviceId: string,
     active: boolean,
