@@ -137,42 +137,30 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   private async registerDevice(device: PuraDevice) {
     this.log.debug('Registering device:', device.name, device.id);
 
-    // Create accessory for each bay that exists
-    if (device.bay1) {
-      await this.registerBayAccessory(device, 1);
-    }
-    if (device.bay2) {
-      await this.registerBayAccessory(device, 2);
-    }
+    // Single diffuser accessory (On/Off)
+    await this.registerDiffuserAccessory(device);
 
     // Nightlight accessory (one per device)
     await this.registerNightlightAccessory(device);
   }
 
-  private async registerBayAccessory(device: PuraDevice, bayNumber: number) {
-    const bay = bayNumber === 1 ? device.bay1 : device.bay2;
-    if (!bay) {
-      return;
-    }
-
+  private async registerDiffuserAccessory(device: PuraDevice) {
     const deviceName = device.name || `Pura ${device.id}`;
     const baseName = deviceName.endsWith('Diffuser') ? deviceName : `${deviceName} Diffuser`;
-    const accessoryName = `${baseName} Bay ${bayNumber}`;
-    const uniqueId = `${device.id}-bay${bayNumber}`;
+    const accessoryName = baseName;
+    const uniqueId = `${device.id}-diffuser`;
     const uuid = this.api.hap.uuid.generate(uniqueId);
 
     const existingAccessory = this.accessories.get(uuid);
     if (existingAccessory) {
       this.log.info('Restoring existing accessory from cache:', existingAccessory.displayName);
       existingAccessory.context.device = device;
-      existingAccessory.context.bayNumber = bayNumber;
       this.api.updatePlatformAccessories([existingAccessory]);
       (existingAccessory as any).handler = new PuraPlatformAccessory(this, existingAccessory, this.puraApi);
     } else {
       this.log.info('Adding new accessory:', accessoryName);
       const accessory = new this.api.platformAccessory(accessoryName, uuid);
       accessory.context.device = device;
-      accessory.context.bayNumber = bayNumber;
       (accessory as any).handler = new PuraPlatformAccessory(this, accessory, this.puraApi);
       this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
     }
@@ -241,12 +229,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       const devices = await this.puraApi.getDevices();
       
       for (const device of devices) {
-        if (device.bay1) {
-          await this.updateBayAccessory(device, 1);
-        }
-        if (device.bay2) {
-          await this.updateBayAccessory(device, 2);
-        }
+        await this.updateDiffuserAccessory(device);
         await this.updateNightlightAccessory(device);
       }
     } catch (error) {
@@ -266,14 +249,13 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   /**
    * Update a device accessory with fresh device data
    */
-  private async updateBayAccessory(device: PuraDevice, bayNumber: number) {
-    const uniqueId = `${device.id}-bay${bayNumber}`;
+  private async updateDiffuserAccessory(device: PuraDevice) {
+    const uniqueId = `${device.id}-diffuser`;
     const uuid = this.api.hap.uuid.generate(uniqueId);
     const accessory = this.accessories.get(uuid);
 
     if (accessory) {
       accessory.context.device = device;
-      accessory.context.bayNumber = bayNumber;
       this.api.updatePlatformAccessories([accessory]);
       const handler = (accessory as any).handler as PuraPlatformAccessory | undefined;
       if (handler) {
