@@ -113,7 +113,7 @@ export class PuraPlatformAccessory {
           this.accessory.context.lastIntensity = intensity;
           this.accessory.context.lastBay = targetBay;
           this.platform.log.debug(`Successfully turned on ${this.accessory.displayName} with intensity ${intensity}`);
-          if ((this.platform.config as PuraConfig).forceNightlightOffOnDiffuserOn) {
+          if ((this.platform.config as PuraConfig).forceNightlightOff) {
             await this.ensureNightlightOff();
           }
           await this.logDeviceSnapshot('after-on');

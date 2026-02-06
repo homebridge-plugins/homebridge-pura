@@ -8,8 +8,7 @@ export interface PuraConfig extends PlatformConfig {
   username: string;
   password: string;
   refreshInterval?: number;
-  cognitoRefreshInterval?: number;
-  forceNightlightOffOnDiffuserOn?: boolean;
+  forceNightlightOff?: boolean;
 }
 
 export interface PuraDevice {

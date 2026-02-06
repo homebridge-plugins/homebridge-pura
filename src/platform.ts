@@ -204,11 +204,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   }
 
   private setupCognitoRefreshInterval() {
-    const intervalSeconds = this.puraConfig.cognitoRefreshInterval ?? 3600;
-    if (intervalSeconds <= 0) {
-      this.log.debug('Cognito refresh interval disabled');
-      return;
-    }
+    const intervalSeconds = 3600;
     const interval = intervalSeconds * 1000;
     this.log.debug(`Setting up Cognito refresh interval: ${intervalSeconds} seconds`);
     this.cognitoRefreshInterval = setInterval(async () => {

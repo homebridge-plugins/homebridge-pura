@@ -1,4 +1,4 @@
-<img src="Pura_black_Logo.jpg" alt="Pura Logo" width="275" />
+<img src="Pura_black_Logo.jpg" alt="Pura Logo" width="225" />
 
 **A Homebridge plugin for Pura smart fragrance diffusers.**
 
@@ -27,7 +27,7 @@ Add the following platform to your `config.json`:
       "username": "your-pura-email@example.com",
       "password": "your-pura-password",
       "refreshInterval": 90,
-      "forceNightlightOffOnDiffuserOn": false
+      "forceNightlightOff": false
     }
   ]
 }
@@ -38,7 +38,7 @@ Add the following platform to your `config.json`:
 - **username**: Your Pura app username (email address) - *required*
 - **password**: Your Pura app password - *required*
 - **refreshInterval**: How often to refresh device status in seconds (default: 90, min: 60, max: 3600)
-- **forceNightlightOffOnDiffuserOn**: By default, Pura turns the nightlight on/off with the diffuser. Enable this to force the nightlight off after the diffuser turns on (default: false)
+- **forceNightlightOff**: By default, Pura turns the nightlight on/off with the diffuser. Enable this to force the nightlight off after the diffuser turns on (default: false)
 
 ## Features
 
@@ -60,13 +60,13 @@ The plugin will automatically:
 - Discover all Pura devices on your account
 - Create one switch per diffuser
 - Update device status based on the configured refresh interval
-- Handle authentication and token refresh
+- Handle authentication and token refresh (including periodic Cognito refresh polling)
 
 ## Recommended Usage
 
 - Use this plugin in lieu of Pura schedules or auto-away.
 - Enable **Auto-Alternative Fragrances** in the Pura app for best results.
-- By default, Pura turns the nightlight on/off with the diffuser. If you want to prevent the light from staying on, enable `forceNightlightOffOnDiffuserOn`.
+- By default, Pura turns the nightlight on/off with the diffuser. If you want to prevent the light from staying on, enable `forceNightlightOff`.
 
 ## Troubleshooting
 
