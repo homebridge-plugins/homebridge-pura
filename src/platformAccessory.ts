@@ -98,6 +98,7 @@ export class PuraPlatformAccessory {
         if (success) {
           this.currentState.On = true;
           this.currentState.RotationSpeed = intensity;
+          await this.turnOffOtherBay();
           this.platform.log.debug(`Successfully turned on ${this.accessory.displayName} with intensity ${intensity}`);
         } else {
           this.platform.log.error(`Failed to turn on ${this.accessory.displayName}`);
@@ -144,6 +145,9 @@ export class PuraPlatformAccessory {
       if (success) {
         this.currentState.RotationSpeed = intensity;
         this.currentState.On = intensity > 0;
+        if (intensity > 0) {
+          await this.turnOffOtherBay();
+        }
         
         // Update the On characteristic to reflect the new state
         this.service.updateCharacteristic(this.platform.Characteristic.On, this.currentState.On);
@@ -175,5 +179,33 @@ export class PuraPlatformAccessory {
     this.device = device;
     this.accessory.context.device = device;
     this.updateCurrentState();
+  }
+
+  private async turnOffOtherBay() {
+    const otherBay = this.bayNumber === 1 ? 2 : 1;
+    try {
+      const success = await this.puraApi.setIntensity(this.device.id, otherBay, 0);
+      if (!success) {
+        this.platform.log.warn(`Failed to turn off ${this.device.name} Bay ${otherBay}`);
+      }
+    } catch (error) {
+      this.platform.log.warn(`Error turning off ${this.device.name} Bay ${otherBay}:`, error);
+    }
+
+    // Update cached accessory state for the other bay
+    const otherUuid = this.platform.api.hap.uuid.generate(`${this.device.id}-bay${otherBay}`);
+    const otherAccessory = this.platform.accessories.get(otherUuid);
+    if (otherAccessory) {
+      const service = otherAccessory.getService(this.platform.Service.Fan);
+      if (service) {
+        service.updateCharacteristic(this.platform.Characteristic.On, false);
+        service.updateCharacteristic(this.platform.Characteristic.RotationSpeed, 0);
+      }
+      otherAccessory.context.device = {
+        ...this.device,
+        bay1: otherBay === 1 ? { ...this.device.bay1, active: false, intensity: 0 } : this.device.bay1,
+        bay2: otherBay === 2 ? { ...this.device.bay2, active: false, intensity: 0 } : this.device.bay2,
+      };
+    }
   }
 }

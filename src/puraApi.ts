@@ -24,7 +24,6 @@ export class PuraApi {
   private session: CognitoUserSession | null = null;
   private readonly log: Logging;
   private readonly baseUrl: string;
-  private loggedRawDevice = false;
 
   constructor(log: Logging) {
     this.log = log;
@@ -218,13 +217,6 @@ export class PuraApi {
       name = deviceName;
     }
 
-    if (!this.loggedRawDevice) {
-      const candidate = name || deviceName || (typeof record.deviceId === 'string' ? record.deviceId : '');
-      if (candidate.includes('Lounge')) {
-        this.loggedRawDevice = true;
-        this.log.info('DEBUG raw device sample:', JSON.stringify(record, null, 2));
-      }
-    }
 
     const firmwareVersion = (record.fwVersion || record.firmwareVersion) as string | undefined;
     const deviceVersion = (record.deviceVer || record.version) as string | undefined;
@@ -241,8 +233,8 @@ export class PuraApi {
         lastSeen: record.lastConnectedAt ? String(record.lastConnectedAt) : undefined,
         online: (record.connected || record.online) as boolean | undefined,
       },
-      bay1: this.normalizeBay(record.bay1, 1),
-      bay2: this.normalizeBay(record.bay2, 2),
+      bay1: this.normalizeBay(record, record.bay1, 1),
+      bay2: this.normalizeBay(record, record.bay2, 2),
       nightlight: record.nightlight as PuraNightlight | undefined,
       awayMode: record.awayMode as boolean | undefined,
       ambientMode: record.ambientMode as boolean | undefined,
@@ -260,17 +252,18 @@ export class PuraApi {
     return 'Pura Diffuser';
   }
 
-  private normalizeBay(value: unknown, bayNumber: number): PuraBay | undefined {
+  private normalizeBay(parent: Record<string, unknown>, value: unknown, bayNumber: number): PuraBay | undefined {
     if (!value || typeof value !== 'object') {
       return undefined;
     }
     const record = value as Record<string, unknown>;
-    const active = record.active ?? record.enabled ?? record.on ?? record.isOn ?? false;
-    const intensityRaw = record.intensity ?? record.level ?? record.strength ?? 0;
-    const intensityNumber = Number(intensityRaw);
-    const normalizedIntensity = Number.isFinite(intensityNumber)
-      ? (intensityNumber <= 10 ? intensityNumber * 10 : intensityNumber)
-      : 0;
+    const active = record.active ?? record.enabled ?? record.on ?? record.isOn ?? (Number(record.activeAt) > 0);
+    const intensityFromRecord = this.normalizeBayIntensity(record.intensity ?? record.level ?? record.strength);
+    const intensityFromDefaults = this.normalizeBayIntensity(
+      (parent.deviceDefaults as Record<string, unknown> | undefined)?.[`bay${bayNumber}Intensity`],
+    );
+    const intensityFromOscillation = this.normalizeOscillationIntensity(parent.oscillation, bayNumber);
+    const normalizedIntensity = intensityFromRecord ?? intensityFromOscillation ?? intensityFromDefaults ?? 0;
     return {
       id: typeof record.id === 'number' ? record.id : bayNumber,
       name: typeof record.name === 'string' ? record.name : undefined,
@@ -279,6 +272,57 @@ export class PuraApi {
       timer: record.timer as PuraTimer | undefined,
       fragrance: record.fragrance as PuraFragrance | undefined,
     };
+  }
+
+  private normalizeBayIntensity(value: unknown): number | null {
+    if (value === undefined || value === null) {
+      return null;
+    }
+    if (typeof value === 'string') {
+      const normalized = value.toLowerCase().trim();
+      if (normalized === 'subtle') {
+        return 30;
+      }
+      if (normalized === 'medium') {
+        return 60;
+      }
+      if (normalized === 'strong') {
+        return 100;
+      }
+      const asNumber = Number(normalized);
+      if (Number.isFinite(asNumber)) {
+        return asNumber <= 10 ? asNumber * 10 : asNumber;
+      }
+      return null;
+    }
+    const asNumber = Number(value);
+    if (!Number.isFinite(asNumber)) {
+      return null;
+    }
+    return asNumber <= 10 ? asNumber * 10 : asNumber;
+  }
+
+  private normalizeOscillationIntensity(value: unknown, bayNumber: number): number | null {
+    if (!value || typeof value !== 'object') {
+      return null;
+    }
+    const record = value as Record<string, unknown>;
+    const states = Array.isArray(record.states) ? record.states : [];
+    const match = states.find((state) => {
+      if (!state || typeof state !== 'object') {
+        return false;
+      }
+      const stateRecord = state as Record<string, unknown>;
+      return stateRecord.bay === bayNumber;
+    }) as Record<string, unknown> | undefined;
+    if (match) {
+      return this.normalizeBayIntensity(match.intensity);
+    }
+    const state = record.state as Record<string, unknown> | undefined;
+    if (state && state.currentIndex === bayNumber) {
+      return this.normalizeBayIntensity(state.intensity);
+    }
+    return null;
   }
 
   /**
