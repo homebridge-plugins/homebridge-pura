@@ -83,8 +83,9 @@ export class PuraPlatformAccessory {
       if (isOn) {
         await this.logDeviceSnapshot('before-on');
         const preferredBay = this.accessory.context.lastBay;
-        const targetBay = preferredBay && (preferredBay === 1 ? this.device.bay1 : this.device.bay2)
-          ? preferredBay
+        const normalizedPreferred = preferredBay === 1 || preferredBay === 2 ? preferredBay : undefined;
+        const targetBay = normalizedPreferred && (normalizedPreferred === 1 ? this.device.bay1 : this.device.bay2)
+          ? normalizedPreferred
           : (this.device.bay1 ? 1 : 2);
         const bay = targetBay === 1 ? this.device.bay1 : this.device.bay2;
         if (!bay) {
