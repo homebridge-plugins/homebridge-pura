@@ -80,7 +80,8 @@ export class PuraNightlightAccessory {
     const brightness = Math.max(0, Math.min(100, Number(value) || 0));
     this.accessory.context.nightlightBrightness = brightness;
     this.device.nightlight = {
-      ...(this.device.nightlight ?? { color: 'ffffff' }),
+      ...(this.device.nightlight ?? { color: 'ffffff', brightness }),
+      brightness,
       active: true,
     };
     await this.setNightlight(true);
@@ -95,8 +96,10 @@ export class PuraNightlightAccessory {
     this.accessory.context.nightlightHue = hue;
     const saturation = this.accessory.context.nightlightSaturation ?? 0;
     const color = this.hsvToHex(hue, saturation);
+    const brightness = this.accessory.context.nightlightBrightness ?? this.device.nightlight?.brightness ?? 10;
     this.device.nightlight = {
-      ...(this.device.nightlight ?? { brightness: 10, active: true }),
+      ...(this.device.nightlight ?? { brightness, active: true }),
+      brightness,
       color,
     };
     await this.setNightlight(true);
@@ -111,8 +114,10 @@ export class PuraNightlightAccessory {
     this.accessory.context.nightlightSaturation = saturation;
     const hue = this.accessory.context.nightlightHue ?? 0;
     const color = this.hsvToHex(hue, saturation);
+    const brightness = this.accessory.context.nightlightBrightness ?? this.device.nightlight?.brightness ?? 10;
     this.device.nightlight = {
-      ...(this.device.nightlight ?? { brightness: 10, active: true }),
+      ...(this.device.nightlight ?? { brightness, active: true }),
+      brightness,
       color,
     };
     await this.setNightlight(true);
