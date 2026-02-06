@@ -49,16 +49,36 @@ export class PuraNightlightAccessory {
   }
 
   private updateState() {
-    const cachedOn = this.accessory.context.nightlightLastOn === true;
-    const lightOn = typeof this.device.nightlight?.active === 'boolean'
-      ? this.device.nightlight.active
-      : cachedOn;
-    const brightness = this.device.nightlight?.brightness ?? this.accessory.context.nightlightBrightness ?? 10;
-    const { hue, saturation } = this.hexToHsv(this.device.nightlight?.color ?? 'ffffff');
-    this.accessory.context.nightlightLastOn = lightOn;
-    this.accessory.context.nightlightBrightness = brightness;
-    this.accessory.context.nightlightHue = hue;
-    this.accessory.context.nightlightSaturation = saturation;
+    const cachedOn = this.accessory.context.nightlightLastOn;
+    const deviceActive = this.device.nightlight?.active;
+    const lightOn = typeof cachedOn === 'boolean'
+      ? cachedOn
+      : (typeof deviceActive === 'boolean' ? deviceActive : false);
+
+    const cachedBrightness = this.accessory.context.nightlightBrightness;
+    const deviceBrightness = this.device.nightlight?.brightness;
+    const brightness = Number.isFinite(cachedBrightness)
+      ? cachedBrightness
+      : (Number.isFinite(deviceBrightness) ? deviceBrightness : 10);
+
+    const cachedHue = this.accessory.context.nightlightHue;
+    const cachedSaturation = this.accessory.context.nightlightSaturation;
+    const deviceColor = this.device.nightlight?.color ?? 'ffffff';
+    const { hue, saturation } = this.hexToHsv(deviceColor);
+
+    if (typeof cachedOn !== 'boolean' && typeof deviceActive === 'boolean') {
+      this.accessory.context.nightlightLastOn = deviceActive;
+    }
+    if (!Number.isFinite(cachedBrightness) && Number.isFinite(deviceBrightness)) {
+      this.accessory.context.nightlightBrightness = deviceBrightness;
+    }
+    if (!Number.isFinite(cachedHue)) {
+      this.accessory.context.nightlightHue = hue;
+    }
+    if (!Number.isFinite(cachedSaturation)) {
+      this.accessory.context.nightlightSaturation = saturation;
+    }
+
     this.service.updateCharacteristic(this.platform.Characteristic.On, lightOn);
     this.service.updateCharacteristic(this.platform.Characteristic.Brightness, brightness);
     this.service.updateCharacteristic(this.platform.Characteristic.Hue, hue);
