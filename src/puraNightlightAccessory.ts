@@ -79,7 +79,11 @@ export class PuraNightlightAccessory {
   async setNightlightBrightness(value: CharacteristicValue) {
     const brightness = Math.max(0, Math.min(100, Number(value) || 0));
     this.accessory.context.nightlightBrightness = brightness;
-    await this.setNightlight(Boolean(this.device.nightlight?.active));
+    this.device.nightlight = {
+      ...(this.device.nightlight ?? { color: 'ffffff' }),
+      active: true,
+    };
+    await this.setNightlight(true);
   }
 
   async getNightlightBrightness(): Promise<CharacteristicValue> {
@@ -95,7 +99,7 @@ export class PuraNightlightAccessory {
       ...(this.device.nightlight ?? { brightness: 10, active: true }),
       color,
     };
-    await this.setNightlight(Boolean(this.device.nightlight.active));
+    await this.setNightlight(true);
   }
 
   async getNightlightHue(): Promise<CharacteristicValue> {
@@ -111,7 +115,7 @@ export class PuraNightlightAccessory {
       ...(this.device.nightlight ?? { brightness: 10, active: true }),
       color,
     };
-    await this.setNightlight(Boolean(this.device.nightlight.active));
+    await this.setNightlight(true);
   }
 
   async getNightlightSaturation(): Promise<CharacteristicValue> {

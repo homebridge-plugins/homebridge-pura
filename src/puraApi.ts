@@ -340,6 +340,7 @@ export class PuraApi {
         controller,
         intensity: apiIntensity,
       }) as { success?: boolean };
+      this.log.info('Pura intensity response:', { deviceId, bay, intensity: apiIntensity, controller, success: response.success });
       return response.success === true;
     } catch (error) {
       this.log.error(`Failed to set intensity for device ${deviceId}:`, error);
