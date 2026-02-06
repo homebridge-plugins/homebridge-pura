@@ -272,13 +272,16 @@ export class PuraApi {
       return undefined;
     }
     const record = value as Record<string, unknown>;
-    const active = record.active ?? record.enabled ?? record.on ?? record.isOn ?? false;
+    const activeAt = Number(record.activeAt);
+    const active = record.active ?? record.enabled ?? record.on ?? record.isOn ?? (Number.isFinite(activeAt) && activeAt > 0);
     const intensityFromRecord = this.normalizeBayIntensity(record.intensity ?? record.level ?? record.strength);
     const intensityFromDefaults = this.normalizeBayIntensity(
       (parent.deviceDefaults as Record<string, unknown> | undefined)?.[`bay${bayNumber}Intensity`],
     );
     const intensityFromOscillation = this.normalizeOscillationIntensity(parent.oscillation, bayNumber);
-    const normalizedIntensity = intensityFromRecord ?? intensityFromOscillation ?? intensityFromDefaults ?? 0;
+    const normalizedIntensity = intensityFromRecord ??
+      (active ? (intensityFromOscillation ?? intensityFromDefaults) : null) ??
+      0;
     return {
       id: typeof record.id === 'number' ? record.id : bayNumber,
       name: typeof record.name === 'string' ? record.name : undefined,
