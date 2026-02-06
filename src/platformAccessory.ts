@@ -74,7 +74,9 @@ export class PuraPlatformAccessory {
       if (isOn) {
         const intensity = this.currentState.RotationSpeed || this.accessory.context.lastKnownIntensity || 60;
         await this.puraApi.stopAll(this.device.id);
-        const success = await this.puraApi.setIntensity(this.device.id, this.bayNumber, intensity);
+        await this.puraApi.setAwayMode(this.device.id, false);
+        const alwaysOn = await this.puraApi.setAlwaysOn(this.device.id, this.bayNumber);
+        const success = alwaysOn && await this.puraApi.setIntensity(this.device.id, this.bayNumber, intensity);
         if (success) {
           this.currentState.On = true;
           this.currentState.RotationSpeed = intensity;
@@ -127,7 +129,9 @@ export class PuraPlatformAccessory {
       }
 
       await this.puraApi.stopAll(this.device.id);
-      const success = await this.puraApi.setIntensity(this.device.id, this.bayNumber, intensity);
+      await this.puraApi.setAwayMode(this.device.id, false);
+      const alwaysOn = await this.puraApi.setAlwaysOn(this.device.id, this.bayNumber);
+      const success = alwaysOn && await this.puraApi.setIntensity(this.device.id, this.bayNumber, intensity);
       if (success) {
         this.currentState.RotationSpeed = intensity;
         this.currentState.On = true;
