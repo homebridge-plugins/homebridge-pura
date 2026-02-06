@@ -343,11 +343,14 @@ export class PuraApi {
     }
   }
 
-  private normalizeIntensity(intensity: number): { apiIntensity: string; controller: string } {
+  private normalizeIntensity(intensity: number): { apiIntensity: number; controller: string } {
     const clamped = Math.max(0, Math.min(100, Number(intensity) || 0));
-    const scaled = Math.round(clamped / 10);
+    let scaled = Math.round(clamped / 10);
+    if (clamped > 0 && scaled === 0) {
+      scaled = 1;
+    }
     return {
-      apiIntensity: String(scaled),
+      apiIntensity: Math.max(0, Math.min(10, scaled)),
       controller: 'default',
     };
   }
