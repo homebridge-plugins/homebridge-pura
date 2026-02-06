@@ -1,15 +1,12 @@
-# Homebridge Pura
-
 <img src="Pura_black_Logo.jpg" alt="Pura Logo" width="275" />
 
-A Homebridge plugin for Pura smart fragrance diffusers.
+**A Homebridge plugin for Pura smart fragrance diffusers.**
 
-This plugin allows you to control your Pura smart fragrance diffusers through Apple HomeKit. Each Pura device exposes two fan accessories (one per bay) plus a nightlight accessory, where you can:
+This plugin is intentionally simple. It exposes a single on/off switch per diffuser, allowing you to control each device using HomeKit automations.
 
-- Turn a specific bay on/off
-- Adjust intensity per bay
-- Toggle the nightlight (color + brightness)
-- Monitor the current state of your diffusers
+It’s designed to be used with Pura’s auto-away and scheduling features disabled, so HomeKit can act as the primary automation layer.
+
+While all Pura diffusers are supported, this plugin is best suited for newer Pura models that support auto-alternating fragrances, ensuring equal distribution while the diffuser is running.
 
 ## Installation
 
@@ -29,7 +26,8 @@ Add the following platform to your `config.json`:
       "platform": "PuraSmartDiffuser",
       "username": "your-pura-email@example.com",
       "password": "your-pura-password",
-      "refreshInterval": 300
+      "refreshInterval": 90,
+      "forceNightlightOffOnDiffuserOn": false
     }
   ]
 }
@@ -39,36 +37,36 @@ Add the following platform to your `config.json`:
 
 - **username**: Your Pura app username (email address) - *required*
 - **password**: Your Pura app password - *required*
-- **refreshInterval**: How often to refresh device status in seconds (default: 300, min: 30, max: 3600)
+- **refreshInterval**: How often to refresh device status in seconds (default: 90, min: 60, max: 3600)
+- **forceNightlightOffOnDiffuserOn**: By default, Pura turns the nightlight on/off with the diffuser. Enable this to force the nightlight off after the diffuser turns on (default: false)
 
 ## Features
 
 - **Multiple Device Support**: Automatically discovers all Pura devices on your account
-- **Bay Control**: Two fan accessories (Bay 1 and Bay 2)
-- **Mutual Exclusion**: Turning on one bay turns the other off
-- **Off Behavior**: Turning a bay off stops diffusion for the device
-- **Nightlight**: Toggle and control nightlight color/brightness
+- **Simple On/Off Control**: One switch per diffuser for HomeKit automations
 - **Real-Time Status**: Automatically refreshes device status
-- **HomeKit Integration**: Full integration with Apple HomeKit and the Home app
 
 ## Usage
 
-Once configured, your Pura diffusers will appear in the Home app as two fan accessories (e.g., "Living Room Pura Diffuser Bay 1" and "Living Room Pura Diffuser Bay 2") plus a nightlight accessory.
+Once configured, your Pura diffusers will appear in the Home app as a single switch per diffuser (e.g., "Living Room Diffuser").
 
 ### Controls
 
-- **Power**: Turn each bay on/off
-- **Fan Speed**: Adjust intensity per bay
-- **Nightlight**: Toggle and control color/brightness
 - **Power**: Turn the diffuser on/off
 
 ### Device Management
 
 The plugin will automatically:
 - Discover all Pura devices on your account
-- Create one accessory per bay plus a nightlight accessory per device
+- Create one switch per diffuser
 - Update device status based on the configured refresh interval
 - Handle authentication and token refresh
+
+## Recommended Usage
+
+- Use this plugin in lieu of Pura schedules or auto-away.
+- Enable **Auto-Alternative Fragrances** in the Pura app for best results.
+- By default, Pura turns the nightlight on/off with the diffuser. If you want to prevent the light from staying on, enable `forceNightlightOffOnDiffuserOn`.
 
 ## Troubleshooting
 
@@ -97,29 +95,7 @@ If the plugin loses connection:
 
 ## Support
 
-For issues and feature requests, please use the [GitHub Issues](https://github.com/pradeepmouli/homebridge-pura/issues) page.
-
-## Development
-
-### Release Process
-
-This project uses automated releases via GitHub Actions. To create a new release:
-
-1. Update the version in `package.json`
-2. Commit your changes: `git commit -am "Release v1.x.x"`
-3. Create and push a version tag: `git tag v1.x.x && git push origin v1.x.x`
-
-The GitHub Actions workflow will automatically:
-- Build and test the code
-- Create a GitHub release
-- Publish the package to npm
-
-**Note**: Make sure the version in `package.json` matches the tag version (without the 'v' prefix). The workflow will verify this and fail if they don't match.
-
-### Prerequisites for Publishing
-
-To publish releases, repository maintainers need to configure:
-- `NPM_TOKEN`: A valid npm authentication token with publish permissions
+For issues and feature requests, please use the [GitHub Issues](https://github.com/QandnotU/homebridge-pura/issues) page.
 
 ## Credits
 

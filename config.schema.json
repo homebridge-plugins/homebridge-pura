@@ -27,10 +27,10 @@
       "refreshInterval": {
         "title": "Refresh Interval (seconds)",
         "type": "number",
-        "minimum": 30,
+        "minimum": 60,
         "maximum": 3600,
-        "default": 300,
-        "description": "How often to refresh device status (30-3600 seconds)"
+        "default": 90,
+        "description": "How often to refresh device status (60-3600 seconds)"
       },
       "cognitoRefreshInterval": {
         "title": "Cognito Refresh Interval (seconds)",
