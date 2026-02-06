@@ -241,6 +241,7 @@ export class PuraApi {
       type: this.normalizeModel(type),
       version: deviceVersion ?? '',
       controller: typeof record.controller === 'string' ? record.controller : undefined,
+      diffusionMode: typeof record.diffusionMode === 'string' ? record.diffusionMode : undefined,
       state: {
         battery: (record.batteryRemaining || record.battery) as number | undefined,
         firmwareVersion,
@@ -271,7 +272,7 @@ export class PuraApi {
       return undefined;
     }
     const record = value as Record<string, unknown>;
-    const active = record.active ?? record.enabled ?? record.on ?? record.isOn ?? (Number(record.activeAt) > 0);
+    const active = record.active ?? record.enabled ?? record.on ?? record.isOn ?? false;
     const intensityFromRecord = this.normalizeBayIntensity(record.intensity ?? record.level ?? record.strength);
     const intensityFromDefaults = this.normalizeBayIntensity(
       (parent.deviceDefaults as Record<string, unknown> | undefined)?.[`bay${bayNumber}Intensity`],

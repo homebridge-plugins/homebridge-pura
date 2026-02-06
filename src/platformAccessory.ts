@@ -81,7 +81,7 @@ export class PuraPlatformAccessory {
           deviceId: this.device.id,
           bay: this.bayNumber,
           controller,
-          diffusionMode: (this.device as any).diffusionMode,
+          diffusionMode: this.device.diffusionMode,
         });
         const success = alwaysOn && await this.puraApi.setIntensity(this.device.id, this.bayNumber, intensity, controller);
         if (success) {
@@ -143,7 +143,7 @@ export class PuraPlatformAccessory {
         deviceId: this.device.id,
         bay: this.bayNumber,
         controller,
-        diffusionMode: (this.device as any).diffusionMode,
+        diffusionMode: this.device.diffusionMode,
       });
       const success = alwaysOn && await this.puraApi.setIntensity(this.device.id, this.bayNumber, intensity, controller);
       if (success) {
