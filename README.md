@@ -1,13 +1,13 @@
 # Homebridge Pura
 
-<img src="Pura_black_Logo.jpg" alt="Pura Logo" width="200" />
+<img src="Pura_black_Logo.jpg" alt="Pura Logo" width="275" />
 
 A Homebridge plugin for Pura smart fragrance diffusers.
 
-This plugin allows you to control your Pura smart fragrance diffusers through Apple HomeKit. Each fragrance bay on your Pura device will appear as a separate fan in the Home app, where you can:
+This plugin allows you to control your Pura smart fragrance diffusers through Apple HomeKit. Each Pura device appears as a single fan accessory in the Home app, where you can:
 
 - Turn the diffuser on/off
-- Adjust the fragrance intensity (0-100%)
+- Monitor the current state of your diffusers
 - Monitor the current state of your diffusers
 
 ## Installation
@@ -43,25 +43,24 @@ Add the following platform to your `config.json`:
 ## Features
 
 - **Multiple Device Support**: Automatically discovers all Pura devices on your account
-- **Bay-Level Control**: Each fragrance bay appears as a separate fan accessory
-- **Intensity Control**: Use the fan speed slider to adjust fragrance intensity
+- **Simple Control**: One accessory per device with on/off control
 - **Real-Time Status**: Automatically refreshes device status
 - **HomeKit Integration**: Full integration with Apple HomeKit and the Home app
 
 ## Usage
 
-Once configured, your Pura diffusers will appear in the Home app as fans. Each fragrance bay will be a separate accessory (e.g., "Living Room Pura Bay 1", "Living Room Pura Bay 2").
+Once configured, your Pura diffusers will appear in the Home app as fans. Each device will appear as a single accessory (e.g., "Living Room Pura").
 
 ### Controls
 
 - **Power**: Turn the diffuser on/off
-- **Fan Speed**: Adjust the fragrance intensity (0-100%)
+- **Power**: Turn the diffuser on/off
 
 ### Device Management
 
 The plugin will automatically:
 - Discover all Pura devices on your account
-- Create accessories for each fragrance bay
+- Create one accessory per device
 - Update device status based on the configured refresh interval
 - Handle authentication and token refresh
 
