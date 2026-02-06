@@ -46,6 +46,7 @@ Add the following platform to your `config.json`:
 - **Multiple Device Support**: Automatically discovers all Pura devices on your account
 - **Bay Control**: Two fan accessories (Bay 1 and Bay 2)
 - **Mutual Exclusion**: Turning on one bay turns the other off
+- **Off Behavior**: Turning a bay off stops diffusion for the device
 - **Nightlight**: Toggle and control nightlight color/brightness
 - **Real-Time Status**: Automatically refreshes device status
 - **HomeKit Integration**: Full integration with Apple HomeKit and the Home app

@@ -54,7 +54,9 @@ export class PuraPlatformAccessory {
     if (!bay) {
       return;
     }
-    this.currentState.On = Boolean(bay.active);
+    const hasActiveFlag = typeof bay.active === 'boolean';
+    const cachedOn = this.accessory.context.lastOn === true;
+    this.currentState.On = hasActiveFlag ? Boolean(bay.active) : cachedOn;
     const intensity = Number.isFinite(bay.intensity) ? bay.intensity : 0;
     this.currentState.RotationSpeed = Math.max(0, Math.min(100, intensity));
 
@@ -88,6 +90,7 @@ export class PuraPlatformAccessory {
           this.currentState.On = true;
           this.currentState.RotationSpeed = intensity;
           this.accessory.context.lastKnownIntensity = intensity;
+          this.accessory.context.lastOn = true;
           await this.turnOffOtherBay();
           this.platform.log.debug(`Successfully turned on ${this.accessory.displayName} with intensity ${intensity}`);
         } else {
@@ -99,6 +102,7 @@ export class PuraPlatformAccessory {
         if (success) {
           this.currentState.On = false;
           this.currentState.RotationSpeed = 0;
+          this.accessory.context.lastOn = false;
           this.platform.log.debug(`Successfully turned off ${this.accessory.displayName}`);
           await this.turnOffOtherBay();
         } else {
@@ -128,6 +132,7 @@ export class PuraPlatformAccessory {
         if (success) {
           this.currentState.On = false;
           this.currentState.RotationSpeed = 0;
+          this.accessory.context.lastOn = false;
           this.service.updateCharacteristic(this.platform.Characteristic.On, false);
           await this.turnOffOtherBay();
           return;
@@ -150,6 +155,7 @@ export class PuraPlatformAccessory {
         this.currentState.RotationSpeed = intensity;
         this.currentState.On = true;
         this.accessory.context.lastKnownIntensity = intensity;
+        this.accessory.context.lastOn = true;
         await this.turnOffOtherBay();
         this.service.updateCharacteristic(this.platform.Characteristic.On, true);
         this.platform.log.debug(`Successfully set intensity for ${this.accessory.displayName} to ${intensity}`);
@@ -185,6 +191,7 @@ export class PuraPlatformAccessory {
         service.updateCharacteristic(this.platform.Characteristic.On, false);
         service.updateCharacteristic(this.platform.Characteristic.RotationSpeed, 0);
       }
+      otherAccessory.context.lastOn = false;
       otherAccessory.context.device = {
         ...this.device,
         bay1: otherBay === 1 ? { ...this.device.bay1, active: false, intensity: 0 } : this.device.bay1,
