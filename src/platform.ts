@@ -6,6 +6,13 @@ import { PuraApi } from './puraApi.js';
 import { PuraDevice, PuraConfig } from './puraTypes.js';
 import { fetchLatestCognitoConfig } from './pypuraLookup.js';
 
+type DiffuserAccessory = PlatformAccessory & {
+  context: {
+    device: PuraDevice;
+  };
+  handler?: PuraPlatformAccessory;
+};
+
 /**
  * PuraPlatform
  * This class is the main constructor for the Pura plugin, this is where we
@@ -156,17 +163,17 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     const uniqueId = `${device.id}-diffuser`;
     const uuid = this.api.hap.uuid.generate(uniqueId);
 
-    const existingAccessory = this.accessories.get(uuid);
+    const existingAccessory = this.accessories.get(uuid) as DiffuserAccessory | undefined;
     if (existingAccessory) {
       this.log.info('Restoring existing accessory from cache:', existingAccessory.displayName);
       existingAccessory.context.device = device;
       this.api.updatePlatformAccessories([existingAccessory]);
-      (existingAccessory as any).handler = new PuraPlatformAccessory(this, existingAccessory, this.puraApi);
+      existingAccessory.handler = new PuraPlatformAccessory(this, existingAccessory, this.puraApi);
     } else {
       this.log.info('Adding new accessory:', accessoryName);
-      const accessory = new this.api.platformAccessory(accessoryName, uuid);
+      const accessory = new this.api.platformAccessory(accessoryName, uuid) as DiffuserAccessory;
       accessory.context.device = device;
-      (accessory as any).handler = new PuraPlatformAccessory(this, accessory, this.puraApi);
+      accessory.handler = new PuraPlatformAccessory(this, accessory, this.puraApi);
       this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
     }
 
@@ -263,12 +270,12 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   private async updateDiffuserAccessory(device: PuraDevice) {
     const uniqueId = `${device.id}-diffuser`;
     const uuid = this.api.hap.uuid.generate(uniqueId);
-    const accessory = this.accessories.get(uuid);
+    const accessory = this.accessories.get(uuid) as DiffuserAccessory | undefined;
 
     if (accessory) {
       accessory.context.device = device;
       this.api.updatePlatformAccessories([accessory]);
-      const handler = (accessory as any).handler as PuraPlatformAccessory | undefined;
+      const handler = accessory.handler;
       if (handler) {
         handler.updateDevice(device);
       }
