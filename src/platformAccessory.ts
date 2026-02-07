@@ -80,7 +80,6 @@ export class PuraPlatformAccessory {
 
     try {
       if (isOn) {
-        await this.logDeviceSnapshot('before-on');
         const preferredBay = this.accessory.context.lastBay;
         const normalizedPreferred = preferredBay === 1 || preferredBay === 2 ? preferredBay : undefined;
         const targetBay = normalizedPreferred && (normalizedPreferred === 1 ? this.device.bay1 : this.device.bay2)
@@ -101,12 +100,6 @@ export class PuraPlatformAccessory {
         await this.puraApi.setAwayMode(this.device.id, false);
         const alwaysOn = await this.puraApi.setAlwaysOn(this.device.id, targetBay);
         const controller = this.device.controller || 'default';
-        this.platform.log.info('Pura control context:', {
-          deviceId: this.device.id,
-          bay: targetBay,
-          controller,
-          diffusionMode: this.device.diffusionMode,
-        });
         const success = alwaysOn && await this.puraApi.setIntensity(this.device.id, targetBay, intensity, controller);
         if (success) {
           this.currentState.On = true;
@@ -116,8 +109,6 @@ export class PuraPlatformAccessory {
           if ((this.platform.config as PuraConfig).forceNightlightOff) {
             await this.ensureNightlightOff();
           }
-          await this.logDeviceSnapshot('after-on');
-          await this.logDeviceSnapshot('after-on-post');
         } else {
           this.platform.log.error(`Failed to turn on ${this.accessory.displayName}`);
           throw new Error('Failed to turn on device');
@@ -166,28 +157,5 @@ export class PuraPlatformAccessory {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  private async logDeviceSnapshot(label: string) {
-    try {
-      const devices = await this.puraApi.getDevices();
-      const match = devices.find((device) => device.id === this.device.id);
-      if (!match) {
-        this.platform.log.debug(`Pura device snapshot ${label}: device not found for ${this.device.id}`);
-        return;
-      }
-      this.platform.log.debug(`Pura device snapshot ${label}:`, JSON.stringify({
-        id: match.id,
-        name: match.name,
-        controller: match.controller,
-        diffusionMode: match.diffusionMode,
-        awayMode: match.awayMode,
-        ambientMode: match.ambientMode,
-        nightlight: match.nightlight,
-        bay1: match.bay1,
-        bay2: match.bay2,
-      }, null, 2));
-    } catch (error) {
-      this.platform.log.debug(`Failed to capture Pura device snapshot ${label}:`, error);
-    }
-  }
 
 }

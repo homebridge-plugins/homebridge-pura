@@ -141,16 +141,10 @@ export class PuraApi {
       options.body = JSON.stringify(data);
     }
 
-    this.log.info(`Making ${method} request to ${url}`, data ? { payload: data } : {});
-
     try {
       const response = await fetch(url, options);
       
       const responseText = await response.text();
-      this.log.info(`API response status: ${response.status}`, {
-        url,
-        body: responseText.length > 2000 ? `${responseText.slice(0, 2000)}…` : responseText,
-      });
 
       if (!response.ok) {
         this.log.error(`API request failed: ${response.status} - ${responseText}`);
@@ -159,7 +153,6 @@ export class PuraApi {
 
       try {
         const result = responseText ? JSON.parse(responseText) : {};
-        this.log.info('API response parsed:', result);
         return result;
       } catch (error) {
         this.log.warn('API response was not JSON', { url });
