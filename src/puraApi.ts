@@ -294,7 +294,8 @@ export class PuraApi {
       (parent.deviceDefaults as Record<string, unknown> | undefined)?.[`bay${bayNumber}Intensity`],
     );
     const intensityFromOscillation = this.normalizeOscillationIntensity(parent.oscillation, bayNumber);
-    const inferredActive = activeAtRecent || (Number.isFinite(intensityFromRecord) && intensityFromRecord > 0);
+    const inferredActive = activeAtRecent ||
+      (intensityFromRecord !== null && Number.isFinite(intensityFromRecord) && intensityFromRecord > 0);
     const active = explicitActive ?? inferredActive;
     const normalizedIntensity = intensityFromRecord ??
       (active ? (intensityFromOscillation ?? intensityFromDefaults) : null) ??
