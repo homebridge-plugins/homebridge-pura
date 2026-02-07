@@ -288,12 +288,14 @@ export class PuraApi {
     const activeAtRecent = activeAt !== undefined &&
       activeAt <= nowSeconds &&
       (nowSeconds - activeAt) < 300;
-    const active = record.active ?? record.enabled ?? record.on ?? record.isOn ?? activeAtRecent;
+    const explicitActive = record.active ?? record.enabled ?? record.on ?? record.isOn;
     const intensityFromRecord = this.normalizeBayIntensity(record.intensity ?? record.level ?? record.strength);
     const intensityFromDefaults = this.normalizeBayIntensity(
       (parent.deviceDefaults as Record<string, unknown> | undefined)?.[`bay${bayNumber}Intensity`],
     );
     const intensityFromOscillation = this.normalizeOscillationIntensity(parent.oscillation, bayNumber);
+    const inferredActive = activeAtRecent || (Number.isFinite(intensityFromRecord) && intensityFromRecord > 0);
+    const active = explicitActive ?? inferredActive;
     const normalizedIntensity = intensityFromRecord ??
       (active ? (intensityFromOscillation ?? intensityFromDefaults) : null) ??
       0;

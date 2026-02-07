@@ -252,13 +252,18 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       }
     } catch (error) {
       this.log.debug('Device status refresh failed:', error);
-      // Try to refresh tokens if authentication failed
-      if (error instanceof Error && error.message.includes('authentication')) {
-        try {
-          await this.puraApi.refreshToken();
-          this.log.debug('Token refresh successful');
-        } catch (refreshError) {
-          this.log.error('Token refresh failed:', refreshError);
+      // Try to re-authenticate if authentication failed, then retry once
+      if (this.isAuthError(error)) {
+        const reauthed = await this.ensureAuthenticatedForRefresh();
+        if (reauthed) {
+          try {
+            const devices = await this.puraApi.getDevices();
+            for (const device of devices) {
+              await this.updateDiffuserAccessory(device);
+            }
+          } catch (retryError) {
+            this.log.debug('Device status refresh retry failed:', retryError);
+          }
         }
       }
     }
@@ -280,6 +285,50 @@ export class PuraPlatform implements DynamicPlatformPlugin {
         handler.updateDevice(device);
       }
     }
+  }
+
+  private isAuthError(error: unknown): boolean {
+    if (!(error instanceof Error)) {
+      return false;
+    }
+    const message = error.message.toLowerCase();
+    return message.includes('authentication') ||
+      message.includes('unauthorized') ||
+      message.includes('not authenticated') ||
+      message.includes('401');
+  }
+
+  private async ensureAuthenticatedForRefresh(): Promise<boolean> {
+    try {
+      await this.puraApi.refreshToken();
+      this.log.debug('Token refresh successful');
+      return true;
+    } catch (refreshError) {
+      this.log.warn('Token refresh failed during status refresh:', refreshError);
+    }
+
+    try {
+      await this.puraApi.authenticate(this.puraConfig.username, this.puraConfig.password);
+      this.log.info('Re-authenticated with Pura during status refresh.');
+      this.attemptedCognitoUpdate = false;
+      return true;
+    } catch (authError) {
+      const retried = await this.tryAutoUpdateCognito(authError);
+      if (retried) {
+        try {
+          await this.puraApi.authenticate(this.puraConfig.username, this.puraConfig.password);
+          this.log.info('Re-authenticated after Cognito refresh.');
+          this.attemptedCognitoUpdate = false;
+          return true;
+        } catch (retryAuthError) {
+          this.log.error('Re-authentication failed after Cognito refresh:', retryAuthError);
+        }
+      } else {
+        this.log.error('Re-authentication failed during status refresh:', authError);
+      }
+    }
+
+    return false;
   }
 
   // Nightlight accessory removed
