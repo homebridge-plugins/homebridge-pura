@@ -111,11 +111,15 @@ export class PuraApi {
   /**
    * Get authorization header for API requests
    */
-  private getAuthHeader(): string {
+  private getAuthHeader(preferIdToken = false): string {
     if (!this.session) {
       throw new Error('Not authenticated');
     }
-    return `Bearer ${this.session.getIdToken().getJwtToken()}`;
+    if (preferIdToken) {
+      return `Bearer ${this.session.getIdToken().getJwtToken()}`;
+    }
+    // Pura API expects access token for bearer auth.
+    return `Bearer ${this.session.getAccessToken().getJwtToken()}`;
   }
 
   /**
@@ -127,24 +131,46 @@ export class PuraApi {
     data?: unknown,
   ): Promise<unknown> {
     const url = new URL(endpoint, this.baseUrl).toString();
-    
-    const options: RequestInit = {
-      method: method.toUpperCase(),
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: this.getAuthHeader(),
-      },
-      // timeout: 10000, // Not supported in fetch
+
+    const isGet = method.toLowerCase() === 'get';
+    const buildOptions = (authorization: string): RequestInit => {
+      const options: RequestInit = {
+        method: method.toUpperCase(),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: authorization,
+        },
+      };
+      if (data && !isGet) {
+        options.body = JSON.stringify(data);
+      }
+      return options;
     };
 
-    if (data && method.toLowerCase() !== 'get') {
-      options.body = JSON.stringify(data);
-    }
+    const doRequest = async (authorization: string) => {
+      const response = await fetch(url, buildOptions(authorization));
+      const responseText = await response.text();
+      return { response, responseText };
+    };
 
     try {
-      const response = await fetch(url, options);
-      
-      const responseText = await response.text();
+      // First attempt with access token.
+      let { response, responseText } = await doRequest(this.getAuthHeader());
+
+      // If unauthorized, try refresh then retry once.
+      if (response.status === 401) {
+        try {
+          await this.refreshToken();
+          ({ response, responseText } = await doRequest(this.getAuthHeader()));
+        } catch (refreshError) {
+          this.log.debug('Token refresh failed during request retry:', refreshError);
+        }
+      }
+
+      // If still unauthorized, try ID token as fallback.
+      if (response.status === 401) {
+        ({ response, responseText } = await doRequest(this.getAuthHeader(true)));
+      }
 
       if (!response.ok) {
         this.log.error(`API request failed: ${response.status} - ${responseText}`);

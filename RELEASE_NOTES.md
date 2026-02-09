@@ -1,5 +1,8 @@
 # Release Notes
 
+## 1.1.6 - 2026-02-09
+- Use access token for API auth and retry on 401 with refresh + ID-token fallback.
+
 ## 1.1.5 - 2026-02-07
 - Fix bay active inference null check to satisfy TypeScript and ensure reliable inference.
 
