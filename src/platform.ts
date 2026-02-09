@@ -303,16 +303,14 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     if (this.authInFlight) {
       await this.authInFlight;
     }
-    let release: (() => void) | null = null;
+    let release!: () => void;
     this.authInFlight = new Promise<void>((resolve) => {
       release = resolve;
     });
     try {
       return await task();
     } finally {
-      if (release) {
-        release();
-      }
+      release();
       this.authInFlight = null;
     }
   }
