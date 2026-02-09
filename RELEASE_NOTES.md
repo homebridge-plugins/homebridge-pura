@@ -1,5 +1,8 @@
 # Release Notes
 
+## 1.1.7 - 2026-02-09
+- Serialize authentication refresh/update to avoid "Not authenticated" races during status refresh.
+
 ## 1.1.6 - 2026-02-09
 - Use access token for API auth and retry on 401 with refresh + ID-token fallback.
 

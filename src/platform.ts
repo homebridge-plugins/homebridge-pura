@@ -32,6 +32,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   private cognitoRefreshInterval: NodeJS.Timeout | null = null;
   private attemptedCognitoUpdate = false;
   private latestCognitoVersion: string | null = null;
+  private authInFlight: Promise<void> | null = null;
 
   constructor(
     public readonly log: Logging,
@@ -93,7 +94,9 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     try {
       // Authenticate with Pura
       this.log.info('Authenticating with Pura...');
-      await this.puraApi.authenticate(this.puraConfig.username, this.puraConfig.password);
+      await this.withAuthLock(async () => {
+        await this.puraApi.authenticate(this.puraConfig.username, this.puraConfig.password);
+      });
       this.log.info('Pura authentication successful');
 
       // Get devices
@@ -216,23 +219,25 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     this.log.debug(`Setting up Cognito refresh interval: ${intervalSeconds} seconds`);
     this.cognitoRefreshInterval = setInterval(async () => {
       try {
-        const latest = await fetchLatestCognitoConfig(this.log);
-        if (!latest) {
-          return;
-        }
-        if (this.latestCognitoVersion === latest.version) {
-          return;
-        }
-        this.log.warn(`Detected new pypura version ${latest.version}; refreshing Cognito IDs...`);
-        this.puraApi.updateCognitoConfig(latest.userPoolId, latest.clientId);
-        this.latestCognitoVersion = latest.version;
-        try {
-          await this.puraApi.authenticate(this.puraConfig.username, this.puraConfig.password);
-          this.log.info('Re-authenticated with refreshed Cognito IDs.');
-          this.attemptedCognitoUpdate = false;
-        } catch (authError) {
-          this.log.warn('Re-authentication failed after Cognito refresh:', authError);
-        }
+        await this.withAuthLock(async () => {
+          const latest = await fetchLatestCognitoConfig(this.log);
+          if (!latest) {
+            return;
+          }
+          if (this.latestCognitoVersion === latest.version) {
+            return;
+          }
+          this.log.warn(`Detected new pypura version ${latest.version}; refreshing Cognito IDs...`);
+          this.puraApi.updateCognitoConfig(latest.userPoolId, latest.clientId);
+          this.latestCognitoVersion = latest.version;
+          try {
+            await this.puraApi.authenticate(this.puraConfig.username, this.puraConfig.password);
+            this.log.info('Re-authenticated with refreshed Cognito IDs.');
+            this.attemptedCognitoUpdate = false;
+          } catch (authError) {
+            this.log.warn('Re-authentication failed after Cognito refresh:', authError);
+          }
+        });
       } catch (error) {
         this.log.debug('Cognito refresh check failed:', error);
       }
@@ -243,6 +248,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
    * Refresh status of all devices
    */
   private async refreshDeviceStatus() {
+    await this.waitForAuth();
     try {
       const devices = await this.puraApi.getDevices();
       
@@ -287,6 +293,30 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     }
   }
 
+  private async waitForAuth(): Promise<void> {
+    if (this.authInFlight) {
+      await this.authInFlight;
+    }
+  }
+
+  private async withAuthLock<T>(task: () => Promise<T>): Promise<T> {
+    if (this.authInFlight) {
+      await this.authInFlight;
+    }
+    let release: (() => void) | null = null;
+    this.authInFlight = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    try {
+      return await task();
+    } finally {
+      if (release) {
+        release();
+      }
+      this.authInFlight = null;
+    }
+  }
+
   private isAuthError(error: unknown): boolean {
     if (!(error instanceof Error)) {
       return false;
@@ -299,36 +329,38 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   }
 
   private async ensureAuthenticatedForRefresh(): Promise<boolean> {
-    try {
-      await this.puraApi.refreshToken();
-      this.log.debug('Token refresh successful');
-      return true;
-    } catch (refreshError) {
-      this.log.warn('Token refresh failed during status refresh:', refreshError);
-    }
-
-    try {
-      await this.puraApi.authenticate(this.puraConfig.username, this.puraConfig.password);
-      this.log.info('Re-authenticated with Pura during status refresh.');
-      this.attemptedCognitoUpdate = false;
-      return true;
-    } catch (authError) {
-      const retried = await this.tryAutoUpdateCognito(authError);
-      if (retried) {
-        try {
-          await this.puraApi.authenticate(this.puraConfig.username, this.puraConfig.password);
-          this.log.info('Re-authenticated after Cognito refresh.');
-          this.attemptedCognitoUpdate = false;
-          return true;
-        } catch (retryAuthError) {
-          this.log.error('Re-authentication failed after Cognito refresh:', retryAuthError);
-        }
-      } else {
-        this.log.error('Re-authentication failed during status refresh:', authError);
+    return this.withAuthLock(async () => {
+      try {
+        await this.puraApi.refreshToken();
+        this.log.debug('Token refresh successful');
+        return true;
+      } catch (refreshError) {
+        this.log.warn('Token refresh failed during status refresh:', refreshError);
       }
-    }
 
-    return false;
+      try {
+        await this.puraApi.authenticate(this.puraConfig.username, this.puraConfig.password);
+        this.log.info('Re-authenticated with Pura during status refresh.');
+        this.attemptedCognitoUpdate = false;
+        return true;
+      } catch (authError) {
+        const retried = await this.tryAutoUpdateCognito(authError);
+        if (retried) {
+          try {
+            await this.puraApi.authenticate(this.puraConfig.username, this.puraConfig.password);
+            this.log.info('Re-authenticated after Cognito refresh.');
+            this.attemptedCognitoUpdate = false;
+            return true;
+          } catch (retryAuthError) {
+            this.log.error('Re-authentication failed after Cognito refresh:', retryAuthError);
+          }
+        } else {
+          this.log.error('Re-authentication failed during status refresh:', authError);
+        }
+      }
+
+      return false;
+    });
   }
 
   // Nightlight accessory removed
