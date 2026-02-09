@@ -1,5 +1,8 @@
 # Release Notes
 
+## 1.1.12 - 2026-02-09
+- Treat inferred activity as on even if bay reports active=false when other signals indicate it is running.
+
 ## 1.1.11 - 2026-02-09
 - Treat oscillation state as active when diffusion mode is multi-bay.
 
