@@ -1,5 +1,8 @@
 # Release Notes
 
+## 1.1.11 - 2026-02-09
+- Treat oscillation state as active when diffusion mode is multi-bay.
+
 ## 1.1.10 - 2026-02-09
 - Treat bay `activeAt` timestamps within 5 minutes (past or future) as active to handle clock skew.
 

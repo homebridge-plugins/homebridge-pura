@@ -319,9 +319,12 @@ export class PuraApi {
     const intensityFromDefaults = this.normalizeBayIntensity(
       (parent.deviceDefaults as Record<string, unknown> | undefined)?.[`bay${bayNumber}Intensity`],
     );
+    const oscillationActive = this.normalizeOscillationActive(parent.oscillation, bayNumber);
     const intensityFromOscillation = this.normalizeOscillationIntensity(parent.oscillation, bayNumber);
     const inferredActive = activeAtRecent ||
-      (intensityFromRecord !== null && Number.isFinite(intensityFromRecord) && intensityFromRecord > 0);
+      oscillationActive ||
+      (intensityFromRecord !== null && Number.isFinite(intensityFromRecord) && intensityFromRecord > 0) ||
+      (intensityFromOscillation !== null && Number.isFinite(intensityFromOscillation) && intensityFromOscillation > 0);
     const active = explicitActive ?? inferredActive;
     const normalizedIntensity = intensityFromRecord ??
       (active ? (intensityFromOscillation ?? intensityFromDefaults) : null) ??
@@ -386,6 +389,26 @@ export class PuraApi {
       return this.normalizeBayIntensity(state.intensity);
     }
     return null;
+  }
+
+  private normalizeOscillationActive(value: unknown, bayNumber: number): boolean {
+    if (!value || typeof value !== 'object') {
+      return false;
+    }
+    const record = value as Record<string, unknown>;
+    const states = Array.isArray(record.states) ? record.states : [];
+    const match = states.find((state) => {
+      if (!state || typeof state !== 'object') {
+        return false;
+      }
+      const stateRecord = state as Record<string, unknown>;
+      return stateRecord.bay === bayNumber;
+    });
+    if (match) {
+      return true;
+    }
+    const state = record.state as Record<string, unknown> | undefined;
+    return state?.currentIndex === bayNumber;
   }
 
   /**
