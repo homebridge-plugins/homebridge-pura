@@ -1,5 +1,8 @@
 # Release Notes
 
+## 1.1.9 - 2026-02-09
+- Add debug logging for bay status to diagnose startup state mismatches.
+
 ## 1.1.8 - 2026-02-09
 - Trigger immediate and delayed status refresh on startup to avoid stale "off" states.
 

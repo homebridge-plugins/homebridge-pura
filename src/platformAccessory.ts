@@ -138,7 +138,34 @@ export class PuraPlatformAccessory {
   updateDevice(device: PuraDevice) {
     this.device = device;
     this.accessory.context.device = device;
+    this.platform.log.debug('Device snapshot:', this.summarizeDevice(device));
     this.updateCurrentState();
+  }
+
+  private summarizeDevice(device: PuraDevice) {
+    const baySummary = (bay?: PuraBay) => {
+      if (!bay) {
+        return null;
+      }
+      return {
+        id: bay.id,
+        active: bay.active,
+        intensity: bay.intensity,
+        activeAt: bay.activeAt,
+        timerActive: bay.timer?.active,
+        fragrance: bay.fragrance?.name,
+      };
+    };
+    return {
+      id: device.id,
+      name: device.name,
+      online: device.online,
+      awayMode: device.awayMode,
+      ambientMode: device.ambientMode,
+      diffusionMode: device.diffusionMode,
+      bay1: baySummary(device.bay1),
+      bay2: baySummary(device.bay2),
+    };
   }
 
   private async ensureNightlightOff() {

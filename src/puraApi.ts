@@ -290,6 +290,7 @@ export class PuraApi {
       awayMode: record.awayMode as boolean | undefined,
       ambientMode: record.ambientMode as boolean | undefined,
       online: (record.connected || record.online) as boolean | undefined,
+      __raw: record,
     };
   }
 

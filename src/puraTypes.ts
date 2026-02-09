@@ -25,6 +25,7 @@ export interface PuraDevice {
   awayMode?: boolean;
   ambientMode?: boolean;
   online?: boolean;
+  __raw?: Record<string, unknown>;
 }
 
 export interface PuraDeviceState {
