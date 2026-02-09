@@ -1,5 +1,8 @@
 # Release Notes
 
+## 1.1.15 - 2026-02-09
+- Use a 60-minute `activeAt` window for standard diffusion mode only when online.
+
 ## 1.1.14 - 2026-02-09
 - Map diffuser models from `hwVersion` major value (Pura 3/4/Plus/Mini/etc.), with fallbacks.
 

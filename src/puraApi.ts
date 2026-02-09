@@ -351,8 +351,11 @@ export class PuraApi {
     const activeAtRaw = Number(record.activeAt);
     const activeAt = Number.isFinite(activeAtRaw) && activeAtRaw > 0 ? activeAtRaw : undefined;
     const nowSeconds = Math.floor(Date.now() / 1000);
+    const standardMode = parent.diffusionMode === 'standard';
+    const online = Boolean(parent.connected || parent.online);
+    const activeAtWindowSeconds = standardMode && online ? 60 * 60 : 300;
     const activeAtRecent = activeAt !== undefined &&
-      Math.abs(nowSeconds - activeAt) < 300;
+      Math.abs(nowSeconds - activeAt) < activeAtWindowSeconds;
     const explicitActive = record.active ?? record.enabled ?? record.on ?? record.isOn;
     const intensityFromRecord = this.normalizeBayIntensity(record.intensity ?? record.level ?? record.strength);
     const intensityFromDefaults = this.normalizeBayIntensity(
