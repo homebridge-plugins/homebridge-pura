@@ -115,6 +115,8 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       // Set up refresh interval
       this.setupRefreshInterval();
       this.setupCognitoRefreshInterval();
+      // Force an immediate refresh after startup, then a short delayed retry
+      this.scheduleInitialRefreshes();
 
     } catch (error) {
       const retried = await this.tryAutoUpdateCognito(error);
@@ -211,6 +213,19 @@ export class PuraPlatform implements DynamicPlatformPlugin {
         this.log.error('Failed to refresh device status:', error);
       }
     }, interval);
+  }
+
+  private scheduleInitialRefreshes() {
+    const doRefresh = async (label: string) => {
+      try {
+        this.log.debug(`Initial device status refresh (${label})...`);
+        await this.refreshDeviceStatus();
+      } catch (error) {
+        this.log.debug(`Initial device status refresh (${label}) failed:`, error);
+      }
+    };
+    void doRefresh('immediate');
+    setTimeout(() => void doRefresh('delayed'), 15000);
   }
 
   private setupCognitoRefreshInterval() {

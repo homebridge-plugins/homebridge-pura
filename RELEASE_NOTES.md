@@ -1,5 +1,8 @@
 # Release Notes
 
+## 1.1.8 - 2026-02-09
+- Trigger immediate and delayed status refresh on startup to avoid stale "off" states.
+
 ## 1.1.7 - 2026-02-09
 - Serialize authentication refresh/update to avoid "Not authenticated" races during status refresh.
 
