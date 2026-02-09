@@ -1,5 +1,8 @@
 # Release Notes
 
+## 1.1.14 - 2026-02-09
+- Map diffuser models from `hwVersion` major value (Pura 3/4/Plus/Mini/etc.), with fallbacks.
+
 ## 1.1.13 - 2026-02-09
 - Add debug logging of model-related fields from the raw API payload.
 

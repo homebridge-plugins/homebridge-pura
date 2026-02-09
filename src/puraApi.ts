@@ -249,6 +249,7 @@ export class PuraApi {
 
     const firmwareVersion = (record.fwVersion || record.firmwareVersion) as string | undefined;
     const deviceVersion = (record.deviceVer || record.version) as string | undefined;
+    const hwVersion = record.hwVersion as string | undefined;
     const type = (record.type || record.model || 'Pura Diffuser') as string;
 
     const defaultNightlight = (record.deviceDefaults as Record<string, unknown> | undefined)?.nightlight;
@@ -274,7 +275,7 @@ export class PuraApi {
     return {
       id,
       name: name ?? `Pura ${id}`,
-      type: this.normalizeModel(type),
+      type: this.normalizeModel(this.resolveModelLabel(type, deviceVersion, hwVersion)),
       version: deviceVersion ?? '',
       controller: typeof record.controller === 'string' ? record.controller : undefined,
       diffusionMode: typeof record.diffusionMode === 'string' ? record.diffusionMode : undefined,
@@ -295,13 +296,51 @@ export class PuraApi {
   }
 
   private normalizeModel(value: unknown): string {
-    if (typeof value === 'string' && value.trim().length > 1) {
-      return value.trim();
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (trimmed.length > 1) {
+        return trimmed;
+      }
+      const asNumber = Number(trimmed);
+      if (Number.isFinite(asNumber)) {
+        return `Pura ${asNumber}`;
+      }
     }
     if (typeof value === 'number') {
-      return `Model ${value}`;
+      return `Pura ${value}`;
     }
-    return 'Pura Diffuser';
+    return 'Pura';
+  }
+
+  private resolveModelLabel(modelValue: unknown, deviceVersion?: string, hwVersion?: string): unknown {
+    if (typeof hwVersion === 'string') {
+      const major = Number(hwVersion.split('.')[0]);
+      if (Number.isFinite(major)) {
+        const map: Record<number, string> = {
+          1: 'Pura Car',
+          2: 'Pura 3',
+          3: 'Pura 3',
+          4: 'Pura 4',
+          22: 'Pura Plus',
+          26: 'Pura Mini',
+          27: 'Pura Car Pro',
+        };
+        return map[major] ?? `Pura ${major}`;
+      }
+    }
+    if (typeof deviceVersion === 'string') {
+      const normalized = deviceVersion.trim().toLowerCase();
+      const map: Record<string, string> = {
+        v48: 'Pura 4',
+      };
+      if (map[normalized]) {
+        return map[normalized];
+      }
+    }
+    if (modelValue === null || modelValue === undefined) {
+      return 'Pura';
+    }
+    return modelValue;
   }
 
   private normalizeBay(parent: Record<string, unknown>, value: unknown, bayNumber: number): PuraBay | undefined {

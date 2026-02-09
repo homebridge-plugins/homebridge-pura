@@ -150,6 +150,7 @@ export class PuraPlatformAccessory {
       model: rawRecord.model,
       deviceVer: rawRecord.deviceVer,
       version: rawRecord.version,
+      hwVersion: rawRecord.hwVersion,
       deviceName: rawRecord.deviceName,
       displayName: rawRecord.displayName,
       firmwareVersion: rawRecord.fwVersion ?? rawRecord.firmwareVersion,
