@@ -1,5 +1,8 @@
 # Release Notes
 
+## 1.1.13 - 2026-02-09
+- Add debug logging of model-related fields from the raw API payload.
+
 ## 1.1.12 - 2026-02-09
 - Treat inferred activity as on even if bay reports active=false when other signals indicate it is running.
 

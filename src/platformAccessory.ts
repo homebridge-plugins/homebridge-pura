@@ -143,6 +143,17 @@ export class PuraPlatformAccessory {
   }
 
   private summarizeDevice(device: PuraDevice) {
+    const raw = device.__raw ?? {};
+    const rawRecord = raw as Record<string, unknown>;
+    const modelFields = {
+      type: rawRecord.type,
+      model: rawRecord.model,
+      deviceVer: rawRecord.deviceVer,
+      version: rawRecord.version,
+      deviceName: rawRecord.deviceName,
+      displayName: rawRecord.displayName,
+      firmwareVersion: rawRecord.fwVersion ?? rawRecord.firmwareVersion,
+    };
     const baySummary = (bay?: PuraBay) => {
       if (!bay) {
         return null;
@@ -163,6 +174,7 @@ export class PuraPlatformAccessory {
       awayMode: device.awayMode,
       ambientMode: device.ambientMode,
       diffusionMode: device.diffusionMode,
+      modelFields,
       bay1: baySummary(device.bay1),
       bay2: baySummary(device.bay2),
     };
