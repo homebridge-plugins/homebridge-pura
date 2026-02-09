@@ -1,5 +1,8 @@
 # Release Notes
 
+## 1.1.10 - 2026-02-09
+- Treat bay `activeAt` timestamps within 5 minutes (past or future) as active to handle clock skew.
+
 ## 1.1.9 - 2026-02-09
 - Add debug logging for bay status to diagnose startup state mismatches.
 
