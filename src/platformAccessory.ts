@@ -6,7 +6,7 @@ import { PuraConfig, PuraDevice, PuraBay } from './puraTypes.js';
 
 /**
  * Pura Platform Accessory
- * One Switch service per diffuser (On/Off).
+ * One Fan (Fanv2) service per diffuser (On/Off).
  */
 export class PuraPlatformAccessory {
   private service: Service;
@@ -31,8 +31,8 @@ export class PuraPlatformAccessory {
       .setCharacteristic(this.platform.Characteristic.SerialNumber, this.device.id)
       .setCharacteristic(this.platform.Characteristic.FirmwareRevision, this.device.state?.firmwareVersion || '1.0.0');
 
-    this.service = this.accessory.getService(this.platform.Service.Switch) ||
-      this.accessory.addService(this.platform.Service.Switch);
+    this.service = this.accessory.getService(this.platform.Service.Fanv2) ||
+      this.accessory.addService(this.platform.Service.Fanv2);
 
     this.service.setCharacteristic(this.platform.Characteristic.Name, accessory.displayName);
 

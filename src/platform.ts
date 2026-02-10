@@ -351,6 +351,14 @@ export class PuraPlatform implements DynamicPlatformPlugin {
 
     socket.on('error', (error: Error) => {
       this.log.debug('Realtime socket error:', error);
+      if (this.realtimeConnected) {
+        this.realtimeConnected = false;
+        this.updatePollingForRealtime();
+      }
+      if (socket.readyState !== WebSocket.CLOSED && socket.readyState !== WebSocket.CLOSING) {
+        socket.terminate();
+      }
+      this.scheduleRealtimeReconnect();
     });
 
     socket.on('close', (code: number, reason: Buffer) => {
