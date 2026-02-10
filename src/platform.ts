@@ -1,5 +1,5 @@
 import type { API, Characteristic, DynamicPlatformPlugin, Logging, PlatformAccessory, PlatformConfig, Service } from 'homebridge';
-
+import WebSocket from 'ws';
 
 import { PuraPlatformAccessory } from './platformAccessory.js';
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
@@ -316,10 +316,6 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     if (this.realtimeSocket || this.realtimeReconnectTimer) {
       return;
     }
-    if (typeof WebSocket === 'undefined') {
-      this.log.warn('WebSocket is not available in this Node runtime; falling back to polling only.');
-      return;
-    }
     this.connectRealtimeSubscriber();
   }
 
@@ -332,39 +328,35 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     }
 
     this.log.info('Connecting to Pura realtime updates...');
-    const WebSocketCtor = WebSocket as unknown as new (
-      url: string,
-      protocols?: string[] | string,
-      options?: { headers?: Record<string, string> },
-    ) => WebSocket;
-    const socket = new WebSocketCtor('wss://socket.trypura.io', undefined, {
+    const socket = new WebSocket('wss://socket.trypura.io', {
       headers: {
         Authorization: `Bearer ${token}`,
       },
     });
     this.realtimeSocket = socket;
 
-    socket.onopen = () => {
+    socket.on('open', () => {
       this.realtimeFailures = 0;
       this.log.info('Connected to Pura realtime updates.');
-    };
+    });
 
-    socket.onmessage = (event) => {
-      const payload = this.parseRealtimePayload(event.data);
+    socket.on('message', (data: WebSocket.RawData) => {
+      const payload = this.parseRealtimePayload(data);
       if (payload !== undefined) {
         void this.handleWebhookPayload(payload);
       }
-    };
+    });
 
-    socket.onerror = (error) => {
+    socket.on('error', (error: Error) => {
       this.log.debug('Realtime socket error:', error);
-    };
+    });
 
-    socket.onclose = () => {
+    socket.on('close', (code: number, reason: Buffer) => {
       this.realtimeSocket = null;
-      this.log.warn('Realtime updates disconnected; will retry.');
+      const detail = reason ? ` (${reason.toString()})` : '';
+      this.log.warn(`Realtime updates disconnected (code ${code})${detail}; will retry.`);
       this.scheduleRealtimeReconnect();
-    };
+    });
   }
 
   private stopRealtimeSubscriber() {
@@ -394,7 +386,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     }, delaySeconds * 1000);
   }
 
-  private parseRealtimePayload(data: unknown): unknown | undefined {
+  private parseRealtimePayload(data: WebSocket.RawData): unknown | undefined {
     if (typeof data === 'string') {
       try {
         return JSON.parse(data);
@@ -403,16 +395,15 @@ export class PuraPlatform implements DynamicPlatformPlugin {
         return undefined;
       }
     }
-    if (data instanceof ArrayBuffer) {
+    if (Buffer.isBuffer(data)) {
       try {
-        const text = new TextDecoder().decode(new Uint8Array(data));
-        return JSON.parse(text);
+        return JSON.parse(data.toString('utf-8'));
       } catch (error) {
         this.log.debug('Realtime payload was not valid JSON:', error);
         return undefined;
       }
     }
-    return data;
+    return data as unknown;
   }
 
   private async handleWebhookPayload(payload: unknown) {
