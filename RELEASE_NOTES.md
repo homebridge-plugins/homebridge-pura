@@ -1,8 +1,8 @@
 # Release Notes
 
-## 1.1.20 - 2026-02-10
+## 1.1.21 - 2026-02-10
+- Slow polling to 5 minutes when realtime is connected; speed up to 15 seconds when it is down.
 - Fix realtime websocket connection by sending auth headers via ws client.
-- Keep a fixed 30s polling refresh as a fallback for reliability.
 - Simplify configuration by removing refresh interval tuning.
 
 ## 1.1.17 - 2026-02-09

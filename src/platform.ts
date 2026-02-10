@@ -32,6 +32,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   private refreshTimer: NodeJS.Timeout | null = null;
   private refreshBaseIntervalSeconds = 30;
   private refreshFailures = 0;
+  private realtimeConnected = false;
   private cognitoRefreshInterval: NodeJS.Timeout | null = null;
   private attemptedCognitoUpdate = false;
   private latestCognitoVersion: string | null = null;
@@ -215,8 +216,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
    * Set up periodic refresh of device status
    */
   private setupRefreshInterval() {
-    const configuredSeconds = 30;
-    this.refreshBaseIntervalSeconds = configuredSeconds;
+    this.refreshBaseIntervalSeconds = 15;
     this.refreshFailures = 0;
     this.log.debug(`Setting up refresh interval: ${this.refreshBaseIntervalSeconds} seconds (base)`);
 
@@ -337,6 +337,8 @@ export class PuraPlatform implements DynamicPlatformPlugin {
 
     socket.on('open', () => {
       this.realtimeFailures = 0;
+      this.realtimeConnected = true;
+      this.updatePollingForRealtime();
       this.log.info('Connected to Pura realtime updates.');
     });
 
@@ -353,6 +355,8 @@ export class PuraPlatform implements DynamicPlatformPlugin {
 
     socket.on('close', (code: number, reason: Buffer) => {
       this.realtimeSocket = null;
+      this.realtimeConnected = false;
+      this.updatePollingForRealtime();
       const detail = reason ? ` (${reason.toString()})` : '';
       this.log.warn(`Realtime updates disconnected (code ${code})${detail}; will retry.`);
       this.scheduleRealtimeReconnect();
@@ -371,6 +375,10 @@ export class PuraPlatform implements DynamicPlatformPlugin {
         this.log.debug('Failed to close realtime socket:', error);
       }
       this.realtimeSocket = null;
+    }
+    if (this.realtimeConnected) {
+      this.realtimeConnected = false;
+      this.updatePollingForRealtime();
     }
   }
 
@@ -425,7 +433,8 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     }
 
     if (!payload || typeof payload !== 'object') {
-      this.log.debug('Ignoring webhook payload with unexpected shape');
+      this.log.debug('Realtime payload had unexpected shape; forcing refresh.');
+      this.triggerWebhookRefresh();
       return;
     }
 
@@ -492,8 +501,20 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     }
     this.webhookRefreshTimer = setTimeout(() => {
       this.webhookRefreshTimer = null;
-      void this.refreshDeviceStatus();
-    }, 1000);
+      void this.runRefreshCycle();
+    }, 0);
+  }
+
+  private updatePollingForRealtime() {
+    const nextBase = this.realtimeConnected ? 300 : 15;
+    if (this.refreshBaseIntervalSeconds === nextBase) {
+      return;
+    }
+    this.refreshBaseIntervalSeconds = nextBase;
+    this.refreshFailures = 0;
+    const label = this.realtimeConnected ? 'realtime connected' : 'realtime disconnected';
+    this.log.info(`Adjusting polling interval to ${nextBase}s (${label}).`);
+    this.scheduleNextRefresh(0);
   }
 
   private deepMerge(

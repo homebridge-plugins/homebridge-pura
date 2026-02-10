@@ -42,7 +42,7 @@ Add the following platform to your `config.json`:
 
 - **Multiple Device Support**: Automatically discovers all Pura devices on your account
 - **Simple On/Off Control**: One switch per diffuser for HomeKit automations
-- **Real-Time Status**: Uses realtime updates with a 30-second polling fallback
+- **Real-Time Status**: Uses realtime updates with a 5-minute polling fallback (15s when realtime is down)
 
 ## Usage
 
@@ -57,7 +57,7 @@ Once configured, your Pura diffusers will appear in the Home app as a single swi
 The plugin will automatically:
 - Discover all Pura devices on your account
 - Create one switch per diffuser
-- Update device status via realtime updates with a 30-second polling fallback
+- Update device status via realtime updates with a 5-minute polling fallback (15s when realtime is down)
 - Handle authentication and token refresh (including periodic Cognito refresh polling)
 
 ## Recommended Usage
