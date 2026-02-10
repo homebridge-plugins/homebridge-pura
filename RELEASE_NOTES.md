@@ -1,10 +1,9 @@
 # Release Notes
 
-## 1.2.3 - 2026-02-10
+## 1.2.4 - 2026-02-10
+- Hide per-device snapshot logs unless debug logging is enabled.
 - Further reduce startup refresh chatter when realtime connects quickly.
 - Reduce duplicate refreshes by debouncing realtime-triggered refreshes.
-- Avoid redundant startup refreshes when realtime is connected.
-- Remove legacy Switch service to avoid duplicate accessories.
 
 ## 1.1.17 - 2026-02-09
 - Enforce `forceNightlightOff` on status refresh when the diffuser is turned on from the Pura app.

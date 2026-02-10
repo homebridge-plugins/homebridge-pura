@@ -35,6 +35,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   private refreshInFlight: Promise<void> | null = null;
   private refreshQueued = false;
   private lastRefreshAt = 0;
+  private debugEnabled = process.argv.includes('-D') || process.argv.includes('--debug');
   private realtimeConnected = false;
   private cognitoRefreshInterval: NodeJS.Timeout | null = null;
   private attemptedCognitoUpdate = false;
@@ -91,6 +92,10 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       }
       this.stopRealtimeSubscriber();
     });
+  }
+
+  isDebugEnabled(): boolean {
+    return this.debugEnabled;
   }
 
   /**

@@ -146,7 +146,9 @@ export class PuraPlatformAccessory {
   updateDevice(device: PuraDevice) {
     this.device = device;
     this.accessory.context.device = device;
-    this.platform.log.debug('Device snapshot:', this.summarizeDevice(device));
+    if (this.platform.isDebugEnabled()) {
+      this.platform.log.debug('Device snapshot:', this.summarizeDevice(device));
+    }
     this.updateCurrentState();
     void this.maybeForceNightlightOff();
   }
