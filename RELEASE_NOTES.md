@@ -1,9 +1,9 @@
 # Release Notes
 
-## 1.1.21 - 2026-02-10
+## 1.1.22 - 2026-02-10
+- Refresh device status shortly after realtime events to keep HomeKit in sync.
 - Slow polling to 5 minutes when realtime is connected; speed up to 15 seconds when it is down.
 - Fix realtime websocket connection by sending auth headers via ws client.
-- Simplify configuration by removing refresh interval tuning.
 
 ## 1.1.17 - 2026-02-09
 - Enforce `forceNightlightOff` on status refresh when the diffuser is turned on from the Pura app.

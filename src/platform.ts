@@ -456,6 +456,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     if (deviceId && deviceRecord && recordType === 'DEVICE' && eventType === 'MODIFY') {
       const updated = this.applyDeviceRecord(deviceId, deviceRecord);
       if (updated) {
+        this.triggerWebhookRefreshWithDelay(2000);
         return;
       }
     }
@@ -496,13 +497,17 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   }
 
   private triggerWebhookRefresh() {
+    this.triggerWebhookRefreshWithDelay(2000);
+  }
+
+  private triggerWebhookRefreshWithDelay(delayMs: number) {
     if (this.webhookRefreshTimer) {
       return;
     }
     this.webhookRefreshTimer = setTimeout(() => {
       this.webhookRefreshTimer = null;
       void this.runRefreshCycle();
-    }, 0);
+    }, Math.max(0, delayMs));
   }
 
   private updatePollingForRealtime() {
