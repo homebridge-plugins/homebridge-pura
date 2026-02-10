@@ -43,13 +43,6 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   private authInFlight: Promise<void> | null = null;
   private webhookRefreshTimer: NodeJS.Timeout | null = null;
   private webhookRefreshDueAt: number | null = null;
-  private realtimeLogThrottleMs = 5000;
-  private lastRealtimeLogAt: Map<string, number> = new Map();
-  private realtimeLogTimers: Map<string, NodeJS.Timeout> = new Map();
-  private lastRealtimeState: Map<string, boolean | null> = new Map();
-  private lastRealtimeReceiptAt: Map<string, number> = new Map();
-  private intentWindowMs = 7000;
-  private lastIntentAt: Map<string, { state: boolean; at: number }> = new Map();
   private webhookReceived = false;
   private realtimeSocket: WebSocket | null = null;
   private realtimeReconnectTimer: NodeJS.Timeout | null = null;
@@ -498,17 +491,11 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     if (deviceId && deviceRecord && recordType === 'DEVICE' && eventType === 'MODIFY') {
       const updated = this.applyDeviceRecord(deviceId, deviceRecord);
       if (updated) {
-        const accessory = this.findAccessoryByDeviceId(deviceId);
-        const name = accessory?.displayName ?? deviceId;
-        this.scheduleRealtimeLog(deviceId, name, accessory);
         this.triggerWebhookRefreshWithDelay(2000);
         return;
       }
     }
 
-    if (deviceId) {
-      this.logRealtimeReceipt(deviceId);
-    }
     this.triggerWebhookRefresh();
   }
 
@@ -542,82 +529,6 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       }
     }
     return undefined;
-  }
-
-  private getAccessoryActiveState(accessory?: DiffuserAccessory): boolean | null {
-    if (!accessory) {
-      return null;
-    }
-    const handler = accessory.handler;
-    if (!handler) {
-      return null;
-    }
-    const device = accessory.context?.device;
-    if (!device) {
-      return null;
-    }
-    const bay1 = device.bay1;
-    const bay2 = device.bay2;
-    if (bay1?.active && !bay2?.active) {
-      return true;
-    }
-    if (bay2?.active && !bay1?.active) {
-      return true;
-    }
-    if (bay1?.active || bay2?.active) {
-      return true;
-    }
-    return false;
-  }
-
-  private scheduleRealtimeLog(deviceId: string, name: string, accessory?: DiffuserAccessory) {
-    const existing = this.realtimeLogTimers.get(deviceId);
-    if (existing) {
-      clearTimeout(existing);
-    }
-
-    const timer = setTimeout(() => {
-      this.realtimeLogTimers.delete(deviceId);
-      const now = Date.now();
-      const last = this.lastRealtimeLogAt.get(deviceId) ?? 0;
-      if (now - last < this.realtimeLogThrottleMs) {
-        return;
-      }
-      const state = this.getAccessoryActiveState(accessory);
-      const intent = this.lastIntentAt.get(deviceId);
-      if (intent && now - intent.at <= this.intentWindowMs && state !== null && state !== intent.state) {
-        return;
-      }
-      const prevState = this.lastRealtimeState.get(deviceId);
-      if (state !== null && state === prevState) {
-        return;
-      }
-      this.lastRealtimeLogAt.set(deviceId, now);
-      this.lastRealtimeState.set(deviceId, state);
-      if (state === null) {
-        this.log.info(`Realtime update applied for ${name}.`);
-      } else {
-        const verb = state ? 'turned on' : 'turned off';
-        this.log.info(`${name} ${verb}.`);
-      }
-    }, 2000);
-    this.realtimeLogTimers.set(deviceId, timer);
-  }
-
-  private logRealtimeReceipt(deviceId: string) {
-    const now = Date.now();
-    const last = this.lastRealtimeReceiptAt.get(deviceId) ?? 0;
-    if (now - last < this.realtimeLogThrottleMs) {
-      return;
-    }
-    this.lastRealtimeReceiptAt.set(deviceId, now);
-    const accessory = this.findAccessoryByDeviceId(deviceId);
-    const name = accessory?.displayName ?? deviceId;
-    this.log.info(`Realtime update received for ${name}.`);
-  }
-
-  recordIntent(deviceId: string, state: boolean) {
-    this.lastIntentAt.set(deviceId, { state, at: Date.now() });
   }
 
   private triggerWebhookRefresh() {

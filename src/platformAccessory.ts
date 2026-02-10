@@ -85,7 +85,6 @@ export class PuraPlatformAccessory {
   async setOn(value: CharacteristicValue) {
     const isOn = value === this.platform.Characteristic.Active.ACTIVE;
     this.platform.log.debug(`Set Characteristic Active for ${this.accessory.displayName} ->`, value);
-    this.platform.recordIntent(this.device.id, isOn);
 
     try {
       if (isOn) {
