@@ -1,7 +1,7 @@
 # Release Notes
 
-## 1.1.19 - 2026-02-10
-- Add realtime websocket updates for faster device status changes.
+## 1.1.20 - 2026-02-10
+- Fix realtime websocket connection by sending auth headers via ws client.
 - Keep a fixed 30s polling refresh as a fallback for reliability.
 - Simplify configuration by removing refresh interval tuning.
 
