@@ -45,6 +45,8 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   private webhookRefreshDueAt: number | null = null;
   private realtimeLogThrottleMs = 5000;
   private lastRealtimeLogAt: Map<string, number> = new Map();
+  private realtimeLogTimers: Map<string, NodeJS.Timeout> = new Map();
+  private lastRealtimeState: Map<string, boolean | null> = new Map();
   private webhookReceived = false;
   private realtimeSocket: WebSocket | null = null;
   private realtimeReconnectTimer: NodeJS.Timeout | null = null;
@@ -495,18 +497,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       if (updated) {
         const accessory = this.findAccessoryByDeviceId(deviceId);
         const name = accessory?.displayName ?? deviceId;
-        const now = Date.now();
-        const last = this.lastRealtimeLogAt.get(deviceId) ?? 0;
-        if (now - last >= this.realtimeLogThrottleMs) {
-          this.lastRealtimeLogAt.set(deviceId, now);
-          const state = this.getAccessoryActiveState(accessory);
-          if (state === null) {
-            this.log.info(`Realtime update applied for ${name}.`);
-          } else {
-            const verb = state ? 'turned on' : 'turned off';
-            this.log.info(`${name} ${verb}.`);
-          }
-        }
+        this.scheduleRealtimeLog(deviceId, name, accessory);
         this.triggerWebhookRefreshWithDelay(2000);
         return;
       }
@@ -571,6 +562,36 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       return true;
     }
     return false;
+  }
+
+  private scheduleRealtimeLog(deviceId: string, name: string, accessory?: DiffuserAccessory) {
+    const existing = this.realtimeLogTimers.get(deviceId);
+    if (existing) {
+      clearTimeout(existing);
+    }
+
+    const timer = setTimeout(() => {
+      this.realtimeLogTimers.delete(deviceId);
+      const now = Date.now();
+      const last = this.lastRealtimeLogAt.get(deviceId) ?? 0;
+      if (now - last < this.realtimeLogThrottleMs) {
+        return;
+      }
+      const state = this.getAccessoryActiveState(accessory);
+      const prevState = this.lastRealtimeState.get(deviceId);
+      if (state !== null && state === prevState) {
+        return;
+      }
+      this.lastRealtimeLogAt.set(deviceId, now);
+      this.lastRealtimeState.set(deviceId, state);
+      if (state === null) {
+        this.log.info(`Realtime update applied for ${name}.`);
+      } else {
+        const verb = state ? 'turned on' : 'turned off';
+        this.log.info(`${name} ${verb}.`);
+      }
+    }, 2000);
+    this.realtimeLogTimers.set(deviceId, timer);
   }
 
   private triggerWebhookRefresh() {
