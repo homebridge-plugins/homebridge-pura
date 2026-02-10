@@ -6,15 +6,14 @@ import { PuraConfig, PuraDevice, PuraBay } from './puraTypes.js';
 
 /**
  * Pura Platform Accessory
- * One Fan (Fanv2) service per diffuser (On/Off).
+ * One Switch service per diffuser (On/Off) by default.
  */
 export class PuraPlatformAccessory {
   private service: Service;
   private device: PuraDevice;
+  private useFanService: boolean;
 
-  private currentState = {
-    Active: 0,
-  };
+  private currentStateActive = false;
   private lastNightlightOffAt = 0;
 
   constructor(
@@ -31,17 +30,27 @@ export class PuraPlatformAccessory {
       .setCharacteristic(this.platform.Characteristic.SerialNumber, this.device.id)
       .setCharacteristic(this.platform.Characteristic.FirmwareRevision, this.device.state?.firmwareVersion || '1.0.0');
 
-    const legacySwitch = this.accessory.getService(this.platform.Service.Switch);
-    if (legacySwitch) {
-      this.accessory.removeService(legacySwitch);
+    this.useFanService = Boolean((this.platform.config as PuraConfig).useFanService);
+    const fanService = this.accessory.getService(this.platform.Service.Fanv2);
+    const switchService = this.accessory.getService(this.platform.Service.Switch);
+    if (this.useFanService) {
+      if (switchService) {
+        this.accessory.removeService(switchService);
+      }
+      this.service = fanService || this.accessory.addService(this.platform.Service.Fanv2);
+    } else {
+      if (fanService) {
+        this.accessory.removeService(fanService);
+      }
+      this.service = switchService || this.accessory.addService(this.platform.Service.Switch);
     }
-
-    this.service = this.accessory.getService(this.platform.Service.Fanv2) ||
-      this.accessory.addService(this.platform.Service.Fanv2);
 
     this.service.setCharacteristic(this.platform.Characteristic.Name, accessory.displayName);
 
-    this.service.getCharacteristic(this.platform.Characteristic.Active)
+    const activeCharacteristic = this.useFanService
+      ? this.platform.Characteristic.Active
+      : this.platform.Characteristic.On;
+    this.service.getCharacteristic(activeCharacteristic)
       .onSet(this.setOn.bind(this))
       .onGet(this.getOn.bind(this));
 
@@ -50,16 +59,14 @@ export class PuraPlatformAccessory {
 
   private updateCurrentState() {
     const activeBay = this.getActiveBay();
-    this.currentState.Active = activeBay?.active
-      ? this.platform.Characteristic.Active.ACTIVE
-      : this.platform.Characteristic.Active.INACTIVE;
+    this.currentStateActive = Boolean(activeBay?.active);
     if (activeBay) {
       this.accessory.context.lastBay = activeBay === this.device.bay1 ? 1 : 2;
       if (Number.isFinite(activeBay.intensity) && activeBay.intensity > 0) {
         this.accessory.context.lastIntensity = activeBay.intensity;
       }
     }
-    this.service.updateCharacteristic(this.platform.Characteristic.Active, this.currentState.Active);
+    this.applyCurrentState();
   }
 
   private getActiveBay(): PuraBay | undefined {
@@ -83,7 +90,9 @@ export class PuraPlatformAccessory {
   }
 
   async setOn(value: CharacteristicValue) {
-    const isOn = value === this.platform.Characteristic.Active.ACTIVE;
+    const isOn = this.useFanService
+      ? value === this.platform.Characteristic.Active.ACTIVE
+      : Boolean(value);
     this.platform.log.debug(`Set Characteristic Active for ${this.accessory.displayName} ->`, value);
 
     try {
@@ -110,10 +119,11 @@ export class PuraPlatformAccessory {
         const controller = this.device.controller || 'default';
         const success = alwaysOn && await this.puraApi.setIntensity(this.device.id, targetBay, intensity, controller);
         if (success) {
-          this.currentState.Active = this.platform.Characteristic.Active.ACTIVE;
+          this.currentStateActive = true;
           this.accessory.context.lastIntensity = intensity;
           this.accessory.context.lastBay = targetBay;
           this.platform.log.debug(`Successfully turned on ${this.accessory.displayName} with intensity ${intensity}`);
+          this.applyCurrentState();
           if ((this.platform.config as PuraConfig).forceNightlightOff) {
             await this.ensureNightlightOff();
           }
@@ -124,8 +134,9 @@ export class PuraPlatformAccessory {
       } else {
         const success = await this.puraApi.stopAll(this.device.id);
         if (success) {
-          this.currentState.Active = this.platform.Characteristic.Active.INACTIVE;
+          this.currentStateActive = false;
           this.platform.log.debug(`Successfully turned off ${this.accessory.displayName}`);
+          this.applyCurrentState();
         } else {
           this.platform.log.error(`Failed to turn off ${this.accessory.displayName}`);
           throw new Error('Failed to turn off device');
@@ -138,7 +149,7 @@ export class PuraPlatformAccessory {
   }
 
   async getOn(): Promise<CharacteristicValue> {
-    const isActive = this.currentState.Active;
+    const isActive = this.getCurrentStateValue();
     this.platform.log.debug(`Get Characteristic Active for ${this.accessory.displayName} ->`, isActive);
     return isActive;
   }
@@ -195,7 +206,7 @@ export class PuraPlatformAccessory {
     if (!forceOff) {
       return;
     }
-    if (this.currentState.Active !== this.platform.Characteristic.Active.ACTIVE || !this.device.nightlight?.active) {
+    if (!this.currentStateActive || !this.device.nightlight?.active) {
       return;
     }
     const now = Date.now();
@@ -204,6 +215,23 @@ export class PuraPlatformAccessory {
     }
     this.lastNightlightOffAt = now;
     await this.ensureNightlightOff();
+  }
+
+  private getCurrentStateValue(): CharacteristicValue {
+    if (this.useFanService) {
+      return this.currentStateActive
+        ? this.platform.Characteristic.Active.ACTIVE
+        : this.platform.Characteristic.Active.INACTIVE;
+    }
+    return this.currentStateActive;
+  }
+
+  private applyCurrentState() {
+    const value = this.getCurrentStateValue();
+    const activeCharacteristic = this.useFanService
+      ? this.platform.Characteristic.Active
+      : this.platform.Characteristic.On;
+    this.service.updateCharacteristic(activeCharacteristic, value);
   }
 
   private async ensureNightlightOff() {

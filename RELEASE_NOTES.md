@@ -1,5 +1,8 @@
 # Release Notes
 
+## 1.3.4 - 2026-02-10
+- Use Switch service by default to reduce HomeKit bounce; `useFanService` can restore Fanv2.
+
 ## 1.3.3 - 2026-02-10
 - Revert to v1.2.3 behavior for stability (realtime + polling balance).
 
