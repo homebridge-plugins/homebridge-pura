@@ -328,7 +328,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     }
 
     const path = '/pura';
-    const { token, isNew } = await this.getWebhookToken();
+    const { token } = await this.getWebhookToken();
     this.webhookToken = token;
 
     this.webhookServer = http.createServer((req, res) => {
@@ -412,7 +412,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     this.webhookServer = null;
   }
 
-  private async getWebhookToken(): Promise<{ token?: string; isNew: boolean }> {
+  private async getWebhookToken(): Promise<{ token?: string }> {
     try {
       const storagePath = this.api.user.storagePath();
       const tokenPath = path.join(storagePath, 'pura-webhook.json');
@@ -420,7 +420,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
         const existing = await fs.readFile(tokenPath, 'utf-8');
         const parsed = JSON.parse(existing) as { token?: string };
         if (parsed.token && typeof parsed.token === 'string') {
-          return { token: parsed.token, isNew: false };
+          return { token: parsed.token };
         }
       } catch {
         // Ignore missing/invalid file and generate a new token below.
@@ -433,10 +433,10 @@ export class PuraPlatform implements DynamicPlatformPlugin {
         mode: 0o600,
       });
       this.logInfo(`Generated webhook token and stored it at ${tokenPath}.`);
-      return { token: generated, isNew: true };
+      return { token: generated };
     } catch (error) {
       this.logWarn('Failed to load or create webhook token; continuing without token.', error);
-      return { token: undefined, isNew: false };
+      return { token: undefined };
     }
   }
 
@@ -446,7 +446,8 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       return;
     }
     const [message, ...rest] = redacted;
-    this.log.info(String(message), ...(rest as any[]));
+    const params = [String(message), ...rest] as [string, ...unknown[]];
+    this.log.info(...params);
   }
 
   private logWarn(...args: unknown[]) {
@@ -455,7 +456,8 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       return;
     }
     const [message, ...rest] = redacted;
-    this.log.warn(String(message), ...(rest as any[]));
+    const params = [String(message), ...rest] as [string, ...unknown[]];
+    this.log.warn(...params);
   }
 
   private redactLogArgs(args: unknown[]): unknown[] {
@@ -528,11 +530,11 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     if (!this.webhookReceived) {
       this.webhookReceived = true;
       if (deviceId) {
-      this.logInfo(`Received first webhook payload for device ${deviceId}.`);
-    } else {
-      this.logInfo('Received first webhook payload.');
+        this.logInfo(`Received first webhook payload for device ${deviceId}.`);
+      } else {
+        this.logInfo('Received first webhook payload.');
+      }
     }
-  }
 
     if (deviceId && deviceRecord && recordType === 'DEVICE' && eventType === 'MODIFY') {
       const updated = this.applyDeviceRecord(deviceId, deviceRecord);
