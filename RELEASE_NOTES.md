@@ -1,11 +1,10 @@
 # Release Notes
 
-## 1.2.1 - 2026-02-10
+## 1.2.2 - 2026-02-10
+- Reduce duplicate refreshes by debouncing realtime-triggered refreshes.
+- Avoid redundant startup refreshes when realtime is connected.
 - Remove legacy Switch service to avoid duplicate accessories.
 - Fan accessory type by default for diffusers.
-- Refresh device status shortly after realtime events to keep HomeKit in sync.
-- Slow polling to 5 minutes when realtime is connected; speed up to 15 seconds when it is down.
-- Improve realtime fallback on socket errors.
 
 ## 1.1.17 - 2026-02-09
 - Enforce `forceNightlightOff` on status refresh when the diffuser is turned on from the Pura app.

@@ -32,12 +32,16 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   private refreshTimer: NodeJS.Timeout | null = null;
   private refreshBaseIntervalSeconds = 30;
   private refreshFailures = 0;
+  private refreshInFlight: Promise<void> | null = null;
+  private refreshQueued = false;
+  private lastRefreshAt = 0;
   private realtimeConnected = false;
   private cognitoRefreshInterval: NodeJS.Timeout | null = null;
   private attemptedCognitoUpdate = false;
   private latestCognitoVersion: string | null = null;
   private authInFlight: Promise<void> | null = null;
   private webhookRefreshTimer: NodeJS.Timeout | null = null;
+  private webhookRefreshDueAt: number | null = null;
   private webhookReceived = false;
   private realtimeSocket: WebSocket | null = null;
   private realtimeReconnectTimer: NodeJS.Timeout | null = null;
@@ -236,7 +240,12 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       }
     };
     void doRefresh('immediate');
-    setTimeout(() => void doRefresh('delayed'), 15000);
+    setTimeout(() => {
+      const ageMs = Date.now() - this.lastRefreshAt;
+      if (!this.realtimeConnected && ageMs > 20000) {
+        void doRefresh('delayed');
+      }
+    }, 15000);
   }
 
   private scheduleNextRefresh(delaySeconds: number) {
@@ -269,15 +278,28 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   }
 
   private async runRefreshCycle() {
+    if (this.refreshInFlight) {
+      this.refreshQueued = true;
+      return;
+    }
     try {
-      this.log.debug('Refreshing device status...');
-      await this.refreshDeviceStatus();
+      this.refreshInFlight = (async () => {
+        this.log.debug('Refreshing device status...');
+        await this.refreshDeviceStatus();
+      })();
+      await this.refreshInFlight;
       this.refreshFailures = 0;
       this.scheduleNextRefresh(this.getRefreshIntervalWithJitter());
     } catch (error) {
       this.log.error('Failed to refresh device status:', error);
       this.refreshFailures += 1;
       this.scheduleNextRefresh(this.getRefreshIntervalWithBackoff());
+    } finally {
+      this.refreshInFlight = null;
+      if (this.refreshQueued) {
+        this.refreshQueued = false;
+        this.scheduleNextRefresh(0);
+      }
     }
   }
 
@@ -509,13 +531,19 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   }
 
   private triggerWebhookRefreshWithDelay(delayMs: number) {
-    if (this.webhookRefreshTimer) {
+    const dueAt = Date.now() + delayMs;
+    if (this.webhookRefreshDueAt !== null && this.webhookRefreshDueAt <= dueAt) {
       return;
     }
+    if (this.webhookRefreshTimer) {
+      clearTimeout(this.webhookRefreshTimer);
+    }
+    this.webhookRefreshDueAt = dueAt;
     this.webhookRefreshTimer = setTimeout(() => {
       this.webhookRefreshTimer = null;
+      this.webhookRefreshDueAt = null;
       void this.runRefreshCycle();
-    }, Math.max(0, delayMs));
+    }, Math.max(0, dueAt - Date.now()));
   }
 
   private updatePollingForRealtime() {
@@ -527,7 +555,9 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     this.refreshFailures = 0;
     const label = this.realtimeConnected ? 'realtime connected' : 'realtime disconnected';
     this.log.info(`Adjusting polling interval to ${nextBase}s (${label}).`);
-    this.scheduleNextRefresh(0);
+    if (Date.now() - this.lastRefreshAt > 30000) {
+      this.scheduleNextRefresh(0);
+    }
   }
 
   private deepMerge(
@@ -563,6 +593,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
         await this.updateDiffuserAccessory(device);
         // No nightlight accessory
       }
+      this.lastRefreshAt = Date.now();
     } catch (error) {
       this.log.debug('Device status refresh failed:', error);
       // Try to re-authenticate if authentication failed, then retry once
@@ -574,6 +605,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
             for (const device of devices) {
               await this.updateDiffuserAccessory(device);
             }
+            this.lastRefreshAt = Date.now();
           } catch (retryError) {
             this.log.debug('Device status refresh retry failed:', retryError);
           }
