@@ -15,6 +15,7 @@ export class PuraPlatformAccessory {
   private currentState = {
     On: false,
   };
+  private lastNightlightOffAt = 0;
 
   constructor(
     private readonly platform: PuraPlatform,
@@ -140,6 +141,7 @@ export class PuraPlatformAccessory {
     this.accessory.context.device = device;
     this.platform.log.debug('Device snapshot:', this.summarizeDevice(device));
     this.updateCurrentState();
+    void this.maybeForceNightlightOff();
   }
 
   private summarizeDevice(device: PuraDevice) {
@@ -179,6 +181,22 @@ export class PuraPlatformAccessory {
       bay1: baySummary(device.bay1),
       bay2: baySummary(device.bay2),
     };
+  }
+
+  private async maybeForceNightlightOff() {
+    const forceOff = (this.platform.config as PuraConfig).forceNightlightOff;
+    if (!forceOff) {
+      return;
+    }
+    if (!this.currentState.On || !this.device.nightlight?.active) {
+      return;
+    }
+    const now = Date.now();
+    if (now - this.lastNightlightOffAt < 30000) {
+      return;
+    }
+    this.lastNightlightOffAt = now;
+    await this.ensureNightlightOff();
   }
 
   private async ensureNightlightOff() {

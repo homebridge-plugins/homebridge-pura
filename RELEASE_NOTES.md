@@ -1,5 +1,8 @@
 # Release Notes
 
+## 1.1.17 - 2026-02-09
+- Enforce `forceNightlightOff` on status refresh when the diffuser is turned on from the Pura app.
+
 ## 1.1.16 - 2026-02-09
 - Only use `activeAt` to infer on-state for standard diffusion mode to avoid stale "on" after manual off.
 
