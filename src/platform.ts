@@ -491,6 +491,9 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     if (deviceId && deviceRecord && recordType === 'DEVICE' && eventType === 'MODIFY') {
       const updated = this.applyDeviceRecord(deviceId, deviceRecord);
       if (updated) {
+        const accessory = this.findAccessoryByDeviceId(deviceId);
+        const name = accessory?.displayName ?? deviceId;
+        this.log.info(`Realtime update applied for ${name}.`);
         this.triggerWebhookRefreshWithDelay(2000);
         return;
       }
