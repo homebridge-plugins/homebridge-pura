@@ -43,6 +43,8 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   private authInFlight: Promise<void> | null = null;
   private webhookRefreshTimer: NodeJS.Timeout | null = null;
   private webhookRefreshDueAt: number | null = null;
+  private realtimeLogThrottleMs = 5000;
+  private lastRealtimeLogAt: Map<string, number> = new Map();
   private webhookReceived = false;
   private realtimeSocket: WebSocket | null = null;
   private realtimeReconnectTimer: NodeJS.Timeout | null = null;
@@ -493,7 +495,18 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       if (updated) {
         const accessory = this.findAccessoryByDeviceId(deviceId);
         const name = accessory?.displayName ?? deviceId;
-        this.log.info(`Realtime update applied for ${name}.`);
+        const now = Date.now();
+        const last = this.lastRealtimeLogAt.get(deviceId) ?? 0;
+        if (now - last >= this.realtimeLogThrottleMs) {
+          this.lastRealtimeLogAt.set(deviceId, now);
+          const state = this.getAccessoryActiveState(accessory);
+          if (state === null) {
+            this.log.info(`Realtime update applied for ${name}.`);
+          } else {
+            const verb = state ? 'turned on' : 'turned off';
+            this.log.info(`${name} ${verb}.`);
+          }
+        }
         this.triggerWebhookRefreshWithDelay(2000);
         return;
       }
@@ -532,6 +545,32 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       }
     }
     return undefined;
+  }
+
+  private getAccessoryActiveState(accessory?: DiffuserAccessory): boolean | null {
+    if (!accessory) {
+      return null;
+    }
+    const handler = accessory.handler;
+    if (!handler) {
+      return null;
+    }
+    const device = accessory.context?.device;
+    if (!device) {
+      return null;
+    }
+    const bay1 = device.bay1;
+    const bay2 = device.bay2;
+    if (bay1?.active && !bay2?.active) {
+      return true;
+    }
+    if (bay2?.active && !bay1?.active) {
+      return true;
+    }
+    if (bay1?.active || bay2?.active) {
+      return true;
+    }
+    return false;
   }
 
   private triggerWebhookRefresh() {
