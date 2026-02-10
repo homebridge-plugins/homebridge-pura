@@ -43,6 +43,8 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   private webhookRefreshTimer: NodeJS.Timeout | null = null;
   private webhookRefreshDueAt: number | null = null;
   private webhookReceived = false;
+  private intentWindowMs = 8000;
+  private lastIntentAt: Map<string, { state: boolean; at: number }> = new Map();
   private realtimeSocket: WebSocket | null = null;
   private realtimeReconnectTimer: NodeJS.Timeout | null = null;
   private realtimeFailures = 0;
@@ -486,6 +488,12 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     if (deviceId && deviceRecord && recordType === 'DEVICE' && eventType === 'MODIFY') {
       const updated = this.applyDeviceRecord(deviceId, deviceRecord);
       if (updated) {
+        const intent = this.lastIntentAt.get(deviceId);
+        const now = Date.now();
+        if (intent && now - intent.at <= this.intentWindowMs) {
+          this.triggerWebhookRefreshWithDelay(this.intentWindowMs + 1000);
+          return;
+        }
         this.triggerWebhookRefreshWithDelay(2000);
         return;
       }
@@ -502,6 +510,21 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     }
 
     const current = accessory.context.device;
+    const intent = this.lastIntentAt.get(deviceId);
+    const now = Date.now();
+    if (intent && now - intent.at <= this.intentWindowMs) {
+      const incomingMerged = this.deepMerge(
+        (current.__raw ?? {}) as Record<string, unknown>,
+        deviceRecord,
+      );
+      const incomingNormalized = this.puraApi.normalizeDeviceRecord({ ...incomingMerged, id: deviceId });
+      if (incomingNormalized) {
+        const incomingState = this.getDeviceActiveState(incomingNormalized);
+        if (incomingState !== null && incomingState !== intent.state) {
+          return false;
+        }
+      }
+    }
     const merged = this.deepMerge(
       (current.__raw ?? {}) as Record<string, unknown>,
       deviceRecord,
@@ -524,6 +547,22 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       }
     }
     return undefined;
+  }
+
+  private getDeviceActiveState(device: PuraDevice): boolean | null {
+    const bay1 = device.bay1;
+    const bay2 = device.bay2;
+    if (!bay1 && !bay2) {
+      return null;
+    }
+    if (bay1?.active || bay2?.active) {
+      return true;
+    }
+    return false;
+  }
+
+  recordIntent(deviceId: string, state: boolean) {
+    this.lastIntentAt.set(deviceId, { state, at: Date.now() });
   }
 
   private triggerWebhookRefresh() {
@@ -624,6 +663,14 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     const accessory = this.accessories.get(uuid) as DiffuserAccessory | undefined;
 
     if (accessory) {
+      const intent = this.lastIntentAt.get(device.id);
+      const now = Date.now();
+      if (intent && now - intent.at <= this.intentWindowMs) {
+        const incomingState = this.getDeviceActiveState(device);
+        if (incomingState !== null && incomingState !== intent.state) {
+          return;
+        }
+      }
       accessory.context.device = device;
       this.api.updatePlatformAccessories([accessory]);
       const handler = accessory.handler;

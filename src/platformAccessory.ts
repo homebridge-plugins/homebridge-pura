@@ -94,6 +94,7 @@ export class PuraPlatformAccessory {
       ? value === this.platform.Characteristic.Active.ACTIVE
       : Boolean(value);
     this.platform.log.debug(`Set Characteristic Active for ${this.accessory.displayName} ->`, value);
+    this.platform.recordIntent(this.device.id, isOn);
 
     try {
       if (isOn) {

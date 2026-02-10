@@ -1,5 +1,8 @@
 # Release Notes
 
+## 1.3.5 - 2026-02-10
+- Add intent settle window to suppress stale refresh/realtime updates after a user toggle.
+
 ## 1.3.4 - 2026-02-10
 - Use Switch service by default to reduce HomeKit bounce; `useFanService` can restore Fanv2.
 
