@@ -1,5 +1,8 @@
 # Release Notes
 
+## 1.1.16 - 2026-02-09
+- Only use `activeAt` to infer on-state for standard diffusion mode to avoid stale "on" after manual off.
+
 ## 1.1.15 - 2026-02-09
 - Use a 60-minute `activeAt` window for standard diffusion mode only when online.
 

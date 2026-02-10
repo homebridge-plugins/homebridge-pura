@@ -351,7 +351,8 @@ export class PuraApi {
     const activeAtRaw = Number(record.activeAt);
     const activeAt = Number.isFinite(activeAtRaw) && activeAtRaw > 0 ? activeAtRaw : undefined;
     const nowSeconds = Math.floor(Date.now() / 1000);
-    const standardMode = parent.diffusionMode === 'standard';
+    const diffusionMode = typeof parent.diffusionMode === 'string' ? parent.diffusionMode : undefined;
+    const standardMode = diffusionMode === 'standard';
     const online = Boolean(parent.connected || parent.online);
     const activeAtWindowSeconds = standardMode && online ? 60 * 60 : 300;
     const activeAtRecent = activeAt !== undefined &&
@@ -363,10 +364,10 @@ export class PuraApi {
     );
     const oscillationActive = this.normalizeOscillationActive(parent.oscillation, bayNumber);
     const intensityFromOscillation = this.normalizeOscillationIntensity(parent.oscillation, bayNumber);
-    const inferredActive = activeAtRecent ||
-      oscillationActive ||
+    const inferredActive = oscillationActive ||
       (intensityFromRecord !== null && Number.isFinite(intensityFromRecord) && intensityFromRecord > 0) ||
-      (intensityFromOscillation !== null && Number.isFinite(intensityFromOscillation) && intensityFromOscillation > 0);
+      (intensityFromOscillation !== null && Number.isFinite(intensityFromOscillation) && intensityFromOscillation > 0) ||
+      (standardMode && activeAtRecent);
     const active = explicitActive === true ? true : inferredActive;
     const normalizedIntensity = intensityFromRecord ??
       (active ? (intensityFromOscillation ?? intensityFromDefaults) : null) ??
