@@ -379,7 +379,7 @@ export class PuraApi {
       (intensityFromRecord !== null && Number.isFinite(intensityFromRecord) && intensityFromRecord > 0) ||
       (intensityFromOscillation !== null && Number.isFinite(intensityFromOscillation) && intensityFromOscillation > 0) ||
       (standardMode && activeAtRecent);
-    const active = explicitActive === true ? true : inferredActive;
+    const active = explicitActive === true ? true : (explicitActive === false ? false : inferredActive);
     const normalizedIntensity = intensityFromRecord ??
       (active ? (intensityFromOscillation ?? intensityFromDefaults) : null) ??
       0;
