@@ -1,5 +1,9 @@
 # Release Notes
 
+## 1.3.1 - 2026-02-10
+- Suppress polling updates that conflict with recent HomeKit intent to reduce off-state bounce.
+- Defer realtime-triggered refresh until after the intent hold window, then reconcile.
+
 ## 1.3.0 - 2026-02-10
 - Hold HomeKit state briefly after Home commands to avoid bounce from realtime updates.
 - Log Pura intensity responses only in debug mode.

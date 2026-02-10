@@ -47,6 +47,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   private intentWindowMs = 7000;
   private lastIntentAt: Map<string, { state: boolean; at: number }> = new Map();
   private holdWindowMs = 7000;
+  private intentReconcileTimers: Map<string, NodeJS.Timeout> = new Map();
   private realtimeSocket: WebSocket | null = null;
   private realtimeReconnectTimer: NodeJS.Timeout | null = null;
   private realtimeFailures = 0;
@@ -502,6 +503,10 @@ export class PuraPlatform implements DynamicPlatformPlugin {
             return;
           }
         }
+        if (intent && now - intent.at <= this.holdWindowMs) {
+          this.triggerWebhookRefreshWithDelay(this.holdWindowMs + 1000);
+          return;
+        }
         this.triggerWebhookRefreshWithDelay(2000);
         return;
       }
@@ -587,6 +592,16 @@ export class PuraPlatform implements DynamicPlatformPlugin {
 
   recordIntent(deviceId: string, state: boolean) {
     this.lastIntentAt.set(deviceId, { state, at: Date.now() });
+    const existing = this.intentReconcileTimers.get(deviceId);
+    if (existing) {
+      clearTimeout(existing);
+    }
+    const delayMs = this.holdWindowMs + 1000;
+    const timer = setTimeout(() => {
+      this.intentReconcileTimers.delete(deviceId);
+      void this.runRefreshCycle();
+    }, delayMs);
+    this.intentReconcileTimers.set(deviceId, timer);
   }
 
   private triggerWebhookRefresh() {
@@ -687,6 +702,15 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     const accessory = this.accessories.get(uuid) as DiffuserAccessory | undefined;
 
     if (accessory) {
+      const intent = this.lastIntentAt.get(device.id);
+      const now = Date.now();
+      if (intent && now - intent.at <= this.holdWindowMs) {
+        const currentState = this.getAccessoryActiveState(accessory);
+        const incomingState = this.getDeviceActiveState(device);
+        if (currentState !== null && incomingState !== null && incomingState !== currentState && incomingState !== intent.state) {
+          return;
+        }
+      }
       accessory.context.device = device;
       this.api.updatePlatformAccessories([accessory]);
       const handler = accessory.handler;
