@@ -35,7 +35,6 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   private refreshInFlight: Promise<void> | null = null;
   private refreshQueued = false;
   private lastRefreshAt = 0;
-  private debugEnabled = process.argv.includes('-D') || process.argv.includes('--debug');
   private realtimeConnected = false;
   private cognitoRefreshInterval: NodeJS.Timeout | null = null;
   private attemptedCognitoUpdate = false;
@@ -44,10 +43,6 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   private webhookRefreshTimer: NodeJS.Timeout | null = null;
   private webhookRefreshDueAt: number | null = null;
   private webhookReceived = false;
-  private intentWindowMs = 7000;
-  private lastIntentAt: Map<string, { state: boolean; at: number }> = new Map();
-  private holdWindowMs = 7000;
-  private intentReconcileTimers: Map<string, NodeJS.Timeout> = new Map();
   private realtimeSocket: WebSocket | null = null;
   private realtimeReconnectTimer: NodeJS.Timeout | null = null;
   private realtimeFailures = 0;
@@ -96,10 +91,6 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       }
       this.stopRealtimeSubscriber();
     });
-  }
-
-  isDebugEnabled(): boolean {
-    return this.debugEnabled;
   }
 
   /**
@@ -493,20 +484,8 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     }
 
     if (deviceId && deviceRecord && recordType === 'DEVICE' && eventType === 'MODIFY') {
-      const intent = this.lastIntentAt.get(deviceId);
       const updated = this.applyDeviceRecord(deviceId, deviceRecord);
       if (updated) {
-        const now = Date.now();
-        if (intent && now - intent.at <= this.intentWindowMs) {
-          const state = this.getAccessoryActiveState(this.findAccessoryByDeviceId(deviceId));
-          if (state !== null && state !== intent.state) {
-            return;
-          }
-        }
-        if (intent && now - intent.at <= this.holdWindowMs) {
-          this.triggerWebhookRefreshWithDelay(this.holdWindowMs + 1000);
-          return;
-        }
         this.triggerWebhookRefreshWithDelay(2000);
         return;
       }
@@ -523,23 +502,6 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     }
 
     const current = accessory.context.device;
-    const intent = this.lastIntentAt.get(deviceId);
-    const now = Date.now();
-    if (intent && now - intent.at <= this.holdWindowMs) {
-      const currentState = this.getAccessoryActiveState(accessory);
-      const incomingMerged = this.deepMerge(
-        (current.__raw ?? {}) as Record<string, unknown>,
-        deviceRecord,
-      );
-      const incomingNormalized = this.puraApi.normalizeDeviceRecord({ ...incomingMerged, id: deviceId });
-      if (incomingNormalized) {
-        const incomingState = this.getDeviceActiveState(incomingNormalized);
-        if (currentState !== null && incomingState !== null && incomingState !== currentState && incomingState !== intent.state) {
-          return false;
-        }
-      }
-    }
-
     const merged = this.deepMerge(
       (current.__raw ?? {}) as Record<string, unknown>,
       deviceRecord,
@@ -562,46 +524,6 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       }
     }
     return undefined;
-  }
-
-  private getAccessoryActiveState(accessory?: DiffuserAccessory): boolean | null {
-    if (!accessory) {
-      return null;
-    }
-    const device = accessory.context?.device;
-    if (!device) {
-      return null;
-    }
-    return this.getDeviceActiveState(device);
-  }
-
-  private getDeviceActiveState(device: PuraDevice): boolean | null {
-    const bay1 = device.bay1;
-    const bay2 = device.bay2;
-    if (bay1?.active && !bay2?.active) {
-      return true;
-    }
-    if (bay2?.active && !bay1?.active) {
-      return true;
-    }
-    if (bay1?.active || bay2?.active) {
-      return true;
-    }
-    return false;
-  }
-
-  recordIntent(deviceId: string, state: boolean) {
-    this.lastIntentAt.set(deviceId, { state, at: Date.now() });
-    const existing = this.intentReconcileTimers.get(deviceId);
-    if (existing) {
-      clearTimeout(existing);
-    }
-    const delayMs = this.holdWindowMs + 1000;
-    const timer = setTimeout(() => {
-      this.intentReconcileTimers.delete(deviceId);
-      void this.runRefreshCycle();
-    }, delayMs);
-    this.intentReconcileTimers.set(deviceId, timer);
   }
 
   private triggerWebhookRefresh() {
@@ -702,15 +624,6 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     const accessory = this.accessories.get(uuid) as DiffuserAccessory | undefined;
 
     if (accessory) {
-      const intent = this.lastIntentAt.get(device.id);
-      const now = Date.now();
-      if (intent && now - intent.at <= this.holdWindowMs) {
-        const currentState = this.getAccessoryActiveState(accessory);
-        const incomingState = this.getDeviceActiveState(device);
-        if (currentState !== null && incomingState !== null && incomingState !== currentState && incomingState !== intent.state) {
-          return;
-        }
-      }
       accessory.context.device = device;
       this.api.updatePlatformAccessories([accessory]);
       const handler = accessory.handler;

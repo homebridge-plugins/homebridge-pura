@@ -85,7 +85,6 @@ export class PuraPlatformAccessory {
   async setOn(value: CharacteristicValue) {
     const isOn = value === this.platform.Characteristic.Active.ACTIVE;
     this.platform.log.debug(`Set Characteristic Active for ${this.accessory.displayName} ->`, value);
-    this.platform.recordIntent(this.device.id, isOn);
 
     try {
       if (isOn) {
@@ -147,9 +146,7 @@ export class PuraPlatformAccessory {
   updateDevice(device: PuraDevice) {
     this.device = device;
     this.accessory.context.device = device;
-    if (this.platform.isDebugEnabled()) {
-      this.platform.log.debug('Device snapshot:', this.summarizeDevice(device));
-    }
+    this.platform.log.debug('Device snapshot:', this.summarizeDevice(device));
     this.updateCurrentState();
     void this.maybeForceNightlightOff();
   }

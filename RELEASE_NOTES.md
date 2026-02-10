@@ -1,15 +1,13 @@
 # Release Notes
 
-## 1.3.1 - 2026-02-10
-- Suppress polling updates that conflict with recent HomeKit intent to reduce off-state bounce.
-- Defer realtime-triggered refresh until after the intent hold window, then reconcile.
+## 1.3.3 - 2026-02-10
+- Revert to v1.2.3 behavior for stability (realtime + polling balance).
 
-## 1.3.2 - 2026-02-10
-- Treat explicit "active: false" as authoritative to avoid intensity-based bounce after turning off.
-
-## 1.3.0 - 2026-02-10
-- Hold HomeKit state briefly after Home commands to avoid bounce from realtime updates.
-- Log Pura intensity responses only in debug mode.
+## 1.2.3 - 2026-02-10
+- Further reduce startup refresh chatter when realtime connects quickly.
+- Reduce duplicate refreshes by debouncing realtime-triggered refreshes.
+- Avoid redundant startup refreshes when realtime is connected.
+- Remove legacy Switch service to avoid duplicate accessories.
 
 ## 1.1.17 - 2026-02-09
 - Enforce `forceNightlightOff` on status refresh when the diffuser is turned on from the Pura app.
