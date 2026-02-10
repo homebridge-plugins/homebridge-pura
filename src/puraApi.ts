@@ -122,6 +122,13 @@ export class PuraApi {
     return `Bearer ${this.session.getAccessToken().getJwtToken()}`;
   }
 
+  getIdToken(): string | null {
+    if (!this.session) {
+      return null;
+    }
+    return this.session.getIdToken().getJwtToken();
+  }
+
   /**
    * Make authenticated API request
    */

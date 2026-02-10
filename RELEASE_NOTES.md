@@ -1,7 +1,7 @@
 # Release Notes
 
-## 1.1.18 - 2026-02-10
-- Add a built-in webhook listener for faster device status updates.
+## 1.1.19 - 2026-02-10
+- Add realtime websocket updates for faster device status changes.
 - Keep a fixed 30s polling refresh as a fallback for reliability.
 - Simplify configuration by removing refresh interval tuning.
 

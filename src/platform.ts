@@ -1,10 +1,5 @@
 import type { API, Characteristic, DynamicPlatformPlugin, Logging, PlatformAccessory, PlatformConfig, Service } from 'homebridge';
 
-import { randomBytes } from 'node:crypto';
-import { promises as fs } from 'node:fs';
-import http from 'node:http';
-import path from 'node:path';
-import { URL } from 'node:url';
 
 import { PuraPlatformAccessory } from './platformAccessory.js';
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
@@ -41,10 +36,11 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   private attemptedCognitoUpdate = false;
   private latestCognitoVersion: string | null = null;
   private authInFlight: Promise<void> | null = null;
-  private webhookServer: http.Server | null = null;
   private webhookRefreshTimer: NodeJS.Timeout | null = null;
   private webhookReceived = false;
-  private webhookToken?: string;
+  private realtimeSocket: WebSocket | null = null;
+  private realtimeReconnectTimer: NodeJS.Timeout | null = null;
+  private realtimeFailures = 0;
 
   constructor(
     public readonly log: Logging,
@@ -88,7 +84,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       if (this.webhookRefreshTimer) {
         clearTimeout(this.webhookRefreshTimer);
       }
-      this.stopWebhookServer();
+      this.stopRealtimeSubscriber();
     });
   }
 
@@ -131,7 +127,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       // Set up refresh interval
       this.setupRefreshInterval();
       this.setupCognitoRefreshInterval();
-      await this.setupWebhookServer();
+      this.setupRealtimeSubscriber();
       // Force an immediate refresh after startup, then a short delayed retry
       this.scheduleInitialRefreshes();
 
@@ -316,186 +312,107 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     }, interval);
   }
 
-  private async setupWebhookServer() {
-    if (this.webhookServer) {
+  private setupRealtimeSubscriber() {
+    if (this.realtimeSocket || this.realtimeReconnectTimer) {
       return;
     }
-
-    const port = 3001;
-    if (!Number.isFinite(port) || port <= 0 || port > 65535) {
-      this.log.warn('Invalid webhook port configured; webhook server not started.');
+    if (typeof WebSocket === 'undefined') {
+      this.log.warn('WebSocket is not available in this Node runtime; falling back to polling only.');
       return;
     }
-
-    const path = '/pura';
-    const { token } = await this.getWebhookToken();
-    this.webhookToken = token;
-
-    this.webhookServer = http.createServer((req, res) => {
-      if (req.method !== 'POST') {
-        res.writeHead(405);
-        res.end();
-        return;
-      }
-
-      const url = new URL(req.url ?? '', `http://${req.headers.host ?? 'localhost'}`);
-      if (url.pathname !== path) {
-        res.writeHead(404);
-        res.end();
-        return;
-      }
-
-      if (token) {
-        const headerToken = req.headers['x-webhook-token'];
-        const provided = Array.isArray(headerToken) ? headerToken[0] : headerToken;
-        const queryToken = url.searchParams.get('token') ?? undefined;
-        if (token !== (provided ?? queryToken)) {
-          res.writeHead(401);
-          res.end();
-          return;
-        }
-      }
-
-      let body = '';
-      const maxBytes = 512 * 1024;
-      req.on('data', (chunk) => {
-        body += chunk;
-        if (body.length > maxBytes) {
-          res.writeHead(413);
-          res.end();
-          req.destroy();
-        }
-      });
-
-      req.on('end', () => {
-        if (!body) {
-          res.writeHead(400);
-          res.end();
-          return;
-        }
-
-        try {
-          const payload = JSON.parse(body) as unknown;
-          void this.handleWebhookPayload(payload);
-          res.writeHead(200);
-          res.end();
-        } catch (error) {
-          this.log.debug('Webhook payload was not valid JSON:', error);
-          res.writeHead(400);
-          res.end();
-        }
-      });
-    });
-
-    this.webhookServer.listen(port, () => {
-      const address = this.webhookServer?.address();
-      const resolvedPort = typeof address === 'object' && address ? address.port : port;
-      this.logInfo(`Webhook server listening on port ${resolvedPort} at path ${path}`);
-      this.logInfo(`Webhook URL: http://<homebridge-host>:${resolvedPort}${path}`);
-      if (token) {
-        this.logInfo('Webhook token is required (X-Webhook-Token header or ?token= query param).');
-      } else {
-        this.logInfo('Webhook token is not configured; requests are unauthenticated.');
-      }
-    });
+    this.connectRealtimeSubscriber();
   }
 
-  private stopWebhookServer() {
-    if (!this.webhookServer) {
+  private connectRealtimeSubscriber() {
+    const token = this.puraApi.getIdToken();
+    if (!token) {
+      this.log.warn('Realtime updates unavailable: missing ID token. Will retry.');
+      this.scheduleRealtimeReconnect();
       return;
     }
-    try {
-      this.webhookServer.close();
-    } catch (error) {
-      this.log.debug('Failed to close webhook server:', error);
-    }
-    this.webhookServer = null;
+
+    this.log.info('Connecting to Pura realtime updates...');
+    const WebSocketCtor = WebSocket as unknown as new (
+      url: string,
+      protocols?: string[] | string,
+      options?: { headers?: Record<string, string> },
+    ) => WebSocket;
+    const socket = new WebSocketCtor('wss://socket.trypura.io', undefined, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    this.realtimeSocket = socket;
+
+    socket.onopen = () => {
+      this.realtimeFailures = 0;
+      this.log.info('Connected to Pura realtime updates.');
+    };
+
+    socket.onmessage = (event) => {
+      const payload = this.parseRealtimePayload(event.data);
+      if (payload !== undefined) {
+        void this.handleWebhookPayload(payload);
+      }
+    };
+
+    socket.onerror = (error) => {
+      this.log.debug('Realtime socket error:', error);
+    };
+
+    socket.onclose = () => {
+      this.realtimeSocket = null;
+      this.log.warn('Realtime updates disconnected; will retry.');
+      this.scheduleRealtimeReconnect();
+    };
   }
 
-  private async getWebhookToken(): Promise<{ token?: string }> {
-    try {
-      const storagePath = this.api.user.storagePath();
-      const tokenPath = path.join(storagePath, 'pura-webhook.json');
+  private stopRealtimeSubscriber() {
+    if (this.realtimeReconnectTimer) {
+      clearTimeout(this.realtimeReconnectTimer);
+      this.realtimeReconnectTimer = null;
+    }
+    if (this.realtimeSocket) {
       try {
-        const existing = await fs.readFile(tokenPath, 'utf-8');
-        const parsed = JSON.parse(existing) as { token?: string };
-        if (parsed.token && typeof parsed.token === 'string') {
-          return { token: parsed.token };
-        }
-      } catch {
-        // Ignore missing/invalid file and generate a new token below.
+        this.realtimeSocket.close();
+      } catch (error) {
+        this.log.debug('Failed to close realtime socket:', error);
       }
-
-      const generated = randomBytes(24).toString('hex');
-      await fs.mkdir(storagePath, { recursive: true });
-      await fs.writeFile(tokenPath, JSON.stringify({ token: generated }, null, 2), {
-        encoding: 'utf-8',
-        mode: 0o600,
-      });
-      this.logInfo(`Generated webhook token and stored it at ${tokenPath}.`);
-      return { token: generated };
-    } catch (error) {
-      this.logWarn('Failed to load or create webhook token; continuing without token.', error);
-      return { token: undefined };
+      this.realtimeSocket = null;
     }
   }
 
-  private logInfo(...args: unknown[]) {
-    const redacted = this.redactLogArgs(args);
-    if (redacted.length === 0) {
+  private scheduleRealtimeReconnect() {
+    if (this.realtimeReconnectTimer) {
       return;
     }
-    const [message, ...rest] = redacted;
-    const params = [String(message), ...rest] as [string, ...unknown[]];
-    this.log.info(...params);
+    this.realtimeFailures += 1;
+    const delaySeconds = Math.min(60, Math.max(5, 2 ** this.realtimeFailures));
+    this.realtimeReconnectTimer = setTimeout(() => {
+      this.realtimeReconnectTimer = null;
+      this.connectRealtimeSubscriber();
+    }, delaySeconds * 1000);
   }
 
-  private logWarn(...args: unknown[]) {
-    const redacted = this.redactLogArgs(args);
-    if (redacted.length === 0) {
-      return;
+  private parseRealtimePayload(data: unknown): unknown | undefined {
+    if (typeof data === 'string') {
+      try {
+        return JSON.parse(data);
+      } catch (error) {
+        this.log.debug('Realtime payload was not valid JSON:', error);
+        return undefined;
+      }
     }
-    const [message, ...rest] = redacted;
-    const params = [String(message), ...rest] as [string, ...unknown[]];
-    this.log.warn(...params);
-  }
-
-  private redactLogArgs(args: unknown[]): unknown[] {
-    if (!this.webhookToken) {
-      return args;
+    if (data instanceof ArrayBuffer) {
+      try {
+        const text = new TextDecoder().decode(new Uint8Array(data));
+        return JSON.parse(text);
+      } catch (error) {
+        this.log.debug('Realtime payload was not valid JSON:', error);
+        return undefined;
+      }
     }
-    return args.map((arg) => this.redactValue(arg, new WeakSet<object>()));
-  }
-
-  private redactValue(value: unknown, seen: WeakSet<object>): unknown {
-    if (!this.webhookToken) {
-      return value;
-    }
-    if (typeof value === 'string') {
-      return value.split(this.webhookToken).join('[redacted]');
-    }
-    if (value instanceof Error) {
-      return {
-        name: value.name,
-        message: this.redactValue(value.message, seen),
-        stack: value.stack ? this.redactValue(value.stack, seen) : value.stack,
-      };
-    }
-    if (!value || typeof value !== 'object') {
-      return value;
-    }
-    if (seen.has(value)) {
-      return value;
-    }
-    seen.add(value);
-    if (Array.isArray(value)) {
-      return value.map((item) => this.redactValue(item, seen));
-    }
-    const output: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-      output[key] = this.redactValue(entry, seen);
-    }
-    return output;
+    return data;
   }
 
   private async handleWebhookPayload(payload: unknown) {
@@ -530,9 +447,9 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     if (!this.webhookReceived) {
       this.webhookReceived = true;
       if (deviceId) {
-        this.logInfo(`Received first webhook payload for device ${deviceId}.`);
+        this.log.info(`Received first realtime payload for device ${deviceId}.`);
       } else {
-        this.logInfo('Received first webhook payload.');
+        this.log.info('Received first realtime payload.');
       }
     }
 
