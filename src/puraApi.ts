@@ -477,7 +477,7 @@ export class PuraApi {
         controller: resolvedController,
         intensity: apiIntensity,
       }) as { success?: boolean };
-      this.log.info('Pura intensity response:', {
+      this.log.debug('Pura intensity response:', {
         deviceId,
         bay,
         intensity: apiIntensity,

@@ -1,7 +1,8 @@
 # Release Notes
 
-## 1.2.9 - 2026-02-10
-- Revert realtime logging changes to restore prior stable behavior.
+## 1.3.0 - 2026-02-10
+- Hold HomeKit state briefly after Home commands to avoid bounce from realtime updates.
+- Log Pura intensity responses only in debug mode.
 
 ## 1.1.17 - 2026-02-09
 - Enforce `forceNightlightOff` on status refresh when the diffuser is turned on from the Pura app.
