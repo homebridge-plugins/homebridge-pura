@@ -242,7 +242,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     void doRefresh('immediate');
     setTimeout(() => {
       const ageMs = Date.now() - this.lastRefreshAt;
-      if (!this.realtimeConnected && ageMs > 20000) {
+      if (!this.realtimeConnected && ageMs > 60000) {
         void doRefresh('delayed');
       }
     }, 15000);
@@ -555,7 +555,8 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     this.refreshFailures = 0;
     const label = this.realtimeConnected ? 'realtime connected' : 'realtime disconnected';
     this.log.info(`Adjusting polling interval to ${nextBase}s (${label}).`);
-    if (Date.now() - this.lastRefreshAt > 30000) {
+    const ageMs = Date.now() - this.lastRefreshAt;
+    if (!this.refreshInFlight && ageMs > 60000) {
       this.scheduleNextRefresh(0);
     }
   }
