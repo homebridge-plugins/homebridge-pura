@@ -7,7 +7,6 @@ import { PlatformConfig } from 'homebridge';
 export interface PuraConfig extends PlatformConfig {
   username: string;
   password: string;
-  refreshInterval?: number;
   forceNightlightOff?: boolean;
 }
 

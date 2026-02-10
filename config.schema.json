@@ -24,19 +24,11 @@
         "required": true,
         "description": "Your Pura app password"
       },
-      "refreshInterval": {
-        "title": "Refresh Interval (seconds)",
-        "type": "number",
-        "minimum": 60,
-        "maximum": 3600,
-        "default": 90,
-        "description": "How often to refresh device status (60-3600 seconds)"
-      },
       "forceNightlightOff": {
         "title": "Force Nightlight Off",
         "type": "boolean",
         "default": false,
-        "description": "If enabled, the plugin will send a nightlight off command right after turning on a diffuser."
+        "description": "Pura turns the nightlight on/off with the diffuser. If enabled, the plugin will send a nightlight off command right after turning on a diffuser."
       }
     }
   }

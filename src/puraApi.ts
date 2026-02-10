@@ -295,6 +295,10 @@ export class PuraApi {
     };
   }
 
+  public normalizeDeviceRecord(device: unknown): PuraDevice | null {
+    return this.normalizeDevice(device);
+  }
+
   private normalizeModel(value: unknown): string {
     if (typeof value === 'string') {
       const trimmed = value.trim();

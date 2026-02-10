@@ -2,7 +2,7 @@
 
 **A Homebridge plugin for Pura smart fragrance diffusers.**
 
-This plugin is intentionally simple. It exposes a single on/off switch per diffuser, allowing you to control each device using HomeKit automations.
+This plugin is intentionally simple. It exposes a single on/off switch per diffuser, allowing you to control each device using HomeKit.
 
 It’s designed to be used with Pura’s auto-away and scheduling features disabled, so HomeKit can act as the primary automation layer.
 
@@ -26,7 +26,6 @@ Add the following platform to your `config.json`:
       "platform": "PuraSmartDiffuser",
       "username": "your-pura-email@example.com",
       "password": "your-pura-password",
-      "refreshInterval": 90,
       "forceNightlightOff": false
     }
   ]
@@ -37,14 +36,13 @@ Add the following platform to your `config.json`:
 
 - **username**: Your Pura app username (email address) - *required*
 - **password**: Your Pura app password - *required*
-- **refreshInterval**: How often to refresh device status in seconds (default: 90, min: 60, max: 3600)
 - **forceNightlightOff**: By default, Pura turns the nightlight on/off with the diffuser. Enable this to force the nightlight off after the diffuser turns on (default: false)
 
 ## Features
 
 - **Multiple Device Support**: Automatically discovers all Pura devices on your account
 - **Simple On/Off Control**: One switch per diffuser for HomeKit automations
-- **Real-Time Status**: Automatically refreshes device status
+- **Real-Time Status**: Uses webhooks for faster updates, with a 30-second polling fallback
 
 ## Usage
 
@@ -59,7 +57,7 @@ Once configured, your Pura diffusers will appear in the Home app as a single swi
 The plugin will automatically:
 - Discover all Pura devices on your account
 - Create one switch per diffuser
-- Update device status based on the configured refresh interval
+- Update device status via webhook updates with a 30-second polling fallback
 - Handle authentication and token refresh (including periodic Cognito refresh polling)
 
 ## Recommended Usage
@@ -76,7 +74,6 @@ If you encounter authentication errors:
 1. Verify your username and password are correct
 2. Check that your Pura account is active and can log in to the mobile app
 3. Ensure your internet connection is stable
-4. If the error mentions a Cognito client or user pool, the plugin will attempt to fetch the latest Cognito IDs from the pypura PyPI release and retry once (requires outbound HTTPS to PyPI on failure)
 
 ### Device Not Appearing
 

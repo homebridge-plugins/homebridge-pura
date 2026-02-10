@@ -1,5 +1,10 @@
 # Release Notes
 
+## 1.1.18 - 2026-02-10
+- Add a built-in webhook listener for faster device status updates.
+- Keep a fixed 30s polling refresh as a fallback for reliability.
+- Simplify configuration by removing refresh interval tuning.
+
 ## 1.1.17 - 2026-02-09
 - Enforce `forceNightlightOff` on status refresh when the diffuser is turned on from the Pura app.
 

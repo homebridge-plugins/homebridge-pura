@@ -1,5 +1,11 @@
 import type { API, Characteristic, DynamicPlatformPlugin, Logging, PlatformAccessory, PlatformConfig, Service } from 'homebridge';
 
+import { randomBytes } from 'node:crypto';
+import { promises as fs } from 'node:fs';
+import http from 'node:http';
+import path from 'node:path';
+import { URL } from 'node:url';
+
 import { PuraPlatformAccessory } from './platformAccessory.js';
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
 import { PuraApi } from './puraApi.js';
@@ -28,11 +34,17 @@ export class PuraPlatform implements DynamicPlatformPlugin {
 
   private readonly puraApi: PuraApi;
   private readonly puraConfig: PuraConfig;
-  private refreshInterval: NodeJS.Timeout | null = null;
+  private refreshTimer: NodeJS.Timeout | null = null;
+  private refreshBaseIntervalSeconds = 30;
+  private refreshFailures = 0;
   private cognitoRefreshInterval: NodeJS.Timeout | null = null;
   private attemptedCognitoUpdate = false;
   private latestCognitoVersion: string | null = null;
   private authInFlight: Promise<void> | null = null;
+  private webhookServer: http.Server | null = null;
+  private webhookRefreshTimer: NodeJS.Timeout | null = null;
+  private webhookReceived = false;
+  private webhookToken?: string;
 
   constructor(
     public readonly log: Logging,
@@ -67,12 +79,16 @@ export class PuraPlatform implements DynamicPlatformPlugin {
 
     // Clean up on shutdown
     this.api.on('shutdown', () => {
-      if (this.refreshInterval) {
-        clearInterval(this.refreshInterval);
+      if (this.refreshTimer) {
+        clearTimeout(this.refreshTimer);
       }
       if (this.cognitoRefreshInterval) {
         clearInterval(this.cognitoRefreshInterval);
       }
+      if (this.webhookRefreshTimer) {
+        clearTimeout(this.webhookRefreshTimer);
+      }
+      this.stopWebhookServer();
     });
   }
 
@@ -115,6 +131,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       // Set up refresh interval
       this.setupRefreshInterval();
       this.setupCognitoRefreshInterval();
+      await this.setupWebhookServer();
       // Force an immediate refresh after startup, then a short delayed retry
       this.scheduleInitialRefreshes();
 
@@ -202,17 +219,15 @@ export class PuraPlatform implements DynamicPlatformPlugin {
    * Set up periodic refresh of device status
    */
   private setupRefreshInterval() {
-    const interval = (this.puraConfig.refreshInterval || 300) * 1000; // Convert to milliseconds
-    this.log.debug(`Setting up refresh interval: ${interval / 1000} seconds`);
+    const configuredSeconds = 30;
+    this.refreshBaseIntervalSeconds = configuredSeconds;
+    this.refreshFailures = 0;
+    this.log.debug(`Setting up refresh interval: ${this.refreshBaseIntervalSeconds} seconds (base)`);
 
-    this.refreshInterval = setInterval(async () => {
-      try {
-        this.log.debug('Refreshing device status...');
-        await this.refreshDeviceStatus();
-      } catch (error) {
-        this.log.error('Failed to refresh device status:', error);
-      }
-    }, interval);
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+    }
+    this.scheduleNextRefresh(0);
   }
 
   private scheduleInitialRefreshes() {
@@ -226,6 +241,48 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     };
     void doRefresh('immediate');
     setTimeout(() => void doRefresh('delayed'), 15000);
+  }
+
+  private scheduleNextRefresh(delaySeconds: number) {
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+    }
+    this.refreshTimer = setTimeout(() => {
+      void this.runRefreshCycle();
+    }, Math.max(0, delaySeconds) * 1000);
+  }
+
+  private getRefreshIntervalWithJitter(): number {
+    const jitterMax = Math.min(this.refreshBaseIntervalSeconds * 0.5, 30);
+    const jitter = Math.random() * jitterMax;
+    const interval = this.refreshBaseIntervalSeconds + jitter;
+    this.log.debug(
+      `Next refresh in ${interval.toFixed(1)}s (base ${this.refreshBaseIntervalSeconds}s, jitter ${jitter.toFixed(1)}s)`,
+    );
+    return interval;
+  }
+
+  private getRefreshIntervalWithBackoff(): number {
+    const maxBackoff = Math.max(this.refreshBaseIntervalSeconds * 2, 300);
+    const backoff = Math.min(2 ** this.refreshFailures, maxBackoff);
+    const interval = this.refreshBaseIntervalSeconds + backoff;
+    this.log.debug(
+      `Refresh failed (attempt ${this.refreshFailures}); next refresh in ${interval}s`,
+    );
+    return interval;
+  }
+
+  private async runRefreshCycle() {
+    try {
+      this.log.debug('Refreshing device status...');
+      await this.refreshDeviceStatus();
+      this.refreshFailures = 0;
+      this.scheduleNextRefresh(this.getRefreshIntervalWithJitter());
+    } catch (error) {
+      this.log.error('Failed to refresh device status:', error);
+      this.refreshFailures += 1;
+      this.scheduleNextRefresh(this.getRefreshIntervalWithBackoff());
+    }
   }
 
   private setupCognitoRefreshInterval() {
@@ -257,6 +314,297 @@ export class PuraPlatform implements DynamicPlatformPlugin {
         this.log.debug('Cognito refresh check failed:', error);
       }
     }, interval);
+  }
+
+  private async setupWebhookServer() {
+    if (this.webhookServer) {
+      return;
+    }
+
+    const port = 3001;
+    if (!Number.isFinite(port) || port <= 0 || port > 65535) {
+      this.log.warn('Invalid webhook port configured; webhook server not started.');
+      return;
+    }
+
+    const path = '/pura';
+    const { token, isNew } = await this.getWebhookToken();
+    this.webhookToken = token;
+
+    this.webhookServer = http.createServer((req, res) => {
+      if (req.method !== 'POST') {
+        res.writeHead(405);
+        res.end();
+        return;
+      }
+
+      const url = new URL(req.url ?? '', `http://${req.headers.host ?? 'localhost'}`);
+      if (url.pathname !== path) {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+
+      if (token) {
+        const headerToken = req.headers['x-webhook-token'];
+        const provided = Array.isArray(headerToken) ? headerToken[0] : headerToken;
+        const queryToken = url.searchParams.get('token') ?? undefined;
+        if (token !== (provided ?? queryToken)) {
+          res.writeHead(401);
+          res.end();
+          return;
+        }
+      }
+
+      let body = '';
+      const maxBytes = 512 * 1024;
+      req.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > maxBytes) {
+          res.writeHead(413);
+          res.end();
+          req.destroy();
+        }
+      });
+
+      req.on('end', () => {
+        if (!body) {
+          res.writeHead(400);
+          res.end();
+          return;
+        }
+
+        try {
+          const payload = JSON.parse(body) as unknown;
+          void this.handleWebhookPayload(payload);
+          res.writeHead(200);
+          res.end();
+        } catch (error) {
+          this.log.debug('Webhook payload was not valid JSON:', error);
+          res.writeHead(400);
+          res.end();
+        }
+      });
+    });
+
+    this.webhookServer.listen(port, () => {
+      const address = this.webhookServer?.address();
+      const resolvedPort = typeof address === 'object' && address ? address.port : port;
+      this.logInfo(`Webhook server listening on port ${resolvedPort} at path ${path}`);
+      this.logInfo(`Webhook URL: http://<homebridge-host>:${resolvedPort}${path}`);
+      if (token) {
+        this.logInfo('Webhook token is required (X-Webhook-Token header or ?token= query param).');
+      } else {
+        this.logInfo('Webhook token is not configured; requests are unauthenticated.');
+      }
+    });
+  }
+
+  private stopWebhookServer() {
+    if (!this.webhookServer) {
+      return;
+    }
+    try {
+      this.webhookServer.close();
+    } catch (error) {
+      this.log.debug('Failed to close webhook server:', error);
+    }
+    this.webhookServer = null;
+  }
+
+  private async getWebhookToken(): Promise<{ token?: string; isNew: boolean }> {
+    try {
+      const storagePath = this.api.user.storagePath();
+      const tokenPath = path.join(storagePath, 'pura-webhook.json');
+      try {
+        const existing = await fs.readFile(tokenPath, 'utf-8');
+        const parsed = JSON.parse(existing) as { token?: string };
+        if (parsed.token && typeof parsed.token === 'string') {
+          return { token: parsed.token, isNew: false };
+        }
+      } catch {
+        // Ignore missing/invalid file and generate a new token below.
+      }
+
+      const generated = randomBytes(24).toString('hex');
+      await fs.mkdir(storagePath, { recursive: true });
+      await fs.writeFile(tokenPath, JSON.stringify({ token: generated }, null, 2), {
+        encoding: 'utf-8',
+        mode: 0o600,
+      });
+      this.logInfo(`Generated webhook token and stored it at ${tokenPath}.`);
+      return { token: generated, isNew: true };
+    } catch (error) {
+      this.logWarn('Failed to load or create webhook token; continuing without token.', error);
+      return { token: undefined, isNew: false };
+    }
+  }
+
+  private logInfo(...args: unknown[]) {
+    const redacted = this.redactLogArgs(args);
+    if (redacted.length === 0) {
+      return;
+    }
+    const [message, ...rest] = redacted;
+    this.log.info(String(message), ...(rest as any[]));
+  }
+
+  private logWarn(...args: unknown[]) {
+    const redacted = this.redactLogArgs(args);
+    if (redacted.length === 0) {
+      return;
+    }
+    const [message, ...rest] = redacted;
+    this.log.warn(String(message), ...(rest as any[]));
+  }
+
+  private redactLogArgs(args: unknown[]): unknown[] {
+    if (!this.webhookToken) {
+      return args;
+    }
+    return args.map((arg) => this.redactValue(arg, new WeakSet<object>()));
+  }
+
+  private redactValue(value: unknown, seen: WeakSet<object>): unknown {
+    if (!this.webhookToken) {
+      return value;
+    }
+    if (typeof value === 'string') {
+      return value.split(this.webhookToken).join('[redacted]');
+    }
+    if (value instanceof Error) {
+      return {
+        name: value.name,
+        message: this.redactValue(value.message, seen),
+        stack: value.stack ? this.redactValue(value.stack, seen) : value.stack,
+      };
+    }
+    if (!value || typeof value !== 'object') {
+      return value;
+    }
+    if (seen.has(value)) {
+      return value;
+    }
+    seen.add(value);
+    if (Array.isArray(value)) {
+      return value.map((item) => this.redactValue(item, seen));
+    }
+    const output: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      output[key] = this.redactValue(entry, seen);
+    }
+    return output;
+  }
+
+  private async handleWebhookPayload(payload: unknown) {
+    if (Array.isArray(payload)) {
+      for (const item of payload) {
+        await this.handleWebhookPayload(item);
+      }
+      return;
+    }
+
+    if (payload && typeof payload === 'object') {
+      const recordList = (payload as Record<string, unknown>).records;
+      if (Array.isArray(recordList)) {
+        for (const item of recordList) {
+          await this.handleWebhookPayload(item);
+        }
+        return;
+      }
+    }
+
+    if (!payload || typeof payload !== 'object') {
+      this.log.debug('Ignoring webhook payload with unexpected shape');
+      return;
+    }
+
+    const record = payload as Record<string, unknown>;
+    const recordType = record.recordType;
+    const eventType = record.eventType;
+    const deviceId = String(record.deviceId ?? '');
+    const deviceRecord = (record.deviceRecord ?? record.device) as Record<string, unknown> | undefined;
+
+    if (!this.webhookReceived) {
+      this.webhookReceived = true;
+      if (deviceId) {
+      this.logInfo(`Received first webhook payload for device ${deviceId}.`);
+    } else {
+      this.logInfo('Received first webhook payload.');
+    }
+  }
+
+    if (deviceId && deviceRecord && recordType === 'DEVICE' && eventType === 'MODIFY') {
+      const updated = this.applyDeviceRecord(deviceId, deviceRecord);
+      if (updated) {
+        return;
+      }
+    }
+
+    this.triggerWebhookRefresh();
+  }
+
+  private applyDeviceRecord(deviceId: string, deviceRecord: Record<string, unknown>): boolean {
+    const accessory = this.findAccessoryByDeviceId(deviceId);
+    if (!accessory) {
+      this.log.debug(`Webhook update for unknown device ${deviceId}; scheduling refresh.`);
+      return false;
+    }
+
+    const current = accessory.context.device;
+    const merged = this.deepMerge(
+      (current.__raw ?? {}) as Record<string, unknown>,
+      deviceRecord,
+    );
+    const normalized = this.puraApi.normalizeDeviceRecord({ ...merged, id: deviceId });
+    if (!normalized) {
+      this.log.debug(`Webhook update for device ${deviceId} could not be normalized.`);
+      return false;
+    }
+
+    void this.updateDiffuserAccessory(normalized);
+    return true;
+  }
+
+  private findAccessoryByDeviceId(deviceId: string): DiffuserAccessory | undefined {
+    for (const accessory of this.accessories.values()) {
+      const diffuser = accessory as DiffuserAccessory;
+      if (diffuser.context?.device?.id === deviceId) {
+        return diffuser;
+      }
+    }
+    return undefined;
+  }
+
+  private triggerWebhookRefresh() {
+    if (this.webhookRefreshTimer) {
+      return;
+    }
+    this.webhookRefreshTimer = setTimeout(() => {
+      this.webhookRefreshTimer = null;
+      void this.refreshDeviceStatus();
+    }, 1000);
+  }
+
+  private deepMerge(
+    base: Record<string, unknown>,
+    update: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const output: Record<string, unknown> = { ...base };
+    for (const [key, value] of Object.entries(update)) {
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        const existing = output[key];
+        output[key] = this.deepMerge(
+          existing && typeof existing === 'object' && !Array.isArray(existing)
+            ? (existing as Record<string, unknown>)
+            : {},
+          value as Record<string, unknown>,
+        );
+      } else {
+        output[key] = value;
+      }
+    }
+    return output;
   }
 
   /**
