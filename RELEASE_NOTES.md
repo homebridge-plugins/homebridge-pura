@@ -1,9 +1,9 @@
 # Release Notes
 
-## 1.2.7 - 2026-02-10
+## 1.2.8 - 2026-02-10
+- Suppress contradictory realtime on/off logs during Home app transitions.
 - Debounce realtime update logs and only print stabilized state changes.
 - Log realtime updates as "device turned on/off" when the state is known.
-- Log a concise message when realtime updates are applied.
 
 ## 1.1.17 - 2026-02-09
 - Enforce `forceNightlightOff` on status refresh when the diffuser is turned on from the Pura app.

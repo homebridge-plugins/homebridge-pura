@@ -47,6 +47,9 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   private lastRealtimeLogAt: Map<string, number> = new Map();
   private realtimeLogTimers: Map<string, NodeJS.Timeout> = new Map();
   private lastRealtimeState: Map<string, boolean | null> = new Map();
+  private lastRealtimeReceiptAt: Map<string, number> = new Map();
+  private intentWindowMs = 7000;
+  private lastIntentAt: Map<string, { state: boolean; at: number }> = new Map();
   private webhookReceived = false;
   private realtimeSocket: WebSocket | null = null;
   private realtimeReconnectTimer: NodeJS.Timeout | null = null;
@@ -503,6 +506,9 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       }
     }
 
+    if (deviceId) {
+      this.logRealtimeReceipt(deviceId);
+    }
     this.triggerWebhookRefresh();
   }
 
@@ -578,6 +584,10 @@ export class PuraPlatform implements DynamicPlatformPlugin {
         return;
       }
       const state = this.getAccessoryActiveState(accessory);
+      const intent = this.lastIntentAt.get(deviceId);
+      if (intent && now - intent.at <= this.intentWindowMs && state !== null && state !== intent.state) {
+        return;
+      }
       const prevState = this.lastRealtimeState.get(deviceId);
       if (state !== null && state === prevState) {
         return;
@@ -592,6 +602,22 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       }
     }, 2000);
     this.realtimeLogTimers.set(deviceId, timer);
+  }
+
+  private logRealtimeReceipt(deviceId: string) {
+    const now = Date.now();
+    const last = this.lastRealtimeReceiptAt.get(deviceId) ?? 0;
+    if (now - last < this.realtimeLogThrottleMs) {
+      return;
+    }
+    this.lastRealtimeReceiptAt.set(deviceId, now);
+    const accessory = this.findAccessoryByDeviceId(deviceId);
+    const name = accessory?.displayName ?? deviceId;
+    this.log.info(`Realtime update received for ${name}.`);
+  }
+
+  recordIntent(deviceId: string, state: boolean) {
+    this.lastIntentAt.set(deviceId, { state, at: Date.now() });
   }
 
   private triggerWebhookRefresh() {
