@@ -13,7 +13,7 @@ export class PuraPlatformAccessory {
   private device: PuraDevice;
 
   private currentState = {
-    On: false,
+    Active: 0,
   };
   private lastNightlightOffAt = 0;
 
@@ -31,12 +31,17 @@ export class PuraPlatformAccessory {
       .setCharacteristic(this.platform.Characteristic.SerialNumber, this.device.id)
       .setCharacteristic(this.platform.Characteristic.FirmwareRevision, this.device.state?.firmwareVersion || '1.0.0');
 
+    const legacySwitch = this.accessory.getService(this.platform.Service.Switch);
+    if (legacySwitch) {
+      this.accessory.removeService(legacySwitch);
+    }
+
     this.service = this.accessory.getService(this.platform.Service.Fanv2) ||
       this.accessory.addService(this.platform.Service.Fanv2);
 
     this.service.setCharacteristic(this.platform.Characteristic.Name, accessory.displayName);
 
-    this.service.getCharacteristic(this.platform.Characteristic.On)
+    this.service.getCharacteristic(this.platform.Characteristic.Active)
       .onSet(this.setOn.bind(this))
       .onGet(this.getOn.bind(this));
 
@@ -45,14 +50,16 @@ export class PuraPlatformAccessory {
 
   private updateCurrentState() {
     const activeBay = this.getActiveBay();
-    this.currentState.On = activeBay ? Boolean(activeBay.active) : false;
+    this.currentState.Active = activeBay?.active
+      ? this.platform.Characteristic.Active.ACTIVE
+      : this.platform.Characteristic.Active.INACTIVE;
     if (activeBay) {
       this.accessory.context.lastBay = activeBay === this.device.bay1 ? 1 : 2;
       if (Number.isFinite(activeBay.intensity) && activeBay.intensity > 0) {
         this.accessory.context.lastIntensity = activeBay.intensity;
       }
     }
-    this.service.updateCharacteristic(this.platform.Characteristic.On, this.currentState.On);
+    this.service.updateCharacteristic(this.platform.Characteristic.Active, this.currentState.Active);
   }
 
   private getActiveBay(): PuraBay | undefined {
@@ -76,8 +83,8 @@ export class PuraPlatformAccessory {
   }
 
   async setOn(value: CharacteristicValue) {
-    const isOn = value as boolean;
-    this.platform.log.debug(`Set Characteristic On for ${this.accessory.displayName} ->`, value);
+    const isOn = value === this.platform.Characteristic.Active.ACTIVE;
+    this.platform.log.debug(`Set Characteristic Active for ${this.accessory.displayName} ->`, value);
 
     try {
       if (isOn) {
@@ -103,7 +110,7 @@ export class PuraPlatformAccessory {
         const controller = this.device.controller || 'default';
         const success = alwaysOn && await this.puraApi.setIntensity(this.device.id, targetBay, intensity, controller);
         if (success) {
-          this.currentState.On = true;
+          this.currentState.Active = this.platform.Characteristic.Active.ACTIVE;
           this.accessory.context.lastIntensity = intensity;
           this.accessory.context.lastBay = targetBay;
           this.platform.log.debug(`Successfully turned on ${this.accessory.displayName} with intensity ${intensity}`);
@@ -117,7 +124,7 @@ export class PuraPlatformAccessory {
       } else {
         const success = await this.puraApi.stopAll(this.device.id);
         if (success) {
-          this.currentState.On = false;
+          this.currentState.Active = this.platform.Characteristic.Active.INACTIVE;
           this.platform.log.debug(`Successfully turned off ${this.accessory.displayName}`);
         } else {
           this.platform.log.error(`Failed to turn off ${this.accessory.displayName}`);
@@ -131,9 +138,9 @@ export class PuraPlatformAccessory {
   }
 
   async getOn(): Promise<CharacteristicValue> {
-    const isOn = this.currentState.On;
-    this.platform.log.debug(`Get Characteristic On for ${this.accessory.displayName} ->`, isOn);
-    return isOn;
+    const isActive = this.currentState.Active;
+    this.platform.log.debug(`Get Characteristic Active for ${this.accessory.displayName} ->`, isActive);
+    return isActive;
   }
 
   updateDevice(device: PuraDevice) {
@@ -188,7 +195,7 @@ export class PuraPlatformAccessory {
     if (!forceOff) {
       return;
     }
-    if (!this.currentState.On || !this.device.nightlight?.active) {
+    if (this.currentState.Active !== this.platform.Characteristic.Active.ACTIVE || !this.device.nightlight?.active) {
       return;
     }
     const now = Date.now();

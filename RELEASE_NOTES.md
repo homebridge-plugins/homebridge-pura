@@ -1,6 +1,7 @@
 # Release Notes
 
-## 1.2.0 - 2026-02-10
+## 1.2.1 - 2026-02-10
+- Remove legacy Switch service to avoid duplicate accessories.
 - Fan accessory type by default for diffusers.
 - Refresh device status shortly after realtime events to keep HomeKit in sync.
 - Slow polling to 5 minutes when realtime is connected; speed up to 15 seconds when it is down.
