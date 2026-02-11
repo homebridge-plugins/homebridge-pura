@@ -1,5 +1,8 @@
 # Release Notes
 
+## 1.3.11 - 2026-02-10
+- Use `./img/` relative paths for branding assets in schema.
+
 ## 1.3.10 - 2026-02-10
 - Add banner image branding path for UI X.
 
