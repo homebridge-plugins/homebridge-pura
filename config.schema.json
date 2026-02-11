@@ -3,33 +3,36 @@
   "pluginType": "platform",
   "singular": true,
   "x-branding": {
-    "imagePath": "https://raw.githubusercontent.com/QandnotU/homebridge-pura/latest/branding/banner.png",
-    "iconPath": "https://raw.githubusercontent.com/QandnotU/homebridge-pura/latest/branding/icon.png",
+    "imagePath": "branding/banner.png",
+    "iconPath": "branding/icon.png",
     "image": "https://raw.githubusercontent.com/QandnotU/homebridge-pura/latest/branding/banner.png",
     "icon": "https://raw.githubusercontent.com/QandnotU/homebridge-pura/latest/branding/icon.png"
   },
-  "x-icon": "https://raw.githubusercontent.com/QandnotU/homebridge-pura/latest/branding/icon.png",
+  "x-icon": "branding/icon.png",
   "icon": "https://raw.githubusercontent.com/QandnotU/homebridge-pura/latest/branding/icon.png",
   "strictValidation": false,
   "schema": {
     "type": "object",
+    "headerDisplay": "![Pura Smart Diffuser](https://raw.githubusercontent.com/QandnotU/homebridge-pura/latest/branding/banner.png)",
+    "required": [
+      "name",
+      "username",
+      "password"
+    ],
     "properties": {
       "name": {
         "title": "Name",
         "type": "string",
-        "required": true,
         "default": "Pura Smart Diffuser"
       },
       "username": {
         "title": "Username",
         "type": "string",
-        "required": true,
         "description": "Your Pura app username (email address)"
       },
       "password": {
         "title": "Password",
         "type": "string",
-        "required": true,
         "description": "Your Pura app password"
       },
       "forceNightlightOff": {
