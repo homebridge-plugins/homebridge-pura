@@ -1,5 +1,9 @@
 # Release Notes
 
+## 1.4.2 - 2026-02-11
+- Force Accessory Information revision propagation by updating `FirmwareRevision`, `SoftwareRevision`, and `HardwareRevision` (when available) on initialization and refresh.
+- Use `updateCharacteristic` alongside `setCharacteristic` for revision fields to improve Home app refresh behavior.
+
 ## 1.4.1 - 2026-02-11
 - Set both `FirmwareRevision` and `SoftwareRevision` in Accessory Information to improve Home app version display consistency.
 - Harden firmware normalization to reject all-zero version forms (for example `0.0`, `0.00`, `0.0.0`) and add `swVersion`/`softwareVersion` fallback fields.
