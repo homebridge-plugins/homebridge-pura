@@ -2,7 +2,7 @@
   "name": "@qandnotu/homebridge-pura",
   "displayName": "Homebridge Pura Smart Diffuser",
   "type": "module",
-  "version": "1.3.9",
+  "version": "1.3.10",
   "description": "Homebridge plugin for Pura smart fragrance diffusers",
   "author": "QandnotU",
   "license": "Apache-2.0",

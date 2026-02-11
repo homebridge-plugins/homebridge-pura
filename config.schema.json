@@ -3,7 +3,7 @@
   "pluginType": "platform",
   "singular": true,
   "x-branding": {
-    "imagePath": "img/icon.png",
+    "imagePath": "img/banner.png",
     "iconPath": "img/icon.png"
   },
   "x-icon": "img/icon.png",

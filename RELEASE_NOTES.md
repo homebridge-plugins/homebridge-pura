@@ -1,5 +1,8 @@
 # Release Notes
 
+## 1.3.10 - 2026-02-10
+- Add banner image branding path for UI X.
+
 ## 1.3.9 - 2026-02-10
 - Resize branding icons to 256x256 for UI compatibility.
 
