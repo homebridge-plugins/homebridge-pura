@@ -3,10 +3,13 @@
   "pluginType": "platform",
   "singular": true,
   "x-branding": {
-    "imagePath": "./img/banner.png",
-    "iconPath": "./img/icon.png"
+    "imagePath": "branding/banner.png",
+    "iconPath": "branding/icon.png",
+    "image": "branding/banner.png",
+    "icon": "branding/icon.png"
   },
-  "x-icon": "./img/icon.png",
+  "x-icon": "branding/icon.png",
+  "icon": "branding/icon.png",
   "strictValidation": false,
   "schema": {
     "type": "object",

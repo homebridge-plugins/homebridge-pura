@@ -1,5 +1,10 @@
 # Release Notes
 
+## 1.4.0 - 2026-02-11
+- Reduce realtime websocket log noise in normal mode; keep close-code details in debug mode.
+- Preserve last known good firmware revision and ignore placeholder values (for example `0`).
+- Improve Homebridge UI branding compatibility by using `branding/*` asset paths and additional schema key variants.
+
 ## 1.3.11 - 2026-02-10
 - Use `./img/` relative paths for branding assets in schema.
 

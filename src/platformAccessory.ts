@@ -24,11 +24,12 @@ export class PuraPlatformAccessory {
     this.device = accessory.context.device;
 
     const safeModel = this.device.type && this.device.type.length > 1 ? this.device.type : 'Pura Diffuser';
-    this.accessory.getService(this.platform.Service.AccessoryInformation)!
+    const infoService = this.accessory.getService(this.platform.Service.AccessoryInformation)!;
+    infoService
       .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Pura')
       .setCharacteristic(this.platform.Characteristic.Model, safeModel)
       .setCharacteristic(this.platform.Characteristic.SerialNumber, this.device.id)
-      .setCharacteristic(this.platform.Characteristic.FirmwareRevision, this.device.state?.firmwareVersion || '1.0.0');
+      .setCharacteristic(this.platform.Characteristic.FirmwareRevision, this.getFirmwareRevision());
 
     this.useFanService = Boolean((this.platform.config as PuraConfig).useFanService);
     const fanService = this.accessory.getService(this.platform.Service.Fanv2);
@@ -160,11 +161,50 @@ export class PuraPlatformAccessory {
   updateDevice(device: PuraDevice) {
     this.device = device;
     this.accessory.context.device = device;
+    this.updateAccessoryInformation();
     if (this.platform.isDebugEnabled()) {
       this.platform.log.debug('Device snapshot:', this.summarizeDevice(device));
     }
     this.updateCurrentState();
     void this.maybeForceNightlightOff();
+  }
+
+  private updateAccessoryInformation() {
+    const safeModel = this.device.type && this.device.type.length > 1 ? this.device.type : 'Pura Diffuser';
+    this.accessory.getService(this.platform.Service.AccessoryInformation)!
+      .setCharacteristic(this.platform.Characteristic.Model, safeModel)
+      .setCharacteristic(this.platform.Characteristic.FirmwareRevision, this.getFirmwareRevision());
+  }
+
+  private getFirmwareRevision(): string {
+    const current = this.normalizeFirmwareRevision(this.device.state?.firmwareVersion);
+    if (current) {
+      this.accessory.context.firmwareRevision = current;
+      return current;
+    }
+    const cached = this.normalizeFirmwareRevision(this.accessory.context.firmwareRevision);
+    if (cached) {
+      return cached;
+    }
+    return '1.0.0';
+  }
+
+  private normalizeFirmwareRevision(value: unknown): string | undefined {
+    if (typeof value !== 'string' && typeof value !== 'number') {
+      return undefined;
+    }
+    const normalized = String(value).trim();
+    if (!normalized) {
+      return undefined;
+    }
+    const lowered = normalized.toLowerCase();
+    if (lowered === '0' || lowered === '0.0' || lowered === '0.0.0') {
+      return undefined;
+    }
+    if (lowered === 'unknown' || lowered === 'null' || lowered === 'undefined' || lowered === 'n/a') {
+      return undefined;
+    }
+    return normalized;
   }
 
   private summarizeDevice(device: PuraDevice) {

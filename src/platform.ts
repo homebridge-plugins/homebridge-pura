@@ -50,6 +50,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   private realtimeSocket: WebSocket | null = null;
   private realtimeReconnectTimer: NodeJS.Timeout | null = null;
   private realtimeFailures = 0;
+  private realtimeConnectionAnnounced = false;
 
   constructor(
     public readonly log: Logging,
@@ -365,7 +366,12 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       this.realtimeFailures = 0;
       this.realtimeConnected = true;
       this.updatePollingForRealtime();
-      this.log.info('Connected to Pura realtime updates.');
+      if (this.debugEnabled) {
+        this.log.info('Connected to Pura realtime updates.');
+      } else if (!this.realtimeConnectionAnnounced) {
+        this.log.info('Realtime updates active.');
+        this.realtimeConnectionAnnounced = true;
+      }
       this.scheduleRealtimeStableLog();
     });
 
@@ -401,7 +407,11 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       }
       this.updatePollingForRealtime();
       const detail = reason ? ` (${reason.toString()})` : '';
-      this.log.warn(`Realtime updates disconnected (code ${code})${detail}; will retry.`);
+      if (this.debugEnabled) {
+        this.log.warn(`Realtime updates disconnected (code ${code})${detail}; will retry.`);
+      } else if (code !== 1000 && code !== 1001) {
+        this.log.warn('Realtime updates temporarily disconnected; retrying automatically.');
+      }
       this.scheduleRealtimeReconnect();
     });
   }

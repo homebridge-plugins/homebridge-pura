@@ -254,7 +254,9 @@ export class PuraApi {
     }
 
 
-    const firmwareVersion = (record.fwVersion || record.firmwareVersion) as string | undefined;
+    const firmwareVersion =
+      this.normalizeFirmwareVersion(record.fwVersion) ??
+      this.normalizeFirmwareVersion(record.firmwareVersion);
     const deviceVersion = (record.deviceVer || record.version) as string | undefined;
     const hwVersion = record.hwVersion as string | undefined;
     const type = (record.type || record.model || 'Pura Diffuser') as string;
@@ -304,6 +306,24 @@ export class PuraApi {
 
   public normalizeDeviceRecord(device: unknown): PuraDevice | null {
     return this.normalizeDevice(device);
+  }
+
+  private normalizeFirmwareVersion(value: unknown): string | undefined {
+    if (typeof value !== 'string' && typeof value !== 'number') {
+      return undefined;
+    }
+    const normalized = String(value).trim();
+    if (!normalized) {
+      return undefined;
+    }
+    const lowered = normalized.toLowerCase();
+    if (lowered === '0' || lowered === '0.0' || lowered === '0.0.0') {
+      return undefined;
+    }
+    if (lowered === 'unknown' || lowered === 'null' || lowered === 'undefined' || lowered === 'n/a') {
+      return undefined;
+    }
+    return normalized;
   }
 
   private normalizeModel(value: unknown): string {
