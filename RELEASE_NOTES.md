@@ -1,5 +1,9 @@
 # Release Notes
 
+## 1.4.3 - 2026-02-11
+- Fix config schema `required` validation by using object-level required fields.
+- Add/adjust GitHub Actions release workflow to auto-create GitHub Releases from pushed version tags.
+
 ## 1.4.2 - 2026-02-11
 - Force Accessory Information revision propagation by updating `FirmwareRevision`, `SoftwareRevision`, and `HardwareRevision` (when available) on initialization and refresh.
 - Use `updateCharacteristic` alongside `setCharacteristic` for revision fields to improve Home app refresh behavior.
