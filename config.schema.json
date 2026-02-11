@@ -2,6 +2,9 @@
   "pluginAlias": "PuraSmartDiffuser",
   "pluginType": "platform",
   "singular": true,
+  "x-branding": {
+    "imagePath": "img/icon.png"
+  },
   "strictValidation": false,
   "schema": {
     "type": "object",

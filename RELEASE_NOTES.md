@@ -1,5 +1,8 @@
 # Release Notes
 
+## 1.3.7 - 2026-02-10
+- Add `img/icon.png` and schema branding path for UI icon compatibility.
+
 ## 1.3.6 - 2026-02-10
 - Reduce log noise; keep device snapshots and API details in debug mode.
 - Add concise on/off action logs and hourly realtime stability info.
