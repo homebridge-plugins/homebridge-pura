@@ -51,6 +51,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   private realtimeReconnectTimer: NodeJS.Timeout | null = null;
   private realtimeFailures = 0;
   private realtimeConnectionAnnounced = false;
+  private disabledDueToConfig = false;
 
   constructor(
     public readonly log: Logging,
@@ -59,15 +60,24 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   ) {
     this.Service = api.hap.Service;
     this.Characteristic = api.hap.Characteristic;
-
-    // Validate configuration
-    if (!config.username || !config.password) {
-      this.log.error('Username and password are required in the config');
-      throw new Error('Username and password are required in the config');
-    }
-
-    this.puraConfig = config as PuraConfig;
+    this.puraConfig = {
+      ...(config as PuraConfig),
+      username: typeof config.username === 'string' ? config.username : '',
+      password: typeof config.password === 'string' ? config.password : '',
+    };
     this.puraApi = new PuraApi(this.log);
+
+    // Validate configuration without crashing Homebridge startup.
+    const missingConfig = this.getMissingRequiredConfig();
+    if (missingConfig.length > 0) {
+      this.disabledDueToConfig = true;
+      this.log.error(
+        `Plugin disabled: missing required configuration value(s): ${missingConfig.join(', ')}.`,
+      );
+      this.log.error(
+        `Update your Homebridge config for platform "${PLATFORM_NAME}" and restart Homebridge.`,
+      );
+    }
 
     this.log.debug('Pura API config: using default baseUrl');
 
@@ -79,8 +89,12 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     // to start discovery of new accessories.
     this.api.on('didFinishLaunching', () => {
       log.debug('Executed didFinishLaunching callback');
+      if (this.disabledDueToConfig) {
+        this.log.warn('Skipping device discovery because plugin configuration is incomplete.');
+        return;
+      }
       // run the method to discover / register your devices as accessories
-      this.discoverDevices();
+      void this.discoverDevices();
     });
 
     // Clean up on shutdown
@@ -113,6 +127,9 @@ export class PuraPlatform implements DynamicPlatformPlugin {
    * Discover and register Pura devices
    */
   async discoverDevices(): Promise<void> {
+    if (this.disabledDueToConfig) {
+      return;
+    }
     try {
       // Authenticate with Pura
       this.log.info('Authenticating with Pura...');
@@ -148,6 +165,17 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       }
       this.log.error('Failed to discover Pura devices:', error);
     }
+  }
+
+  private getMissingRequiredConfig(): string[] {
+    const missing: string[] = [];
+    if (!this.puraConfig.username.trim()) {
+      missing.push('username');
+    }
+    if (!this.puraConfig.password.trim()) {
+      missing.push('password');
+    }
+    return missing;
   }
 
   private async tryAutoUpdateCognito(error: unknown): Promise<boolean> {

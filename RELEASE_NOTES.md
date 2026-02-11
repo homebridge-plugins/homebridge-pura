@@ -1,5 +1,9 @@
 # Release Notes
 
+## 1.4.4 - 2026-02-11
+- Prevent startup crash-restart loops when required config is missing.
+- Validate missing `username`/`password` at startup, log actionable errors, and disable discovery safely instead of throwing.
+
 ## 1.4.3 - 2026-02-11
 - Fix config schema `required` validation by using object-level required fields.
 - Add/adjust GitHub Actions release workflow to auto-create GitHub Releases from pushed version tags.
