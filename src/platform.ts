@@ -35,7 +35,9 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   private refreshInFlight: Promise<void> | null = null;
   private refreshQueued = false;
   private lastRefreshAt = 0;
+  private debugEnabled = process.argv.includes('-D') || process.argv.includes('--debug');
   private realtimeConnected = false;
+  private realtimeStableTimer: NodeJS.Timeout | null = null;
   private cognitoRefreshInterval: NodeJS.Timeout | null = null;
   private attemptedCognitoUpdate = false;
   private latestCognitoVersion: string | null = null;
@@ -66,7 +68,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     this.puraConfig = config as PuraConfig;
     this.puraApi = new PuraApi(this.log);
 
-    this.log.info('Pura API config: using default baseUrl');
+    this.log.debug('Pura API config: using default baseUrl');
 
     this.log.debug('Finished initializing platform:', this.config.name);
 
@@ -100,7 +102,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
    * It should be used to set up event handlers for characteristics and update respective values.
    */
   configureAccessory(accessory: PlatformAccessory) {
-    this.log.info('Loading accessory from cache:', accessory.displayName);
+    this.log.debug('Loading accessory from cache:', accessory.displayName);
 
     // add the restored accessory to the accessories cache, so we can track if it has already been registered
     this.accessories.set(accessory.UUID, accessory);
@@ -351,7 +353,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       return;
     }
 
-    this.log.info('Connecting to Pura realtime updates...');
+    this.log.debug('Connecting to Pura realtime updates...');
     const socket = new WebSocket('wss://socket.trypura.io', {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -364,6 +366,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       this.realtimeConnected = true;
       this.updatePollingForRealtime();
       this.log.info('Connected to Pura realtime updates.');
+      this.scheduleRealtimeStableLog();
     });
 
     socket.on('message', (data: WebSocket.RawData) => {
@@ -377,6 +380,10 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       this.log.debug('Realtime socket error:', error);
       if (this.realtimeConnected) {
         this.realtimeConnected = false;
+        if (this.realtimeStableTimer) {
+          clearTimeout(this.realtimeStableTimer);
+          this.realtimeStableTimer = null;
+        }
         this.updatePollingForRealtime();
       }
       if (socket.readyState !== WebSocket.CLOSED && socket.readyState !== WebSocket.CLOSING) {
@@ -388,6 +395,10 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     socket.on('close', (code: number, reason: Buffer) => {
       this.realtimeSocket = null;
       this.realtimeConnected = false;
+      if (this.realtimeStableTimer) {
+        clearTimeout(this.realtimeStableTimer);
+        this.realtimeStableTimer = null;
+      }
       this.updatePollingForRealtime();
       const detail = reason ? ` (${reason.toString()})` : '';
       this.log.warn(`Realtime updates disconnected (code ${code})${detail}; will retry.`);
@@ -399,6 +410,10 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     if (this.realtimeReconnectTimer) {
       clearTimeout(this.realtimeReconnectTimer);
       this.realtimeReconnectTimer = null;
+    }
+    if (this.realtimeStableTimer) {
+      clearTimeout(this.realtimeStableTimer);
+      this.realtimeStableTimer = null;
     }
     if (this.realtimeSocket) {
       try {
@@ -593,11 +608,28 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     this.refreshBaseIntervalSeconds = nextBase;
     this.refreshFailures = 0;
     const label = this.realtimeConnected ? 'realtime connected' : 'realtime disconnected';
-    this.log.info(`Adjusting polling interval to ${nextBase}s (${label}).`);
+    this.log.debug(`Adjusting polling interval to ${nextBase}s (${label}).`);
     const ageMs = Date.now() - this.lastRefreshAt;
     if (!this.refreshInFlight && ageMs > 60000) {
       this.scheduleNextRefresh(0);
     }
+  }
+
+  isDebugEnabled(): boolean {
+    return this.debugEnabled;
+  }
+
+  private scheduleRealtimeStableLog() {
+    if (this.realtimeStableTimer) {
+      clearTimeout(this.realtimeStableTimer);
+    }
+    this.realtimeStableTimer = setTimeout(() => {
+      this.realtimeStableTimer = null;
+      if (this.realtimeConnected) {
+        this.log.info('Realtime connection stable for 60 minutes.');
+        this.scheduleRealtimeStableLog();
+      }
+    }, 60 * 60 * 1000);
   }
 
   private deepMerge(

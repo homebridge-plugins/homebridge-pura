@@ -1,5 +1,9 @@
 # Release Notes
 
+## 1.3.6 - 2026-02-10
+- Reduce log noise; keep device snapshots and API details in debug mode.
+- Add concise on/off action logs and hourly realtime stability info.
+
 ## 1.3.5 - 2026-02-10
 - Add intent settle window to suppress stale refresh/realtime updates after a user toggle.
 

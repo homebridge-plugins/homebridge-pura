@@ -125,6 +125,7 @@ export class PuraPlatformAccessory {
           this.accessory.context.lastBay = targetBay;
           this.platform.log.debug(`Successfully turned on ${this.accessory.displayName} with intensity ${intensity}`);
           this.applyCurrentState();
+          this.platform.log.info(`${this.accessory.displayName} turned on.`);
           if ((this.platform.config as PuraConfig).forceNightlightOff) {
             await this.ensureNightlightOff();
           }
@@ -138,6 +139,7 @@ export class PuraPlatformAccessory {
           this.currentStateActive = false;
           this.platform.log.debug(`Successfully turned off ${this.accessory.displayName}`);
           this.applyCurrentState();
+          this.platform.log.info(`${this.accessory.displayName} turned off.`);
         } else {
           this.platform.log.error(`Failed to turn off ${this.accessory.displayName}`);
           throw new Error('Failed to turn off device');
@@ -158,7 +160,9 @@ export class PuraPlatformAccessory {
   updateDevice(device: PuraDevice) {
     this.device = device;
     this.accessory.context.device = device;
-    this.platform.log.debug('Device snapshot:', this.summarizeDevice(device));
+    if (this.platform.isDebugEnabled()) {
+      this.platform.log.debug('Device snapshot:', this.summarizeDevice(device));
+    }
     this.updateCurrentState();
     void this.maybeForceNightlightOff();
   }
