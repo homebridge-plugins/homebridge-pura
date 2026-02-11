@@ -1,5 +1,8 @@
 # Release Notes
 
+## 1.3.8 - 2026-02-10
+- Add `x-icon`/`iconPath` hints for Homebridge UI icon compatibility.
+
 ## 1.3.7 - 2026-02-10
 - Add `img/icon.png` and schema branding path for UI icon compatibility.
 
