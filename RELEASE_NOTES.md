@@ -1,5 +1,10 @@
 # Release Notes
 
+## 1.4.1 - 2026-02-11
+- Set both `FirmwareRevision` and `SoftwareRevision` in Accessory Information to improve Home app version display consistency.
+- Harden firmware normalization to reject all-zero version forms (for example `0.0`, `0.00`, `0.0.0`) and add `swVersion`/`softwareVersion` fallback fields.
+- Switch schema branding image/icon references to absolute GitHub raw URLs for better Homebridge UI compatibility.
+
 ## 1.4.0 - 2026-02-11
 - Reduce realtime websocket log noise in normal mode; keep close-code details in debug mode.
 - Preserve last known good firmware revision and ignore placeholder values (for example `0`).

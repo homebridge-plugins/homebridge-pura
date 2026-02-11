@@ -3,13 +3,13 @@
   "pluginType": "platform",
   "singular": true,
   "x-branding": {
-    "imagePath": "branding/banner.png",
-    "iconPath": "branding/icon.png",
-    "image": "branding/banner.png",
-    "icon": "branding/icon.png"
+    "imagePath": "https://raw.githubusercontent.com/QandnotU/homebridge-pura/latest/branding/banner.png",
+    "iconPath": "https://raw.githubusercontent.com/QandnotU/homebridge-pura/latest/branding/icon.png",
+    "image": "https://raw.githubusercontent.com/QandnotU/homebridge-pura/latest/branding/banner.png",
+    "icon": "https://raw.githubusercontent.com/QandnotU/homebridge-pura/latest/branding/icon.png"
   },
-  "x-icon": "branding/icon.png",
-  "icon": "branding/icon.png",
+  "x-icon": "https://raw.githubusercontent.com/QandnotU/homebridge-pura/latest/branding/icon.png",
+  "icon": "https://raw.githubusercontent.com/QandnotU/homebridge-pura/latest/branding/icon.png",
   "strictValidation": false,
   "schema": {
     "type": "object",

@@ -25,11 +25,18 @@ export class PuraPlatformAccessory {
 
     const safeModel = this.device.type && this.device.type.length > 1 ? this.device.type : 'Pura Diffuser';
     const infoService = this.accessory.getService(this.platform.Service.AccessoryInformation)!;
+    const firmwareRevision = this.getFirmwareRevision();
     infoService
       .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Pura')
       .setCharacteristic(this.platform.Characteristic.Model, safeModel)
       .setCharacteristic(this.platform.Characteristic.SerialNumber, this.device.id)
-      .setCharacteristic(this.platform.Characteristic.FirmwareRevision, this.getFirmwareRevision());
+      .setCharacteristic(this.platform.Characteristic.FirmwareRevision, firmwareRevision);
+    const softwareRevisionCharacteristic = (this.platform.Characteristic as unknown as {
+      SoftwareRevision?: string;
+    }).SoftwareRevision;
+    if (softwareRevisionCharacteristic) {
+      infoService.setCharacteristic(softwareRevisionCharacteristic, firmwareRevision);
+    }
 
     this.useFanService = Boolean((this.platform.config as PuraConfig).useFanService);
     const fanService = this.accessory.getService(this.platform.Service.Fanv2);
@@ -171,9 +178,17 @@ export class PuraPlatformAccessory {
 
   private updateAccessoryInformation() {
     const safeModel = this.device.type && this.device.type.length > 1 ? this.device.type : 'Pura Diffuser';
-    this.accessory.getService(this.platform.Service.AccessoryInformation)!
+    const firmwareRevision = this.getFirmwareRevision();
+    const infoService = this.accessory.getService(this.platform.Service.AccessoryInformation)!;
+    infoService
       .setCharacteristic(this.platform.Characteristic.Model, safeModel)
-      .setCharacteristic(this.platform.Characteristic.FirmwareRevision, this.getFirmwareRevision());
+      .setCharacteristic(this.platform.Characteristic.FirmwareRevision, firmwareRevision);
+    const softwareRevisionCharacteristic = (this.platform.Characteristic as unknown as {
+      SoftwareRevision?: string;
+    }).SoftwareRevision;
+    if (softwareRevisionCharacteristic) {
+      infoService.setCharacteristic(softwareRevisionCharacteristic, firmwareRevision);
+    }
   }
 
   private getFirmwareRevision(): string {
@@ -181,6 +196,11 @@ export class PuraPlatformAccessory {
     if (current) {
       this.accessory.context.firmwareRevision = current;
       return current;
+    }
+    const fromDeviceVersion = this.normalizeFirmwareRevision(this.device.version);
+    if (fromDeviceVersion) {
+      this.accessory.context.firmwareRevision = fromDeviceVersion;
+      return fromDeviceVersion;
     }
     const cached = this.normalizeFirmwareRevision(this.accessory.context.firmwareRevision);
     if (cached) {
@@ -198,13 +218,20 @@ export class PuraPlatformAccessory {
       return undefined;
     }
     const lowered = normalized.toLowerCase();
-    if (lowered === '0' || lowered === '0.0' || lowered === '0.0.0') {
+    if (this.isZeroVersion(lowered)) {
       return undefined;
     }
     if (lowered === 'unknown' || lowered === 'null' || lowered === 'undefined' || lowered === 'n/a') {
       return undefined;
     }
     return normalized;
+  }
+
+  private isZeroVersion(value: string): boolean {
+    if (value === '0') {
+      return true;
+    }
+    return /^0(?:\.0+)+$/.test(value);
   }
 
   private summarizeDevice(device: PuraDevice) {

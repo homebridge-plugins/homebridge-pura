@@ -256,7 +256,9 @@ export class PuraApi {
 
     const firmwareVersion =
       this.normalizeFirmwareVersion(record.fwVersion) ??
-      this.normalizeFirmwareVersion(record.firmwareVersion);
+      this.normalizeFirmwareVersion(record.firmwareVersion) ??
+      this.normalizeFirmwareVersion(record.swVersion) ??
+      this.normalizeFirmwareVersion(record.softwareVersion);
     const deviceVersion = (record.deviceVer || record.version) as string | undefined;
     const hwVersion = record.hwVersion as string | undefined;
     const type = (record.type || record.model || 'Pura Diffuser') as string;
@@ -317,13 +319,20 @@ export class PuraApi {
       return undefined;
     }
     const lowered = normalized.toLowerCase();
-    if (lowered === '0' || lowered === '0.0' || lowered === '0.0.0') {
+    if (this.isZeroVersion(lowered)) {
       return undefined;
     }
     if (lowered === 'unknown' || lowered === 'null' || lowered === 'undefined' || lowered === 'n/a') {
       return undefined;
     }
     return normalized;
+  }
+
+  private isZeroVersion(value: string): boolean {
+    if (value === '0') {
+      return true;
+    }
+    return /^0(?:\.0+)+$/.test(value);
   }
 
   private normalizeModel(value: unknown): string {
