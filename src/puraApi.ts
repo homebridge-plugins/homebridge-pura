@@ -325,7 +325,20 @@ export class PuraApi {
     if (lowered === 'unknown' || lowered === 'null' || lowered === 'undefined' || lowered === 'n/a') {
       return undefined;
     }
-    return normalized;
+    const withoutVPrefix = normalized.replace(/^[vV]/, '');
+    if (!/^\d+(?:\.\d+){0,3}$/.test(withoutVPrefix)) {
+      return undefined;
+    }
+    if (this.isZeroVersion(withoutVPrefix)) {
+      return undefined;
+    }
+    if (/^\d+$/.test(withoutVPrefix)) {
+      return `${withoutVPrefix}.0.0`;
+    }
+    if (/^\d+\.\d+$/.test(withoutVPrefix)) {
+      return `${withoutVPrefix}.0`;
+    }
+    return withoutVPrefix;
   }
 
   private isZeroVersion(value: string): boolean {

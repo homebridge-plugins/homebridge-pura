@@ -1,5 +1,9 @@
 # Release Notes
 
+## 1.4.5 - 2026-02-11
+- Tighten firmware-version normalization to prevent `0.0` regressions from non-firmware fields.
+- Refresh branding assets and README image usage updates.
+
 ## 1.4.4 - 2026-02-11
 - Prevent startup crash-restart loops when required config is missing.
 - Validate missing `username`/`password` at startup, log actionable errors, and disable discovery safely instead of throwing.

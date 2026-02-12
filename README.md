@@ -1,6 +1,8 @@
-<img src="Pura_black_Logo.jpg" alt="Pura Logo" width="225" />
+<img src="branding/icon.png" alt="Pura Logo" width="125" />
 
 **A Homebridge plugin for Pura smart fragrance diffusers.**
+
+[![verified-by-homebridge](https://img.shields.io/badge/homebridge-verified-blueviolet?color=%23491F59&style=flat)](https://github.com/homebridge/homebridge/wiki/Verified-Plugins)
 
 This plugin is intentionally simple. It exposes a single on/off switch per diffuser, allowing you to control each device using HomeKit.
 
