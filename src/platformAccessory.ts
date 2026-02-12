@@ -29,8 +29,10 @@ export class PuraPlatformAccessory {
     infoService
       .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Pura')
       .setCharacteristic(this.platform.Characteristic.Model, safeModel)
-      .setCharacteristic(this.platform.Characteristic.SerialNumber, this.device.id)
-      .setCharacteristic(this.platform.Characteristic.FirmwareRevision, firmwareRevision);
+      .setCharacteristic(this.platform.Characteristic.SerialNumber, this.device.id);
+    if (firmwareRevision) {
+      infoService.setCharacteristic(this.platform.Characteristic.FirmwareRevision, firmwareRevision);
+    }
 
     this.useFanService = Boolean((this.platform.config as PuraConfig).useFanService);
     const fanService = this.accessory.getService(this.platform.Service.Fanv2);
@@ -174,17 +176,29 @@ export class PuraPlatformAccessory {
     const safeModel = this.device.type && this.device.type.length > 1 ? this.device.type : 'Pura Diffuser';
     const firmwareRevision = this.getFirmwareRevision();
     const infoService = this.accessory.getService(this.platform.Service.AccessoryInformation)!;
-    infoService
-      .setCharacteristic(this.platform.Characteristic.Model, safeModel)
-      .setCharacteristic(this.platform.Characteristic.FirmwareRevision, firmwareRevision);
+    infoService.setCharacteristic(this.platform.Characteristic.Model, safeModel);
+    if (firmwareRevision) {
+      infoService.setCharacteristic(this.platform.Characteristic.FirmwareRevision, firmwareRevision);
+    }
   }
 
-  private getFirmwareRevision(): string {
+  private getFirmwareRevision(): string | undefined {
     const current = this.normalizeFirmwareRevision(this.device.state?.firmwareVersion);
     if (current) {
+      this.accessory.context.firmwareRevision = current;
       return current;
     }
-    return '1.0.0';
+    const raw = this.device.__raw as Record<string, unknown> | undefined;
+    const fromRaw = this.normalizeFirmwareRevision(raw?.firmwareVersion ?? raw?.fwVersion);
+    if (fromRaw) {
+      this.accessory.context.firmwareRevision = fromRaw;
+      return fromRaw;
+    }
+    const cached = this.normalizeFirmwareRevision(this.accessory.context.firmwareRevision);
+    if (cached) {
+      return cached;
+    }
+    return undefined;
   }
 
   private normalizeFirmwareRevision(value: unknown): string | undefined {

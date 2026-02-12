@@ -1,5 +1,10 @@
 # Release Notes
 
+## 1.4.7 - 2026-02-12
+- Prefer API `firmwareVersion` with `fwVersion` fallback to improve firmware extraction reliability.
+- Stop defaulting firmware to `1.0.0`; only set HomeKit firmware when a validated value exists.
+- Add raw payload and last-known-good fallback in accessory firmware mapping to avoid transient `1.0` display.
+
 ## 1.4.6 - 2026-02-12
 - Use only API `firmwareVersion` for HomeKit firmware reporting and remove alternate firmware-field fallbacks.
 - Stop writing `SoftwareRevision`/`HardwareRevision`; update only `FirmwareRevision` to avoid `0.0` display conflicts.
