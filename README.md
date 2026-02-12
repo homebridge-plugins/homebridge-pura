@@ -8,7 +8,10 @@ This plugin is intentionally simple. It exposes a single on/off switch per diffu
 
 It’s designed to be used with Pura’s auto-away and scheduling features disabled, so HomeKit can act as the primary automation layer.
 
-While all Pura diffusers are supported, this plugin is best suited for newer Pura models that support auto-alternating fragrances, ensuring equal distribution while the diffuser is running.
+## Supported Diffusers
+This plugin is designed and tested for the following diffusers.
+
+<img src="branding/supported-devices.png" alt="Supported Pura Diffusers" />
 
 ## Installation
 

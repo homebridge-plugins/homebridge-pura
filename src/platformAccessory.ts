@@ -31,7 +31,6 @@ export class PuraPlatformAccessory {
       .setCharacteristic(this.platform.Characteristic.Model, safeModel)
       .setCharacteristic(this.platform.Characteristic.SerialNumber, this.device.id)
       .setCharacteristic(this.platform.Characteristic.FirmwareRevision, firmwareRevision);
-    this.updateRevisionCharacteristics(infoService, firmwareRevision);
 
     this.useFanService = Boolean((this.platform.config as PuraConfig).useFanService);
     const fanService = this.accessory.getService(this.platform.Service.Fanv2);
@@ -178,18 +177,12 @@ export class PuraPlatformAccessory {
     infoService
       .setCharacteristic(this.platform.Characteristic.Model, safeModel)
       .setCharacteristic(this.platform.Characteristic.FirmwareRevision, firmwareRevision);
-    this.updateRevisionCharacteristics(infoService, firmwareRevision);
   }
 
   private getFirmwareRevision(): string {
     const current = this.normalizeFirmwareRevision(this.device.state?.firmwareVersion);
     if (current) {
-      this.accessory.context.firmwareRevision = current;
       return current;
-    }
-    const cached = this.normalizeFirmwareRevision(this.accessory.context.firmwareRevision);
-    if (cached) {
-      return cached;
     }
     return '1.0.0';
   }
@@ -230,22 +223,6 @@ export class PuraPlatformAccessory {
       return true;
     }
     return /^0(?:\.0+)+$/.test(value);
-  }
-
-  private updateRevisionCharacteristics(service: Service, revision: string) {
-    const dynamicCharacteristics = this.platform.Characteristic as unknown as {
-      SoftwareRevision?: string;
-      HardwareRevision?: string;
-    };
-    service.updateCharacteristic(this.platform.Characteristic.FirmwareRevision, revision);
-    if (dynamicCharacteristics.SoftwareRevision) {
-      service.setCharacteristic(dynamicCharacteristics.SoftwareRevision, revision);
-      service.updateCharacteristic(dynamicCharacteristics.SoftwareRevision, revision);
-    }
-    if (dynamicCharacteristics.HardwareRevision) {
-      service.setCharacteristic(dynamicCharacteristics.HardwareRevision, revision);
-      service.updateCharacteristic(dynamicCharacteristics.HardwareRevision, revision);
-    }
   }
 
   private summarizeDevice(device: PuraDevice) {

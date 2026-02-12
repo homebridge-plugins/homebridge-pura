@@ -1,5 +1,10 @@
 # Release Notes
 
+## 1.4.6 - 2026-02-12
+- Use only API `firmwareVersion` for HomeKit firmware reporting and remove alternate firmware-field fallbacks.
+- Stop writing `SoftwareRevision`/`HardwareRevision`; update only `FirmwareRevision` to avoid `0.0` display conflicts.
+- Include README documentation updates.
+
 ## 1.4.5 - 2026-02-11
 - Tighten firmware-version normalization to prevent `0.0` regressions from non-firmware fields.
 - Refresh branding assets and README image usage updates.

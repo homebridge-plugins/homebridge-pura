@@ -254,11 +254,7 @@ export class PuraApi {
     }
 
 
-    const firmwareVersion =
-      this.normalizeFirmwareVersion(record.fwVersion) ??
-      this.normalizeFirmwareVersion(record.firmwareVersion) ??
-      this.normalizeFirmwareVersion(record.swVersion) ??
-      this.normalizeFirmwareVersion(record.softwareVersion);
+    const firmwareVersion = this.normalizeFirmwareVersion(record.firmwareVersion);
     const deviceVersion = (record.deviceVer || record.version) as string | undefined;
     const hwVersion = record.hwVersion as string | undefined;
     const type = (record.type || record.model || 'Pura Diffuser') as string;
