@@ -1,18 +1,18 @@
 {
-  "name": "@qandnotu/homebridge-pura",
+  "name": "@homebridge-plugins/homebridge-pura",
   "displayName": "Homebridge Pura Smart Diffuser",
   "type": "module",
   "version": "1.4.7",
   "description": "Homebridge plugin for Pura smart fragrance diffusers",
   "author": "QandnotU",
   "license": "Apache-2.0",
-  "homepage": "https://github.com/QandnotU/homebridge-pura#readme",
+  "homepage": "https://github.com/homebridge-plugins/homebridge-pura#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/QandnotU/homebridge-pura.git"
+    "url": "git+https://github.com/homebridge-plugins/homebridge-pura.git"
   },
   "bugs": {
-    "url": "https://github.com/QandnotU/homebridge-pura/issues"
+    "url": "https://github.com/homebridge-plugins/homebridge-pura/issues"
   },
   "keywords": [
     "homebridge",
@@ -35,21 +35,21 @@
   },
   "dependencies": {
     "amazon-cognito-identity-js": "^6.3.12",
-    "homebridge-lib": "^7.1.4",
+    "homebridge-lib": "^7.3.1",
     "node-fetch": "^3.3.2",
     "tar": "^7.5.7",
     "ws": "^8.19.0"
   },
   "devDependencies": {
-    "@eslint/js": "^9.21.0",
-    "@types/node": "^22.13.5",
+    "@eslint/js": "^9.39.2",
+    "@types/node": "^25.2.3",
     "@types/tar": "^6.1.13",
     "@types/ws": "^8.18.1",
-    "eslint": "^9.21.0",
+    "eslint": "^9.39.2",
     "homebridge": "^2.0.0-beta.0",
     "nodemon": "^3.1.9",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.3",
-    "typescript-eslint": "^8.24.1"
+    "typescript-eslint": "^8.55.0"
   }
 }

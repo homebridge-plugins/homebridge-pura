@@ -15,7 +15,7 @@ This plugin is designed and tested for the following diffusers.
 
 ## Installation
 
-1. Install this plugin using: `npm install -g @qandnotu/homebridge-pura`
+1. Install this plugin using: `npm install -g @homebridge-plugins/homebridge-pura`
 2. Edit your `config.json` file (see sample config below)
 3. Run Homebridge
 
@@ -97,7 +97,7 @@ If the plugin loses connection:
 
 ## Support
 
-For issues and feature requests, please use the [GitHub Issues](https://github.com/QandnotU/homebridge-pura/issues) page.
+For issues and feature requests, please use the [GitHub Issues](https://github.com/homebridge-plugins/homebridge-pura/issues) page.
 
 ## Credits
 
