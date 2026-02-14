@@ -118,9 +118,69 @@ export class PuraPlatform implements DynamicPlatformPlugin {
    */
   configureAccessory(accessory: PlatformAccessory) {
     this.log.debug('Loading accessory from cache:', accessory.displayName);
+    const infoService = accessory.getService(this.Service.AccessoryInformation);
+    if (infoService) {
+      const context = accessory.context as Record<string, unknown>;
+      const cachedDevice = context.device as Record<string, unknown> | undefined;
+      const cachedState = cachedDevice?.state as Record<string, unknown> | undefined;
+      const cachedRaw = cachedDevice?.__raw as Record<string, unknown> | undefined;
+      const firmware = this.normalizeRevision(
+        context.firmwareRevision ?? cachedState?.firmwareVersion ?? cachedRaw?.firmwareVersion ?? cachedRaw?.fwVersion,
+      );
+      const hardware = this.normalizeRevision(context.hardwareRevision ?? cachedRaw?.hwVersion);
+      if (firmware) {
+        infoService.setCharacteristic(this.Characteristic.FirmwareRevision, firmware);
+        infoService.updateCharacteristic(this.Characteristic.FirmwareRevision, firmware);
+        infoService.setCharacteristic(this.Characteristic.SoftwareRevision, firmware);
+        infoService.updateCharacteristic(this.Characteristic.SoftwareRevision, firmware);
+      }
+      if (hardware) {
+        infoService.setCharacteristic(this.Characteristic.HardwareRevision, hardware);
+        infoService.updateCharacteristic(this.Characteristic.HardwareRevision, hardware);
+      }
+      if (firmware || hardware) {
+        this.api.updatePlatformAccessories([accessory]);
+        if (this.isDebugEnabled()) {
+          this.log.debug(
+            `Hydrated cached revisions for ${accessory.displayName}: firmware=${firmware ?? 'none'}, hardware=${hardware ?? 'none'}`,
+          );
+        }
+      }
+    }
 
     // add the restored accessory to the accessories cache, so we can track if it has already been registered
     this.accessories.set(accessory.UUID, accessory);
+  }
+
+  private normalizeRevision(value: unknown): string | undefined {
+    if (typeof value !== 'string' && typeof value !== 'number') {
+      return undefined;
+    }
+    const normalized = String(value).trim();
+    if (!normalized) {
+      return undefined;
+    }
+    const lowered = normalized.toLowerCase();
+    if (lowered === '0' || /^0(?:\.0+)+$/.test(lowered)) {
+      return undefined;
+    }
+    if (lowered === 'unknown' || lowered === 'null' || lowered === 'undefined' || lowered === 'n/a') {
+      return undefined;
+    }
+    const withoutVPrefix = normalized.replace(/^[vV]/, '');
+    if (!/^\d+(?:\.\d+){0,3}$/.test(withoutVPrefix)) {
+      return undefined;
+    }
+    if (withoutVPrefix === '0' || /^0(?:\.0+)+$/.test(withoutVPrefix)) {
+      return undefined;
+    }
+    if (/^\d+$/.test(withoutVPrefix)) {
+      return `${withoutVPrefix}.0.0`;
+    }
+    if (/^\d+\.\d+$/.test(withoutVPrefix)) {
+      return `${withoutVPrefix}.0`;
+    }
+    return withoutVPrefix;
   }
 
   /**
