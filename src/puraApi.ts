@@ -533,14 +533,7 @@ export class PuraApi {
 
   private normalizeIntensity(intensity: number): { apiIntensity: string; controller: string } {
     const clamped = Math.max(0, Math.min(100, Number(intensity) || 0));
-    let apiIntensity: string = 'medium';
-    if (clamped <= 33) {
-      apiIntensity = 'subtle';
-    } else if (clamped <= 66) {
-      apiIntensity = 'medium';
-    } else {
-      apiIntensity = 'strong';
-    }
+    const apiIntensity = clamped <= 33 ? 'subtle' : clamped <= 66 ? 'medium' : 'strong';
     return {
       apiIntensity,
       controller: 'default',
