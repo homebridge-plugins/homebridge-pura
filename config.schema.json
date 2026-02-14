@@ -10,7 +10,7 @@
   },
   "x-icon": "branding/icon.png",
   "icon": "https://raw.githubusercontent.com/homebridge-plugins/homebridge-pura/alpha-1.5.0/branding/icon.png",
-  "headerDisplay": "<img src=\"https://raw.githubusercontent.com/homebridge-plugins/homebridge-pura/alpha-1.5.0/branding/banner.png\" alt=\"Pura Smart Diffuser\" style=\"max-width:300px;width:100%;height:auto;\" />",
+  "headerDisplay": "<img src=\"https://raw.githubusercontent.com/homebridge-plugins/homebridge-pura/alpha-1.5.0/branding/banner.png\" alt=\"Pura Smart Diffuser\" style=\"width:180px;height:auto;\" />",
   "strictValidation": false,
   "schema": {
     "type": "object",
