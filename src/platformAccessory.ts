@@ -26,11 +26,12 @@ export class PuraPlatformAccessory {
     const safeModel = this.device.type && this.device.type.length > 1 ? this.device.type : 'Pura Diffuser';
     const infoService = this.accessory.getService(this.platform.Service.AccessoryInformation)!;
     const firmwareRevision = this.getFirmwareRevision();
+    const hardwareRevision = this.getHardwareRevision();
     infoService
       .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Pura')
       .setCharacteristic(this.platform.Characteristic.Model, safeModel)
       .setCharacteristic(this.platform.Characteristic.SerialNumber, this.device.id);
-    this.applyRevisionCharacteristics(infoService, firmwareRevision);
+    this.applyRevisionCharacteristics(infoService, firmwareRevision, hardwareRevision);
 
     this.useFanService = Boolean((this.platform.config as PuraConfig).useFanService);
     const fanService = this.accessory.getService(this.platform.Service.Fanv2);
@@ -173,20 +174,24 @@ export class PuraPlatformAccessory {
   private updateAccessoryInformation() {
     const safeModel = this.device.type && this.device.type.length > 1 ? this.device.type : 'Pura Diffuser';
     const firmwareRevision = this.getFirmwareRevision();
+    const hardwareRevision = this.getHardwareRevision();
     const infoService = this.accessory.getService(this.platform.Service.AccessoryInformation)!;
     infoService.setCharacteristic(this.platform.Characteristic.Model, safeModel);
-    this.applyRevisionCharacteristics(infoService, firmwareRevision);
+    this.applyRevisionCharacteristics(infoService, firmwareRevision, hardwareRevision);
   }
 
-  private applyRevisionCharacteristics(infoService: Service, firmwareRevision?: string) {
-    if (!firmwareRevision) {
-      return;
+  private applyRevisionCharacteristics(infoService: Service, firmwareRevision?: string, hardwareRevision?: string) {
+    if (firmwareRevision) {
+      // Keep revision fields in sync so cached accessories do not retain stale "0.0" values.
+      infoService.setCharacteristic(this.platform.Characteristic.FirmwareRevision, firmwareRevision);
+      infoService.updateCharacteristic(this.platform.Characteristic.FirmwareRevision, firmwareRevision);
+      infoService.setCharacteristic(this.platform.Characteristic.SoftwareRevision, firmwareRevision);
+      infoService.updateCharacteristic(this.platform.Characteristic.SoftwareRevision, firmwareRevision);
     }
-    // Keep both revision fields in sync so cached accessories do not retain stale "0.0" values.
-    infoService.setCharacteristic(this.platform.Characteristic.FirmwareRevision, firmwareRevision);
-    infoService.updateCharacteristic(this.platform.Characteristic.FirmwareRevision, firmwareRevision);
-    infoService.setCharacteristic(this.platform.Characteristic.SoftwareRevision, firmwareRevision);
-    infoService.updateCharacteristic(this.platform.Characteristic.SoftwareRevision, firmwareRevision);
+    if (hardwareRevision) {
+      infoService.setCharacteristic(this.platform.Characteristic.HardwareRevision, hardwareRevision);
+      infoService.updateCharacteristic(this.platform.Characteristic.HardwareRevision, hardwareRevision);
+    }
   }
 
   private getFirmwareRevision(): string | undefined {
@@ -202,6 +207,20 @@ export class PuraPlatformAccessory {
       return fromRaw;
     }
     const cached = this.normalizeFirmwareRevision(this.accessory.context.firmwareRevision);
+    if (cached) {
+      return cached;
+    }
+    return undefined;
+  }
+
+  private getHardwareRevision(): string | undefined {
+    const raw = this.device.__raw as Record<string, unknown> | undefined;
+    const current = this.normalizeFirmwareRevision(raw?.hwVersion);
+    if (current) {
+      this.accessory.context.hardwareRevision = current;
+      return current;
+    }
+    const cached = this.normalizeFirmwareRevision(this.accessory.context.hardwareRevision);
     if (cached) {
       return cached;
     }
