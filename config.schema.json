@@ -5,12 +5,12 @@
   "x-branding": {
     "imagePath": "branding/banner.png",
     "iconPath": "branding/icon.png",
-    "image": "https://raw.githubusercontent.com/homebridge-plugins/homebridge-pura/latest/branding/banner.png",
-    "icon": "https://raw.githubusercontent.com/homebridge-plugins/homebridge-pura/latest/branding/icon.png"
+    "image": "branding/banner.png",
+    "icon": "branding/icon.png"
   },
   "x-icon": "branding/icon.png",
-  "icon": "https://raw.githubusercontent.com/homebridge-plugins/homebridge-pura/latest/branding/icon.png",
-  "headerDisplay": "![Pura Smart Diffuser](https://raw.githubusercontent.com/homebridge-plugins/homebridge-pura/latest/branding/banner.png)",
+  "icon": "branding/icon.png",
+  "headerDisplay": "Pura Smart Diffuser",
   "strictValidation": false,
   "schema": {
     "type": "object",

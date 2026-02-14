@@ -174,12 +174,20 @@ export class PuraPlatformAccessory {
 
   private updateAccessoryInformation() {
     const safeModel = this.device.type && this.device.type.length > 1 ? this.device.type : 'Pura Diffuser';
-    const firmwareRevision = this.getFirmwareRevision();
-    const hardwareRevision = this.getHardwareRevision();
+    const firmware = this.resolveFirmwareRevision();
+    const hardware = this.resolveHardwareRevision();
     const infoService = this.accessory.getService(this.platform.Service.AccessoryInformation)!;
     infoService.setCharacteristic(this.platform.Characteristic.Model, safeModel);
-    this.applyRevisionCharacteristics(infoService, firmwareRevision, hardwareRevision);
-    this.persistRevisionContext(firmwareRevision, hardwareRevision);
+    this.applyRevisionCharacteristics(infoService, firmware.value, hardware.value);
+    this.persistRevisionContext(firmware.value, hardware.value);
+    if (this.platform.isDebugEnabled()) {
+      this.platform.log.debug(
+        `Revision trace for ${this.accessory.displayName}: firmware=${firmware.value ?? 'none'} (${firmware.source}), ` +
+        `hardware=${hardware.value ?? 'none'} (${hardware.source}), ` +
+        `cachedFirmware=${this.accessory.context.firmwareRevision ?? 'none'}, ` +
+        `cachedHardware=${this.accessory.context.hardwareRevision ?? 'none'}`,
+      );
+    }
   }
 
   private applyRevisionCharacteristics(infoService: Service, firmwareRevision?: string, hardwareRevision?: string) {
@@ -197,33 +205,41 @@ export class PuraPlatformAccessory {
   }
 
   private getFirmwareRevision(): string | undefined {
+    return this.resolveFirmwareRevision().value;
+  }
+
+  private resolveFirmwareRevision(): { value?: string; source: 'state' | 'raw' | 'cache' | 'none' } {
     const current = this.normalizeFirmwareRevision(this.device.state?.firmwareVersion);
     if (current) {
-      return current;
+      return { value: current, source: 'state' };
     }
     const raw = this.device.__raw as Record<string, unknown> | undefined;
     const fromRaw = this.normalizeFirmwareRevision(raw?.firmwareVersion ?? raw?.fwVersion);
     if (fromRaw) {
-      return fromRaw;
+      return { value: fromRaw, source: 'raw' };
     }
     const cached = this.normalizeFirmwareRevision(this.accessory.context.firmwareRevision);
     if (cached) {
-      return cached;
+      return { value: cached, source: 'cache' };
     }
-    return undefined;
+    return { source: 'none' };
   }
 
   private getHardwareRevision(): string | undefined {
+    return this.resolveHardwareRevision().value;
+  }
+
+  private resolveHardwareRevision(): { value?: string; source: 'raw' | 'cache' | 'none' } {
     const raw = this.device.__raw as Record<string, unknown> | undefined;
     const current = this.normalizeFirmwareRevision(raw?.hwVersion);
     if (current) {
-      return current;
+      return { value: current, source: 'raw' };
     }
     const cached = this.normalizeFirmwareRevision(this.accessory.context.hardwareRevision);
     if (cached) {
-      return cached;
+      return { value: cached, source: 'cache' };
     }
-    return undefined;
+    return { source: 'none' };
   }
 
   private persistRevisionContext(firmwareRevision?: string, hardwareRevision?: string) {
@@ -238,6 +254,13 @@ export class PuraPlatformAccessory {
     }
     if (changed) {
       this.platform.api.updatePlatformAccessories([this.accessory]);
+      if (this.platform.isDebugEnabled()) {
+        this.platform.log.debug(
+          `Persisted revision context for ${this.accessory.displayName}: ` +
+          `firmware=${this.accessory.context.firmwareRevision ?? 'none'}, ` +
+          `hardware=${this.accessory.context.hardwareRevision ?? 'none'}`,
+        );
+      }
     }
   }
 
