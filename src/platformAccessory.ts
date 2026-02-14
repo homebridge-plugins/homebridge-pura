@@ -32,6 +32,7 @@ export class PuraPlatformAccessory {
       .setCharacteristic(this.platform.Characteristic.Model, safeModel)
       .setCharacteristic(this.platform.Characteristic.SerialNumber, this.device.id);
     this.applyRevisionCharacteristics(infoService, firmwareRevision, hardwareRevision);
+    this.persistRevisionContext(firmwareRevision, hardwareRevision);
 
     this.useFanService = Boolean((this.platform.config as PuraConfig).useFanService);
     const fanService = this.accessory.getService(this.platform.Service.Fanv2);
@@ -178,6 +179,7 @@ export class PuraPlatformAccessory {
     const infoService = this.accessory.getService(this.platform.Service.AccessoryInformation)!;
     infoService.setCharacteristic(this.platform.Characteristic.Model, safeModel);
     this.applyRevisionCharacteristics(infoService, firmwareRevision, hardwareRevision);
+    this.persistRevisionContext(firmwareRevision, hardwareRevision);
   }
 
   private applyRevisionCharacteristics(infoService: Service, firmwareRevision?: string, hardwareRevision?: string) {
@@ -225,6 +227,21 @@ export class PuraPlatformAccessory {
       return cached;
     }
     return undefined;
+  }
+
+  private persistRevisionContext(firmwareRevision?: string, hardwareRevision?: string) {
+    let changed = false;
+    if (firmwareRevision && this.accessory.context.firmwareRevision !== firmwareRevision) {
+      this.accessory.context.firmwareRevision = firmwareRevision;
+      changed = true;
+    }
+    if (hardwareRevision && this.accessory.context.hardwareRevision !== hardwareRevision) {
+      this.accessory.context.hardwareRevision = hardwareRevision;
+      changed = true;
+    }
+    if (changed) {
+      this.platform.api.updatePlatformAccessories([this.accessory]);
+    }
   }
 
   private normalizeFirmwareRevision(value: unknown): string | undefined {
