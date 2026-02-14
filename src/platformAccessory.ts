@@ -199,13 +199,11 @@ export class PuraPlatformAccessory {
   private getFirmwareRevision(): string | undefined {
     const current = this.normalizeFirmwareRevision(this.device.state?.firmwareVersion);
     if (current) {
-      this.accessory.context.firmwareRevision = current;
       return current;
     }
     const raw = this.device.__raw as Record<string, unknown> | undefined;
     const fromRaw = this.normalizeFirmwareRevision(raw?.firmwareVersion ?? raw?.fwVersion);
     if (fromRaw) {
-      this.accessory.context.firmwareRevision = fromRaw;
       return fromRaw;
     }
     const cached = this.normalizeFirmwareRevision(this.accessory.context.firmwareRevision);
@@ -219,7 +217,6 @@ export class PuraPlatformAccessory {
     const raw = this.device.__raw as Record<string, unknown> | undefined;
     const current = this.normalizeFirmwareRevision(raw?.hwVersion);
     if (current) {
-      this.accessory.context.hardwareRevision = current;
       return current;
     }
     const cached = this.normalizeFirmwareRevision(this.accessory.context.hardwareRevision);

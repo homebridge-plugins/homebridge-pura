@@ -1,5 +1,10 @@
 # Release Notes
 
+## 1.4.9 - 2026-02-14
+- Fix firmware/hardware revision cache persistence by avoiding premature context writes before change detection.
+- Preserve firmware revision values across Homebridge restarts to prevent fallback to `0.0` on cached accessories.
+- Update schema branding raw GitHub URLs to use the `latest` branch path.
+
 ## 1.4.8 - 2026-02-14
 - Fix cached accessory firmware revision propagation by updating both `FirmwareRevision` and `SoftwareRevision`.
 - Prefer API `firmwareVersion` over `fwVersion` in debug snapshot model fields.
