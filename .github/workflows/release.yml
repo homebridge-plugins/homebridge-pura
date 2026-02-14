@@ -132,11 +132,11 @@ jobs:
         if: needs.determine-release-type.outputs.release_type == 'beta' || needs.determine-release-type.outputs.release_type == 'alpha'
         run: |
           # Download versioning script from homebridge/.github
-          mkdir -p .github
-          wget -q https://raw.githubusercontent.com/homebridge/.github/latest/.github/npm-version-script-esm.js -O .github/npm-version-script-esm.js
+          VERSION_SCRIPT=/tmp/npm-version-script-esm.js
+          wget -q https://raw.githubusercontent.com/homebridge/.github/latest/.github/npm-version-script-esm.js -O $VERSION_SCRIPT
 
           # Run the script to set base version
-          node .github/npm-version-script-esm.js ${{ github.ref }} ${{ needs.determine-release-type.outputs.release_type }}
+          node $VERSION_SCRIPT ${{ github.ref }} ${{ needs.determine-release-type.outputs.release_type }}
 
           # Add prerelease suffix
           npm version pre --preid=${{ needs.determine-release-type.outputs.release_type }} --no-git-tag-version

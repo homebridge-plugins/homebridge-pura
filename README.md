@@ -1,15 +1,15 @@
 <img src="branding/icon.png" alt="Pura Logo" width="125" />
 
-**A Homebridge plugin for Pura smart fragrance diffusers.**
-
 [![verified-by-homebridge](https://img.shields.io/badge/homebridge-verified-blueviolet?color=%23491F59&style=flat)](https://github.com/homebridge/homebridge/wiki/Verified-Plugins)
+
+**A Homebridge plugin for Pura smart fragrance diffusers.**
 
 This plugin is intentionally simple. It exposes a single on/off switch per diffuser, allowing you to control each device using HomeKit.
 
 It’s designed to be used with Pura’s auto-away and scheduling features disabled, so HomeKit can act as the primary automation layer.
 
 ## Supported Diffusers
-This plugin is designed and tested for the following diffusers.
+This plugin has been designed and tested for the following diffusers.
 
 <img src="branding/supported-devices.png" alt="Supported Pura Diffusers" />
 
@@ -41,13 +41,7 @@ Add the following platform to your `config.json`:
 
 - **username**: Your Pura app username (email address) - *required*
 - **password**: Your Pura app password - *required*
-- **forceNightlightOff**: By default, Pura turns the nightlight on/off with the diffuser. Enable this to force the nightlight off after the diffuser turns on (default: false)
-
-## Features
-
-- **Multiple Device Support**: Automatically discovers all Pura devices on your account
-- **Simple On/Off Control**: One switch per diffuser for HomeKit automations
-- **Real-Time Status**: Uses realtime updates with a 5-minute polling fallback (15s when realtime is down)
+- **forceNightlightOff**: Pura turns the nightlight on/off with the diffuser. Enable this to force the nightlight off after the diffuser turns on (default: false)
 
 ## Usage
 
@@ -69,7 +63,7 @@ The plugin will automatically:
 
 - Use this plugin in lieu of Pura schedules or auto-away.
 - Enable **Auto-Alternative Fragrances** in the Pura app for best results.
-- By default, Pura turns the nightlight on/off with the diffuser. If you want to prevent the light from staying on, enable `forceNightlightOff`.
+- Pura turns the nightlight on/off with the diffuser. If you want to prevent the light from staying on, enable `forceNightlightOff`.
 
 ## Troubleshooting
 

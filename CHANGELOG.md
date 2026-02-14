@@ -1,5 +1,10 @@
 # Release Notes
 
+## 1.4.8 - 2026-02-14
+- Fix cached accessory firmware revision propagation by updating both `FirmwareRevision` and `SoftwareRevision`.
+- Prefer API `firmwareVersion` over `fwVersion` in debug snapshot model fields.
+- Add `.nvmrc` pinned to Node `24.13.0` for consistent local development setup.
+
 ## 1.4.7 - 2026-02-12
 - Prefer API `firmwareVersion` with `fwVersion` fallback to improve firmware extraction reliability.
 - Stop defaulting firmware to `1.0.0`; only set HomeKit firmware when a validated value exists.

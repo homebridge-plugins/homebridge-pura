@@ -26,13 +26,13 @@ export class PuraPlatformAccessory {
     const safeModel = this.device.type && this.device.type.length > 1 ? this.device.type : 'Pura Diffuser';
     const infoService = this.accessory.getService(this.platform.Service.AccessoryInformation)!;
     const firmwareRevision = this.getFirmwareRevision();
+    const hardwareRevision = this.getHardwareRevision();
     infoService
       .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Pura')
       .setCharacteristic(this.platform.Characteristic.Model, safeModel)
       .setCharacteristic(this.platform.Characteristic.SerialNumber, this.device.id);
-    if (firmwareRevision) {
-      infoService.setCharacteristic(this.platform.Characteristic.FirmwareRevision, firmwareRevision);
-    }
+    this.applyRevisionCharacteristics(infoService, firmwareRevision, hardwareRevision);
+    this.persistRevisionContext(firmwareRevision, hardwareRevision);
 
     this.useFanService = Boolean((this.platform.config as PuraConfig).useFanService);
     const fanService = this.accessory.getService(this.platform.Service.Fanv2);
@@ -175,10 +175,24 @@ export class PuraPlatformAccessory {
   private updateAccessoryInformation() {
     const safeModel = this.device.type && this.device.type.length > 1 ? this.device.type : 'Pura Diffuser';
     const firmwareRevision = this.getFirmwareRevision();
+    const hardwareRevision = this.getHardwareRevision();
     const infoService = this.accessory.getService(this.platform.Service.AccessoryInformation)!;
     infoService.setCharacteristic(this.platform.Characteristic.Model, safeModel);
+    this.applyRevisionCharacteristics(infoService, firmwareRevision, hardwareRevision);
+    this.persistRevisionContext(firmwareRevision, hardwareRevision);
+  }
+
+  private applyRevisionCharacteristics(infoService: Service, firmwareRevision?: string, hardwareRevision?: string) {
     if (firmwareRevision) {
+      // Keep revision fields in sync so cached accessories do not retain stale "0.0" values.
       infoService.setCharacteristic(this.platform.Characteristic.FirmwareRevision, firmwareRevision);
+      infoService.updateCharacteristic(this.platform.Characteristic.FirmwareRevision, firmwareRevision);
+      infoService.setCharacteristic(this.platform.Characteristic.SoftwareRevision, firmwareRevision);
+      infoService.updateCharacteristic(this.platform.Characteristic.SoftwareRevision, firmwareRevision);
+    }
+    if (hardwareRevision) {
+      infoService.setCharacteristic(this.platform.Characteristic.HardwareRevision, hardwareRevision);
+      infoService.updateCharacteristic(this.platform.Characteristic.HardwareRevision, hardwareRevision);
     }
   }
 
@@ -199,6 +213,35 @@ export class PuraPlatformAccessory {
       return cached;
     }
     return undefined;
+  }
+
+  private getHardwareRevision(): string | undefined {
+    const raw = this.device.__raw as Record<string, unknown> | undefined;
+    const current = this.normalizeFirmwareRevision(raw?.hwVersion);
+    if (current) {
+      this.accessory.context.hardwareRevision = current;
+      return current;
+    }
+    const cached = this.normalizeFirmwareRevision(this.accessory.context.hardwareRevision);
+    if (cached) {
+      return cached;
+    }
+    return undefined;
+  }
+
+  private persistRevisionContext(firmwareRevision?: string, hardwareRevision?: string) {
+    let changed = false;
+    if (firmwareRevision && this.accessory.context.firmwareRevision !== firmwareRevision) {
+      this.accessory.context.firmwareRevision = firmwareRevision;
+      changed = true;
+    }
+    if (hardwareRevision && this.accessory.context.hardwareRevision !== hardwareRevision) {
+      this.accessory.context.hardwareRevision = hardwareRevision;
+      changed = true;
+    }
+    if (changed) {
+      this.platform.api.updatePlatformAccessories([this.accessory]);
+    }
   }
 
   private normalizeFirmwareRevision(value: unknown): string | undefined {
@@ -250,7 +293,7 @@ export class PuraPlatformAccessory {
       hwVersion: rawRecord.hwVersion,
       deviceName: rawRecord.deviceName,
       displayName: rawRecord.displayName,
-      firmwareVersion: rawRecord.fwVersion ?? rawRecord.firmwareVersion,
+      firmwareVersion: rawRecord.firmwareVersion ?? rawRecord.fwVersion,
     };
     const baySummary = (bay?: PuraBay) => {
       if (!bay) {
