@@ -1,5 +1,11 @@
 # Release Notes
 
+## 1.4.10 - 2026-02-14
+- Fix CI/npm install failure by restoring ESLint toolchain compatibility:
+  - `eslint` reverted to `^9.39.2`
+  - `@eslint/js` reverted to `^9.39.2`
+- Keep `typescript-eslint@^8.55.0` peer dependency constraints satisfied.
+
 ## 1.4.9 - 2026-02-14
 - Fix firmware/hardware revision cache persistence by avoiding premature context writes before change detection.
 - Preserve firmware revision values across Homebridge restarts to prevent fallback to `0.0` on cached accessories.
