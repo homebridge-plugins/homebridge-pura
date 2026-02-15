@@ -19,12 +19,19 @@
       opacity: 1 !important;
     }
 
-    .test-theme-lock.btn,
-    .test-theme-lock.btn:disabled {
+    .test-theme-lock.btn {
       background-color: transparent !important;
       color: var(--test-theme-color, var(--primary-color, var(--accent-color, var(--bs-primary, #0d6efd)))) !important;
       border-color: var(--test-theme-color, var(--primary-color, var(--accent-color, var(--bs-primary, #0d6efd)))) !important;
       opacity: 1 !important;
+    }
+
+    .test-theme-lock.btn:disabled {
+      background-color: transparent !important;
+      color: #8f98a3 !important;
+      border-color: #8f98a3 !important;
+      opacity: 1 !important;
+      cursor: not-allowed !important;
     }
 
     .test-theme-lock.btn,
@@ -155,12 +162,12 @@
           <img
             src="https://raw.githubusercontent.com/homebridge-plugins/homebridge-pura/latest/branding/banner.png"
             alt="Pura Smart Diffuser"
-            width="180"
+            width="170"
             style="height:auto;"
           />
         </div>
         <h5 class="card-title">Pura Sign In</h5>
-        <p class="card-text mb-4">Please enter your Pura login credentials.</p>
+        <p class="card-text mb-4">Please enter your Pura account credentials.</p>
 
         <div class="mb-3">
           <label class="form-label" for="name">Name</label>
@@ -247,11 +254,12 @@
       let testedCredentialKey = '';
 
       const getCredentialKey = () => `${els.username.value.trim()}\n${els.password.value}`;
+      const hasCredentialInputs = () => els.username.value.trim().length > 0 && els.password.value.length > 0;
 
       const setTestButtonDefault = () => {
         els.testBtn.className = 'btn test-theme-lock';
-        els.testBtn.innerHTML = '<i class="fa-regular fa-circle me-2"></i>' + TEST_BUTTON_TEXT;
-        els.testBtn.disabled = false;
+        els.testBtn.innerHTML = '<i class="fa-solid fa-circle-user me-2"></i>' + TEST_BUTTON_TEXT;
+        els.testBtn.disabled = !hasCredentialInputs();
         if (els.testHint) {
           els.testHint.classList.remove('test-hint-success', 'test-hint-error');
           els.testHint.textContent = TEST_HINT_DEFAULT;
@@ -409,6 +417,8 @@
           testedCredentialKey = '';
           setTestButtonDefault();
           setUiStatus('');
+        } else if (!credentialsVerified) {
+          setTestButtonDefault();
         }
         updateSaveState();
       };
@@ -422,8 +432,9 @@
 
         const current = await currentConfigBlock();
         els.name.value = current.name || DEFAULT_NAME;
-        els.username.value = current.username || '';
-        els.password.value = current.password || '';
+        // Always start with blank credential fields in the custom UI.
+        els.username.value = '';
+        els.password.value = '';
         els.forceNightlightOff.checked = !!current.forceNightlightOff;
 
         setUiStatus('');
