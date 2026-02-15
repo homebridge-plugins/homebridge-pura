@@ -1,6 +1,6 @@
 {
   "name": "@homebridge-plugins/homebridge-pura",
-  "displayName": "Homebridge Pura Smart Diffuser",
+  "displayName": "Pura Smart Diffuser",
   "type": "module",
   "version": "1.5.0",
   "description": "Homebridge plugin for Pura smart fragrance diffusers",
