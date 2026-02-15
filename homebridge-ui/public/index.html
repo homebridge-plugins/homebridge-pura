@@ -432,9 +432,9 @@
 
         const current = await currentConfigBlock();
         els.name.value = current.name || DEFAULT_NAME;
-        // Always start with blank credential fields in the custom UI.
-        els.username.value = '';
-        els.password.value = '';
+        // Load stored credentials so users can review/update without losing values.
+        els.username.value = current.username || '';
+        els.password.value = current.password || '';
         els.forceNightlightOff.checked = !!current.forceNightlightOff;
 
         setUiStatus('');
