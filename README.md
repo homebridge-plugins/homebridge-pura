@@ -39,17 +39,9 @@ Add the following platform to your `config.json`:
 
 ### Configuration Options
 
-### Homebridge UI Credential Test
-
-In Homebridge Config UI, use **Test Credentials** before saving.
-
-1. Enter your Pura email and password
-2. Click **Verify**
-3. Click **Save Settings** after successful validation
-
-- **username**: Your Pura email - *required*
-- **password**: Your Pura password - *required*
-- **forceNightlightOff**: Pura turns the nightlight on/off with the diffuser. Enable to prevent the light from staying on. (default: false)
+**username**: Your Pura email - *required*
+**password**: Your Pura password - *required*
+**forceNightlightOff**: Pura turns the nightlight on/off with the diffuser. Enable to prevent the light from staying on. (default: false)
 
 ## Usage
 
