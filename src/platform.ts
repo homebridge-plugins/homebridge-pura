@@ -124,10 +124,24 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       const cachedDevice = context.device as Record<string, unknown> | undefined;
       const cachedState = cachedDevice?.state as Record<string, unknown> | undefined;
       const cachedRaw = cachedDevice?.__raw as Record<string, unknown> | undefined;
-      const firmware = this.normalizeRevision(
-        context.firmwareRevision ?? cachedState?.firmwareVersion ?? cachedRaw?.firmwareVersion ?? cachedRaw?.fwVersion,
+      const currentFirmware = this.normalizeRevision(
+        infoService.getCharacteristic(this.Characteristic.FirmwareRevision).value,
       );
-      const hardware = this.normalizeRevision(context.hardwareRevision ?? cachedRaw?.hwVersion);
+      const currentSoftware = this.normalizeRevision(
+        infoService.getCharacteristic(this.Characteristic.SoftwareRevision).value,
+      );
+      const currentHardware = this.normalizeRevision(
+        infoService.getCharacteristic(this.Characteristic.HardwareRevision).value,
+      );
+      const firmware = this.normalizeRevision(
+        context.firmwareRevision ??
+        cachedState?.firmwareVersion ??
+        cachedRaw?.firmwareVersion ??
+        cachedRaw?.fwVersion ??
+        currentFirmware ??
+        currentSoftware,
+      );
+      const hardware = this.normalizeRevision(context.hardwareRevision ?? cachedRaw?.hwVersion ?? currentHardware);
       if (firmware) {
         infoService.setCharacteristic(this.Characteristic.FirmwareRevision, firmware);
         infoService.updateCharacteristic(this.Characteristic.FirmwareRevision, firmware);
@@ -142,9 +156,15 @@ export class PuraPlatform implements DynamicPlatformPlugin {
         this.api.updatePlatformAccessories([accessory]);
         if (this.isDebugEnabled()) {
           this.log.debug(
-            `Hydrated cached revisions for ${accessory.displayName}: firmware=${firmware ?? 'none'}, hardware=${hardware ?? 'none'}`,
+            `Hydrated cached revisions for ${accessory.displayName}: firmware=${firmware ?? 'none'}, hardware=${hardware ?? 'none'}, ` +
+            `currentFirmware=${currentFirmware ?? 'none'}, currentSoftware=${currentSoftware ?? 'none'}, currentHardware=${currentHardware ?? 'none'}`,
           );
         }
+      } else if (this.isDebugEnabled()) {
+        this.log.debug(
+          `No cached revisions available for ${accessory.displayName} during restore; ` +
+          `currentFirmware=${currentFirmware ?? 'none'}, currentSoftware=${currentSoftware ?? 'none'}, currentHardware=${currentHardware ?? 'none'}`,
+        );
       }
     }
 

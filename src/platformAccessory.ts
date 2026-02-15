@@ -35,6 +35,12 @@ export class PuraPlatformAccessory {
     const contextChanged = this.persistRevisionContext(firmwareRevision, hardwareRevision);
     if (revisionChanged || contextChanged) {
       this.platform.api.updatePlatformAccessories([this.accessory]);
+      if (this.platform.isDebugEnabled()) {
+        this.platform.log.debug(
+          `Persisted accessory metadata for ${this.accessory.displayName} (startup): ` +
+          `revisionChanged=${revisionChanged}, contextChanged=${contextChanged}`,
+        );
+      }
     }
 
     this.useFanService = Boolean((this.platform.config as PuraConfig).useFanService);
