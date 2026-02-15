@@ -29,7 +29,7 @@ Add the following platform to your `config.json`:
     {
       "name": "Pura Smart Diffuser",
       "platform": "PuraSmartDiffuser",
-      "username": "your-pura-email@example.com",
+      "email": "your-pura-email@example.com",
       "password": "your-pura-password",
       "forceNightlightOff": false
     }
@@ -43,13 +43,13 @@ Add the following platform to your `config.json`:
 
 In Homebridge Config UI, use **Test Credentials** before saving.
 
-1. Enter your Pura username and password
-2. Click **Test Credentials**
+1. Enter your Pura email and password
+2. Click **Verify**
 3. Click **Save Settings** after successful validation
 
-- **username**: Your Pura app username (email address) - *required*
-- **password**: Your Pura app password - *required*
-- **forceNightlightOff**: Pura turns the nightlight on/off with the diffuser. Enable this to force the nightlight off after the diffuser turns on (default: false)
+- **username**: Your Pura email - *required*
+- **password**: Your Pura password - *required*
+- **forceNightlightOff**: Pura turns the nightlight on/off with the diffuser. Enable to prevent the light from staying on. (default: false)
 
 ## Usage
 
@@ -70,8 +70,7 @@ The plugin will automatically:
 ## Recommended Usage
 
 - Use this plugin in lieu of Pura schedules or auto-away.
-- Enable **Auto-Alternative Fragrances** in the Pura app for best results.
-- Pura turns the nightlight on/off with the diffuser. If you want to prevent the light from staying on, enable `forceNightlightOff`.
+- Enable **Auto-alternative fragrances** in the Pura app to ensure equal scent distribution.
 
 ## Troubleshooting
 
