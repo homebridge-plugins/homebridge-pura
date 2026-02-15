@@ -42,5 +42,6 @@
         "description": "Pura turns the nightlight on/off with the diffuser. If enabled, the plugin will send a nightlight off command right after turning on a diffuser."
       }
     }
-  }
+  },
+  "customUi": true
 }
