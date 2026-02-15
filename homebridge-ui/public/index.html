@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pura Smart Diffuser</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    .test-success-lock.btn,
+    .test-success-lock.btn:disabled {
+      background-color: transparent !important;
+      color: #4caf50 !important;
+      border-color: #4caf50 !important;
+      opacity: 1 !important;
+    }
+
+    .test-theme-lock.btn,
+    .test-theme-lock.btn:disabled {
+      background-color: transparent !important;
+      color: var(--test-theme-color, var(--primary-color, var(--accent-color, var(--bs-primary, #0d6efd)))) !important;
+      border-color: var(--test-theme-color, var(--primary-color, var(--accent-color, var(--bs-primary, #0d6efd)))) !important;
+      opacity: 1 !important;
+    }
+
+    .test-theme-lock.btn,
+    .test-success-lock.btn,
+    .test-fail-lock.btn {
+      text-transform: none !important;
+      letter-spacing: normal !important;
+    }
+
+    .test-hint {
+      font-size: 0.78rem;
+      color: var(--test-theme-color, var(--primary-color, var(--accent-color, var(--bs-primary, #0d6efd)))) !important;
+      margin-top: 0.45rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .test-hint-success {
+      color: #4caf50 !important;
+    }
+
+    .test-hint-error {
+      color: #dc3545 !important;
+    }
+
+    .test-fail-lock.btn,
+    .test-fail-lock.btn:disabled {
+      background-color: transparent !important;
+      color: #dc3545 !important;
+      border-color: #dc3545 !important;
+      opacity: 1 !important;
+    }
+
+    .form-text {
+      color: var(--helper-text-color, #8f98a3) !important;
+    }
+
+    .form-label {
+      font-weight: 700 !important;
+    }
+
+    .form-switch .form-check-input:checked {
+      background-color: var(--test-theme-color, var(--primary-color, var(--accent-color, var(--bs-primary, #0d6efd)))) !important;
+      border-color: var(--test-theme-color, var(--primary-color, var(--accent-color, var(--bs-primary, #0d6efd)))) !important;
+    }
+
+    .form-switch .form-check-input:focus {
+      box-shadow: none !important;
+      border-color: var(--test-theme-color, var(--primary-color, var(--accent-color, var(--bs-primary, #0d6efd)))) !important;
+    }
+
+    .password-wrap {
+      position: relative;
+      width: 50%;
+    }
+
+    .password-toggle {
+      position: absolute;
+      right: 0.55rem;
+      top: 50%;
+      transform: translateY(-50%);
+      border: 0;
+      background: transparent;
+      color: var(--input-placeholder-color, #8f98a3);
+      padding: 0;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .password-toggle:focus {
+      outline: none;
+    }
+
+    .password-wrap input.form-control {
+      padding-right: 2rem;
+    }
+
+    .field-half {
+      width: 50% !important;
+    }
+
+    .card {
+      background-color: var(--card-bg-color, transparent) !important;
+    }
+
+    input.form-control,
+    .form-control {
+      background-color: var(--input-bg-color, transparent) !important;
+      color: var(--input-text-color, inherit) !important;
+      border-color: var(--input-border-color, var(--bs-border-color, #5f6670)) !important;
+      caret-color: var(--input-text-color, inherit) !important;
+    }
+
+    input.form-control:focus,
+    .form-control:focus {
+      background-color: var(--input-bg-color, transparent) !important;
+      color: var(--input-text-color, inherit) !important;
+      border-color: var(--test-theme-color, var(--input-border-color, var(--bs-border-color, #5f6670))) !important;
+      box-shadow: none !important;
+    }
+
+    input.form-control::placeholder,
+    .form-control::placeholder {
+      color: var(--input-placeholder-color, #8f98a3) !important;
+      opacity: 1 !important;
+    }
+
+    input.form-control::-webkit-input-placeholder,
+    .form-control::-webkit-input-placeholder {
+      color: var(--input-placeholder-color, #8f98a3) !important;
+    }
+
+    /* Override Safari/Chromium autofill white background in dark mode */
+    input.form-control:-webkit-autofill,
+    input.form-control:-webkit-autofill:hover,
+    input.form-control:-webkit-autofill:focus {
+      -webkit-text-fill-color: var(--input-text-color, inherit) !important;
+      -webkit-box-shadow: 0 0 0px 1000px transparent inset !important;
+      transition: background-color 9999s ease-out 0s !important;
+    }
+
+  </style>
+</head>
+<body>
+  <div class="container-fluid px-0">
+    <div class="card p-2 border border-0">
+      <div class="card-body">
+        <div class="mb-2">
+          <img
+            src="https://raw.githubusercontent.com/homebridge-plugins/homebridge-pura/latest/branding/banner.png"
+            alt="Pura Smart Diffuser"
+            width="180"
+            style="height:auto;"
+          />
+        </div>
+        <h5 class="card-title">Pura Smart Diffuser</h5>
+        <p class="card-text mb-4">Please enter your Pura login credentials.</p>
+
+        <div class="mb-3">
+          <label class="form-label" for="name">Name</label>
+          <input class="form-control form-control-lg field-half" id="name" type="text" />
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label" for="username">Email</label>
+          <input class="form-control form-control-lg field-half" id="username" type="email" autocomplete="username" />
+        </div>
+
+        <div class="mb-4">
+          <label class="form-label" for="password">Password</label>
+          <div class="password-wrap">
+            <input class="form-control form-control-lg" id="password" type="password" autocomplete="current-password" />
+            <button class="password-toggle" id="passwordToggle" type="button" aria-label="Show password" title="Show password">
+              <i class="fa fa-eye" aria-hidden="true"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="form-check form-switch ms-1 mb-4">
+          <input class="form-check-input" id="forceNightlightOff" type="checkbox" role="switch" aria-describedby="forceOff" />
+          <label class="form-check-label" for="forceNightlightOff">Force Nightlight Off</label>
+          <div id="forceOff" class="form-text">
+            Pura syncs the nightlight with the diffuser. Turn this on to keep the nightlight off when the diffuser is running.
+          </div>
+        </div>
+
+        <div class="d-flex gap-2 align-items-center pt-4">
+          <button class="btn btn-outline-primary" id="testBtn" type="button">Test Login</button>
+        </div>
+
+        <p class="test-hint" id="testHint">Credentials must be tested before saving.</p>
+
+        <div class="small" id="status"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      const statusEl = document.getElementById('status');
+      const setStatus = (message, level = 'muted') => {
+        if (!message) {
+          statusEl.className = 'small d-none';
+          statusEl.textContent = '';
+          return;
+        }
+        const levelClass = {
+          success: 'text-success',
+          error: 'text-danger',
+          warning: 'text-warning',
+          muted: 'text-muted',
+        }[level] || 'text-muted';
+        statusEl.className = `small ${levelClass}`;
+        statusEl.textContent = message;
+      };
+
+      if (typeof homebridge === 'undefined') {
+        setStatus('Custom UI context unavailable. Reopen plugin settings from Homebridge UI.', 'error');
+        return;
+      }
+
+      const PLATFORM_NAME = 'PuraSmartDiffuser';
+      const DEFAULT_NAME = 'Pura Smart Diffuser';
+      const TEST_BUTTON_TEXT = 'Verify';
+      const TESTING_BUTTON_TEXT = 'Verifying...';
+      const TEST_HINT_DEFAULT = 'Pura credentials must be verified before saving.';
+      const TEST_HINT_SUCCESS = 'Pura credentials verified. Save to apply changes.';
+
+      const els = {
+        name: document.getElementById('name'),
+        username: document.getElementById('username'),
+        password: document.getElementById('password'),
+        passwordToggle: document.getElementById('passwordToggle'),
+        forceNightlightOff: document.getElementById('forceNightlightOff'),
+        testBtn: document.getElementById('testBtn'),
+        testHint: document.getElementById('testHint'),
+        status: statusEl,
+      };
+
+      let credentialsVerified = false;
+      let testedCredentialKey = '';
+
+      const getCredentialKey = () => `${els.username.value.trim()}\n${els.password.value}`;
+
+      const setTestButtonDefault = () => {
+        els.testBtn.className = 'btn test-theme-lock';
+        els.testBtn.innerHTML = '<i class="fa-regular fa-circle me-2"></i>' + TEST_BUTTON_TEXT;
+        els.testBtn.disabled = false;
+        if (els.testHint) {
+          els.testHint.classList.remove('test-hint-success', 'test-hint-error');
+          els.testHint.textContent = TEST_HINT_DEFAULT;
+          els.testHint.classList.remove('d-none');
+        }
+      };
+
+      const setTestButtonTesting = () => {
+        els.testBtn.className = 'btn test-theme-lock';
+        els.testBtn.innerHTML = '<i class="fa fa-spinner fa-spin me-2" aria-hidden="true"></i>' + TESTING_BUTTON_TEXT;
+        els.testBtn.disabled = true;
+      };
+
+      const setTestButtonSuccess = () => {
+        els.testBtn.className = 'btn btn-outline-success test-success-lock';
+        els.testBtn.innerHTML = '<i class="fa me-2 fa-circle-check green-text ng-star-inserted" aria-hidden="true"></i>Success';
+        els.testBtn.disabled = true;
+        if (els.testHint) {
+          els.testHint.classList.remove('test-hint-error');
+          els.testHint.classList.add('test-hint-success');
+          els.testHint.textContent = TEST_HINT_SUCCESS;
+          els.testHint.classList.remove('d-none');
+        }
+      };
+
+      const setTestButtonFailed = () => {
+        els.testBtn.className = 'btn btn-outline-danger test-fail-lock';
+        els.testBtn.innerHTML = '<i class="fa-solid fa-circle-xmark me-2" aria-hidden="true"></i>Failed';
+        els.testBtn.disabled = true;
+      };
+
+      const setUiStatus = (message, level = 'muted') => {
+        setStatus(message, level);
+        homebridge.fixScrollHeight();
+      };
+
+      const parseRgb = (value) => {
+        const match = value && value.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+        if (!match) {
+          return null;
+        }
+        return { r: Number(match[1]), g: Number(match[2]), b: Number(match[3]) };
+      };
+
+      const isDarkColor = (rgb) => {
+        if (!rgb) {
+          return true;
+        }
+        const luminance = (0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b) / 255;
+        return luminance < 0.45;
+      };
+
+      const applyInputThemeFromParent = () => {
+        const parentDoc = window.parent && window.parent.document ? window.parent.document : document;
+        const parentWin = window.parent && window.parent.getComputedStyle ? window.parent : window;
+        const parentBody = parentDoc.body || document.body;
+        const bg = parentWin.getComputedStyle(parentBody).backgroundColor;
+        const dark = isDarkColor(parseRgb(bg));
+
+        if (dark) {
+          document.documentElement.style.setProperty('--card-bg-color', 'transparent');
+          document.documentElement.style.setProperty('--input-bg-color', 'rgba(255, 255, 255, 0.02)');
+          document.documentElement.style.setProperty('--input-border-color', '#5f6975');
+          document.documentElement.style.setProperty('--input-placeholder-color', '#98a2ae');
+          document.documentElement.style.setProperty('--input-text-color', '#c1cad5');
+          document.documentElement.style.setProperty('--helper-text-color', '#98a2ae');
+        } else {
+          document.documentElement.style.setProperty('--card-bg-color', '#f4f4f4');
+          document.documentElement.style.setProperty('--input-bg-color', '#ffffff');
+          document.documentElement.style.setProperty('--input-border-color', '#bcc5d1');
+          document.documentElement.style.setProperty('--input-placeholder-color', '#6b7280');
+          document.documentElement.style.setProperty('--input-text-color', '#4b5563');
+          document.documentElement.style.setProperty('--helper-text-color', '#6b7280');
+        }
+      };
+
+      const applyThemeColorFromNativeSave = () => {
+        const saveButton = getNativeSaveButton();
+        if (!saveButton) {
+          return;
+        }
+        const computed = window.parent && window.parent.getComputedStyle
+          ? window.parent.getComputedStyle(saveButton)
+          : getComputedStyle(saveButton);
+        const saveBgColor = computed.backgroundColor;
+        if (saveBgColor && saveBgColor !== 'rgba(0, 0, 0, 0)' && saveBgColor !== 'transparent') {
+          document.documentElement.style.setProperty('--test-theme-color', saveBgColor);
+        }
+      };
+
+      const getNativeSaveButton = () => {
+        const parentDoc = window.parent && window.parent.document ? window.parent.document : document;
+        const candidates = Array.from(parentDoc.querySelectorAll('button'));
+        return candidates.find((button) => button.textContent && button.textContent.trim().toLowerCase() === 'save');
+      };
+
+      const setNativeSaveTooltip = (message) => {
+        const saveButton = getNativeSaveButton();
+        if (!saveButton) {
+          return;
+        }
+        if (message) {
+          saveButton.setAttribute('title', message);
+          if (saveButton.parentElement) {
+            saveButton.parentElement.setAttribute('title', message);
+          }
+        } else {
+          saveButton.removeAttribute('title');
+          if (saveButton.parentElement) {
+            saveButton.parentElement.removeAttribute('title');
+          }
+        }
+      };
+
+      const updateSaveState = () => {
+        applyThemeColorFromNativeSave();
+        const hasRequired = els.username.value.trim().length > 0 && els.password.value.length > 0;
+        const hasFreshTest = credentialsVerified && testedCredentialKey === getCredentialKey();
+        if (hasRequired && hasFreshTest) {
+          homebridge.enableSaveButton();
+          setNativeSaveTooltip('');
+        } else {
+          homebridge.disableSaveButton();
+          setNativeSaveTooltip(`Add username and password, then click ${TEST_BUTTON_TEXT}.`);
+        }
+      };
+
+      const currentConfigBlock = async () => {
+        const configBlocks = await homebridge.getPluginConfig();
+        const existing = configBlocks.find((x) => x.platform === PLATFORM_NAME);
+        return existing || {
+          platform: PLATFORM_NAME,
+          name: DEFAULT_NAME,
+          username: '',
+          password: '',
+          forceNightlightOff: false,
+        };
+      };
+
+      const syncConfig = async () => {
+        const config = {
+          platform: PLATFORM_NAME,
+          name: els.name.value.trim() || DEFAULT_NAME,
+          username: els.username.value.trim(),
+          password: els.password.value,
+          forceNightlightOff: !!els.forceNightlightOff.checked,
+        };
+        await homebridge.updatePluginConfig([config]);
+      };
+
+      const markCredentialsDirtyIfNeeded = () => {
+        const key = getCredentialKey();
+        if (testedCredentialKey && testedCredentialKey !== key) {
+          credentialsVerified = false;
+          testedCredentialKey = '';
+          setTestButtonDefault();
+          setUiStatus('');
+        }
+        updateSaveState();
+      };
+
+      const initialize = async () => {
+        homebridge.hideSchemaForm();
+        homebridge.disableSaveButton();
+        setUiStatus('');
+        applyInputThemeFromParent();
+        applyThemeColorFromNativeSave();
+
+        const current = await currentConfigBlock();
+        els.name.value = current.name || DEFAULT_NAME;
+        els.username.value = current.username || '';
+        els.password.value = current.password || '';
+        els.forceNightlightOff.checked = !!current.forceNightlightOff;
+
+        setUiStatus('');
+
+        for (const field of [els.name, els.forceNightlightOff]) {
+          field.addEventListener('change', async () => {
+            await syncConfig();
+            homebridge.toast.info('Config updated. Click Save to write config.json.');
+          });
+        }
+
+        for (const field of [els.username, els.password]) {
+          field.addEventListener('input', markCredentialsDirtyIfNeeded);
+        }
+
+        if (els.passwordToggle) {
+          els.passwordToggle.addEventListener('click', () => {
+            const showing = els.password.type === 'text';
+            els.password.type = showing ? 'password' : 'text';
+            els.passwordToggle.innerHTML = showing
+              ? '<i class="fa fa-eye" aria-hidden="true"></i>'
+              : '<i class="fa fa-eye-slash" aria-hidden="true"></i>';
+            els.passwordToggle.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+            els.passwordToggle.setAttribute('title', showing ? 'Show password' : 'Hide password');
+          });
+        }
+
+        els.testBtn.addEventListener('click', async () => {
+          const username = els.username.value.trim();
+          const password = els.password.value;
+
+          if (!username || !password) {
+            setUiStatus('Enter username and password first.', 'error');
+            homebridge.toast.error('Username and password are required.');
+            return;
+          }
+
+          setTestButtonTesting();
+          setUiStatus('');
+
+          try {
+            await homebridge.request('/test-credentials', { username, password });
+            testedCredentialKey = getCredentialKey();
+            credentialsVerified = true;
+            setTestButtonSuccess();
+            updateSaveState();
+            setUiStatus('');
+            await syncConfig();
+          } catch (error) {
+            credentialsVerified = false;
+            testedCredentialKey = getCredentialKey();
+            setTestButtonFailed();
+            updateSaveState();
+            const message = error?.message || 'Credential test failed.';
+            if (els.testHint) {
+              els.testHint.classList.remove('test-hint-success');
+              els.testHint.classList.add('test-hint-error');
+              els.testHint.textContent = message;
+              els.testHint.classList.remove('d-none');
+            }
+            setUiStatus('');
+            homebridge.toast.error(message);
+          } finally {
+          }
+        });
+
+        homebridge.fixScrollHeight();
+        setTestButtonDefault();
+        updateSaveState();
+      };
+
+      initialize().catch((error) => {
+        const message = error?.message || 'Failed to initialize settings UI.';
+        setUiStatus(message, 'error');
+        homebridge.toast.error(message);
+        homebridge.hideSpinner();
+      });
+    })();
+  </script>
+</body>
+</html>
