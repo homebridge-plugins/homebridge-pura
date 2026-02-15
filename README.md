@@ -39,9 +39,9 @@ Add the following platform to your `config.json`:
 
 ### Configuration Options
 
-**username**: Your Pura email - *required*
-**password**: Your Pura password - *required*
-**forceNightlightOff**: Pura turns the nightlight on/off with the diffuser. Enable to prevent the light from staying on. (default: false)
+- **username**: Your Pura email - *required*
+- **password**: Your Pura password - *required*
+- **forceNightlightOff**: Pura turns the nightlight on/off with the diffuser. Enable to prevent the light from staying on. (default: false)
 
 ## Usage
 
