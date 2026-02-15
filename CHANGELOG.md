@@ -1,5 +1,12 @@
 # Release Notes
 
+## 1.5.0 - 2026-02-14
+- Improve firmware revision reliability across restarts by hydrating cached Accessory Information revisions at startup.
+- Persist accessory cache updates when revision characteristics change to prevent stale `0.0` display.
+- Add debug revision tracing and persistence logs for faster diagnosis of firmware metadata issues.
+- Update Homebridge schema branding/header behavior and banner sizing for better UI compatibility.
+- Bump Homebridge dev dependency to `2.0.0-beta.71`.
+
 ## 1.4.10 - 2026-02-14
 - Fix CI/npm install failure by restoring ESLint toolchain compatibility:
   - `eslint` reverted to `^9.39.2`
