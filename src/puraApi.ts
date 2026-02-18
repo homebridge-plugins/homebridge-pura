@@ -201,29 +201,74 @@ export class PuraApi {
    * Get all devices
    */
   async getDevices(): Promise<PuraDevice[]> {
-    try {
-      const response = await this.makeRequest('GET', 'v2/users/devices') as Record<string, unknown>;
-      const devices = (response as { devices?: unknown[] }).devices;
-      const rawDevices: unknown[] = [];
-      if (Array.isArray(devices)) {
-        rawDevices.push(...devices);
-      } else {
-        for (const [key, value] of Object.entries(response)) {
-          if (key === 'car') {
-            continue;
+    const endpoints = ['v2/users/devices', 'users/devices', 'devices'];
+    let lastError: unknown;
+
+    for (let i = 0; i < endpoints.length; i++) {
+      const endpoint = endpoints[i];
+      try {
+        const response = await this.makeRequest('GET', endpoint) as Record<string, unknown>;
+        return this.extractDevices(response);
+      } catch (error) {
+        lastError = error;
+        const isPrimaryEndpoint = i === 0;
+        if (isPrimaryEndpoint && this.isThingTypeError(error)) {
+          this.log.warn('Pura devices endpoint returned ThingTypeError. Retrying primary endpoint after brief delay.');
+          await this.delay(1500);
+          try {
+            const retryResponse = await this.makeRequest('GET', endpoint) as Record<string, unknown>;
+            return this.extractDevices(retryResponse);
+          } catch (retryError) {
+            lastError = retryError;
           }
-          if (Array.isArray(value)) {
-            rawDevices.push(...value);
-          }
+          this.log.warn('Primary endpoint still failing after ThingTypeError retry. Trying compatibility endpoint.');
+          continue;
+        }
+        if (!isPrimaryEndpoint) {
+          this.log.debug(`Compatibility endpoint failed (${endpoint}):`, error);
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    if (this.isThingTypeError(lastError)) {
+      this.log.warn('Pura API rejected one or more device thing types. Returning no devices this cycle.');
+      return [];
+    }
+
+    throw (lastError instanceof Error ? lastError : new Error('Failed to get devices'));
+  }
+
+  private extractDevices(response: Record<string, unknown>): PuraDevice[] {
+    const devices = (response as { devices?: unknown[] }).devices;
+    const rawDevices: unknown[] = [];
+    if (Array.isArray(devices)) {
+      rawDevices.push(...devices);
+    } else {
+      for (const [key, value] of Object.entries(response)) {
+        if (key === 'car') {
+          continue;
+        }
+        if (Array.isArray(value)) {
+          rawDevices.push(...value);
         }
       }
-      return rawDevices
-        .map((device) => this.normalizeDevice(device))
-        .filter((device): device is PuraDevice => device !== null);
-    } catch (error) {
-      this.log.error('Failed to get devices:', error);
-      throw error;
     }
+    return rawDevices
+      .map((device) => this.normalizeDevice(device))
+      .filter((device): device is PuraDevice => device !== null);
+  }
+
+  private isThingTypeError(error: unknown): boolean {
+    if (!(error instanceof Error)) {
+      return false;
+    }
+    return error.message.toLowerCase().includes('thingtypeerror');
+  }
+
+  private async delay(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private normalizeDevice(device: unknown): PuraDevice | null {

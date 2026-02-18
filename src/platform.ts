@@ -25,7 +25,6 @@ export class PuraPlatform implements DynamicPlatformPlugin {
 
   // this is used to track restored cached accessories
   public readonly accessories: Map<string, PlatformAccessory> = new Map();
-  public readonly discoveredCacheUUIDs: string[] = [];
 
   private readonly puraApi: PuraApi;
   private readonly puraConfig: PuraConfig;
@@ -224,12 +223,14 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       this.log.info(`Found ${devices.length} Pura device(s)`);
 
       // Register each device
+      const discoveredUuids = new Set<string>();
       for (const device of devices) {
-        await this.registerDevice(device);
+        const uuid = await this.registerDevice(device);
+        discoveredUuids.add(uuid);
       }
 
       // Remove accessories that are no longer present
-      this.removeStaleAccessories();
+      this.removeStaleAccessories(discoveredUuids);
 
       // Set up refresh interval
       this.setupRefreshInterval();
@@ -283,16 +284,16 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   /**
    * Register a Pura device as a HomeKit accessory
    */
-  private async registerDevice(device: PuraDevice) {
+  private async registerDevice(device: PuraDevice): Promise<string> {
     this.log.debug('Registering device:', device.name, device.id);
 
     // Single diffuser accessory (On/Off)
-    await this.registerDiffuserAccessory(device);
+    return this.registerDiffuserAccessory(device);
 
     // No nightlight accessory (diffuser switch only)
   }
 
-  private async registerDiffuserAccessory(device: PuraDevice) {
+  private async registerDiffuserAccessory(device: PuraDevice): Promise<string> {
     const deviceName = device.name || `Pura ${device.id}`;
     const baseName = deviceName.endsWith('Diffuser') ? deviceName : `${deviceName} Diffuser`;
     const accessoryName = baseName;
@@ -311,22 +312,36 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       accessory.context.device = device;
       accessory.handler = new PuraPlatformAccessory(this, accessory, this.puraApi);
       this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+      this.accessories.set(uuid, accessory);
     }
 
-    this.discoveredCacheUUIDs.push(uuid);
+    return uuid;
   }
 
 
   /**
    * Remove accessories that are no longer present
    */
-  private removeStaleAccessories() {
+  private removeStaleAccessories(discoveredUuids: Set<string>) {
     for (const [uuid, accessory] of this.accessories) {
-      if (!this.discoveredCacheUUIDs.includes(uuid)) {
+      if (!discoveredUuids.has(uuid)) {
         this.log.info('Removing existing accessory from cache:', accessory.displayName);
         this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+        this.accessories.delete(uuid);
       }
     }
+  }
+
+  private async reconcileDiscoveredDevices(devices: PuraDevice[]): Promise<void> {
+    const discoveredUuids = new Set<string>();
+    for (const device of devices) {
+      const uuid = this.api.hap.uuid.generate(`${device.id}-diffuser`);
+      discoveredUuids.add(uuid);
+      if (!this.accessories.has(uuid)) {
+        await this.registerDevice(device);
+      }
+    }
+    this.removeStaleAccessories(discoveredUuids);
   }
 
   /**
@@ -778,6 +793,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     await this.waitForAuth();
     try {
       const devices = await this.puraApi.getDevices();
+      await this.reconcileDiscoveredDevices(devices);
       
       for (const device of devices) {
         await this.updateDiffuserAccessory(device);
@@ -792,6 +808,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
         if (reauthed) {
           try {
             const devices = await this.puraApi.getDevices();
+            await this.reconcileDiscoveredDevices(devices);
             for (const device of devices) {
               await this.updateDiffuserAccessory(device);
             }

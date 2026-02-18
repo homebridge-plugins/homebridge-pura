@@ -139,7 +139,7 @@ export class PuraPlatformAccessory {
           this.platform.log.debug(`Successfully turned on ${this.accessory.displayName} with intensity ${intensity}`);
           this.applyCurrentState();
           this.platform.log.info(`${this.accessory.displayName} turned on.`);
-          if ((this.platform.config as PuraConfig).forceNightlightOff) {
+          if ((this.platform.config as PuraConfig).forceNightlightOff && this.supportsNightlightControl()) {
             await this.ensureNightlightOff();
           }
         } else {
@@ -375,6 +375,9 @@ export class PuraPlatformAccessory {
     if (!forceOff) {
       return;
     }
+    if (!this.supportsNightlightControl()) {
+      return;
+    }
     if (!this.currentStateActive || !this.device.nightlight?.active) {
       return;
     }
@@ -413,6 +416,20 @@ export class PuraPlatformAccessory {
     } catch (error) {
       this.platform.log.debug(`Failed to force nightlight off for ${this.accessory.displayName}:`, error);
     }
+  }
+
+  private supportsNightlightControl(): boolean {
+    const model = this.device.type?.toLowerCase() ?? '';
+    if (model.includes('plus')) {
+      return false;
+    }
+    const raw = this.device.__raw as Record<string, unknown> | undefined;
+    const hwVersion = typeof raw?.hwVersion === 'string' ? raw.hwVersion : undefined;
+    if (!hwVersion) {
+      return true;
+    }
+    const major = Number(hwVersion.split('.')[0]);
+    return !(Number.isFinite(major) && major === 22);
   }
 
   private sleep(ms: number): Promise<void> {

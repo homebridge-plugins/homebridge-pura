@@ -1,5 +1,13 @@
 # Release Notes
 
+## 1.5.5 - 2026-02-18
+- Improve device-list fetch resiliency when Pura API returns transient `ThingTypeError` during add/remove device changes:
+  - Retry `v2/users/devices` after a short delay.
+  - Fall back to compatibility endpoints (`users/devices`, `devices`) when needed.
+  - Gracefully skip the cycle (instead of hard-failing) when backend thing-type mismatches persist.
+- Reconcile accessories on every refresh cycle so newly added devices are auto-registered and removed devices are unregistered without manual accessory-cache cleanup.
+- Skip forced nightlight-off requests for Pura Plus devices (including `hwVersion` major `22`) to avoid `400` route errors on unsupported nightlight control.
+
 ## 1.5.0 - 2026-02-14
 - Improve firmware revision reliability across restarts by hydrating cached Accessory Information revisions at startup.
 - Persist accessory cache updates when revision characteristics change to prevent stale `0.0` display.
