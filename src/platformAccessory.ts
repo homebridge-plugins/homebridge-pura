@@ -108,6 +108,7 @@ export class PuraPlatformAccessory {
       : Boolean(value);
     this.platform.log.debug(`Set Characteristic Active for ${this.accessory.displayName} ->`, value);
     this.platform.recordIntent(this.device.id, isOn);
+    let noScentVialsDetected = false;
 
     try {
       if (isOn) {
@@ -115,18 +116,21 @@ export class PuraPlatformAccessory {
         const normalizedPreferred = preferredBay === 1 || preferredBay === 2 ? preferredBay : undefined;
         const targetBay = normalizedPreferred && (normalizedPreferred === 1 ? this.device.bay1 : this.device.bay2)
           ? normalizedPreferred
-          : (this.device.bay1 ? 1 : 2);
+          : (this.device.bay1 ? 1 : this.device.bay2 ? 2 : 1);
         const bay = targetBay === 1 ? this.device.bay1 : this.device.bay2;
-        if (!bay) {
-          this.platform.log.error(`No bay data available for ${this.accessory.displayName}`);
-          throw new Error('No bay data available');
+        noScentVialsDetected = !this.device.bay1 && !this.device.bay2;
+        if (!bay && this.platform.isDebugEnabled()) {
+          this.platform.log.warn(
+            `No bay payload available for ${this.accessory.displayName}; using fallback bay ${targetBay}.`,
+          );
         }
-        const candidateIntensity = bay?.intensity;
-        const intensity = Math.max(1, Math.min(100, (
-          this.accessory.context.lastIntensity ??
-          (Number.isFinite(candidateIntensity) ? candidateIntensity : 0) ??
-          60
-        )));
+        const candidateIntensity = bay && Number.isFinite(bay.intensity) && bay.intensity > 0
+          ? bay.intensity
+          : undefined;
+        const preferredIntensity = Number.isFinite(this.accessory.context.lastIntensity) && this.accessory.context.lastIntensity > 0
+          ? this.accessory.context.lastIntensity
+          : undefined;
+        const intensity = Math.max(1, Math.min(100, preferredIntensity ?? candidateIntensity ?? 60));
         await this.puraApi.stopAll(this.device.id);
         await this.puraApi.setAwayMode(this.device.id, false);
         const alwaysOn = await this.puraApi.setAlwaysOn(this.device.id, targetBay);
@@ -138,7 +142,11 @@ export class PuraPlatformAccessory {
           this.accessory.context.lastBay = targetBay;
           this.platform.log.debug(`Successfully turned on ${this.accessory.displayName} with intensity ${intensity}`);
           this.applyCurrentState();
-          this.platform.log.info(`${this.accessory.displayName} turned on.`);
+          if (noScentVialsDetected) {
+            this.platform.log.warn(`${this.accessory.displayName} turned on, but no scent vials detected.`);
+          } else {
+            this.platform.log.info(`${this.accessory.displayName} turned on.`);
+          }
           if ((this.platform.config as PuraConfig).forceNightlightOff && this.supportsNightlightControl()) {
             await this.ensureNightlightOff();
           }
@@ -159,6 +167,9 @@ export class PuraPlatformAccessory {
         }
       }
     } catch (error) {
+      if (isOn && noScentVialsDetected) {
+        this.platform.log.error(`No scent vials detected on ${this.accessory.displayName}.`);
+      }
       this.platform.log.error(`Error setting On state for ${this.accessory.displayName}:`, error);
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
@@ -171,6 +182,9 @@ export class PuraPlatformAccessory {
   }
 
   updateDevice(device: PuraDevice) {
+    const previousOnline = this.normalizeOnlineState(this.device.online);
+    const nextOnline = this.normalizeOnlineState(device.online);
+    this.logOnlineStateTransition(previousOnline, nextOnline);
     this.device = device;
     this.accessory.context.device = device;
     this.updateAccessoryInformation();
@@ -179,6 +193,24 @@ export class PuraPlatformAccessory {
     }
     this.updateCurrentState();
     void this.maybeForceNightlightOff();
+  }
+
+  private normalizeOnlineState(value: unknown): boolean | undefined {
+    if (typeof value === 'boolean') {
+      return value;
+    }
+    return undefined;
+  }
+
+  private logOnlineStateTransition(previousOnline?: boolean, nextOnline?: boolean) {
+    if (previousOnline === undefined || nextOnline === undefined || previousOnline === nextOnline) {
+      return;
+    }
+    if (nextOnline) {
+      this.platform.log.info(`${this.accessory.displayName} is back online.`);
+      return;
+    }
+    this.platform.log.warn(`${this.accessory.displayName} appears offline (Wi-Fi lost or unplugged).`);
   }
 
   private updateAccessoryInformation() {
