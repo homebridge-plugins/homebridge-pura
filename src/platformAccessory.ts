@@ -93,13 +93,6 @@ export class PuraPlatformAccessory {
   }
 
   private updateFaultState() {
-    if (this.service.testCharacteristic(this.platform.Characteristic.StatusActive)) {
-      this.service.updateCharacteristic(
-        this.platform.Characteristic.StatusActive,
-        this.isDeviceOffline() ? 0 : 1,
-      );
-    }
-
     if (!this.service.testCharacteristic(this.platform.Characteristic.StatusFault)) {
       return;
     }
@@ -145,6 +138,7 @@ export class PuraPlatformAccessory {
           : (this.device.bay1 ? 1 : this.device.bay2 ? 2 : 1);
         const bay = targetBay === 1 ? this.device.bay1 : this.device.bay2;
         const noScentVialsDetected = this.hasNoScentVialsDetected();
+        const deviceOffline = this.isDeviceOffline();
         if (!bay && this.platform.isDebugEnabled()) {
           this.platform.log.warn(
             `No bay payload available for ${this.accessory.displayName}; using fallback bay ${targetBay}.`,
@@ -157,12 +151,16 @@ export class PuraPlatformAccessory {
           ? this.accessory.context.lastIntensity
           : undefined;
         const intensity = Math.max(1, Math.min(100, preferredIntensity ?? candidateIntensity ?? 60));
-        if (noScentVialsDetected) {
+        if (noScentVialsDetected || deviceOffline) {
           this.currentStateActive = false;
           this.applyCurrentState();
           this.updateFaultState();
-          this.platform.log.warn(`No scent vials detected on ${this.accessory.displayName}.`);
-          throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+          if (deviceOffline) {
+            this.platform.log.warn(`${this.accessory.displayName} appears offline (Wi-Fi lost or unplugged).`);
+          } else {
+            this.platform.log.warn(`No scent vials detected on ${this.accessory.displayName}.`);
+          }
+          return;
         }
 
         await this.puraApi.stopAll(this.device.id);
@@ -185,6 +183,13 @@ export class PuraPlatformAccessory {
           throw new Error('Failed to turn on device');
         }
       } else {
+        if (this.isDeviceOffline()) {
+          this.currentStateActive = false;
+          this.applyCurrentState();
+          this.updateFaultState();
+          this.platform.log.warn(`${this.accessory.displayName} appears offline (Wi-Fi lost or unplugged).`);
+          return;
+        }
         const success = await this.puraApi.stopAll(this.device.id);
         if (success) {
           this.currentStateActive = false;

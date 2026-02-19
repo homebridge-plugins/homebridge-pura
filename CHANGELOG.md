@@ -1,5 +1,13 @@
 # Release Notes
 
+## 1.6.0 - 2026-02-19
+- Improve no-vial handling so turn-on requests short-circuit cleanly instead of cascading API errors.
+- Keep Home app behavior stable when no vials are installed or device is offline (avoid error-driven flicker/no-response behavior from this path).
+- Surface HomeKit fault state (`StatusFault`) for no-vial and offline conditions so users get a visible in-app problem indicator.
+- Add clearer runtime messaging for unavailable conditions:
+  - `No scent vials detected on <Device Name>.`
+  - `<Device Name> appears offline (Wi-Fi lost or unplugged).`
+
 ## 1.5.5 - 2026-02-18
 - Improve device-list fetch resiliency when Pura API returns transient `ThingTypeError` during add/remove device changes:
   - Retry `v2/users/devices` after a short delay.
