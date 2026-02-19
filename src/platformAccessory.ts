@@ -68,6 +68,7 @@ export class PuraPlatformAccessory {
       .onGet(this.getOn.bind(this));
 
     this.updateCurrentState();
+    this.updateFaultState();
   }
 
   private updateCurrentState() {
@@ -80,6 +81,32 @@ export class PuraPlatformAccessory {
       }
     }
     this.applyCurrentState();
+    this.updateFaultState();
+  }
+
+  private hasNoScentVialsDetected(): boolean {
+    return !this.device.bay1 && !this.device.bay2;
+  }
+
+  private isDeviceOffline(): boolean {
+    return this.normalizeOnlineState(this.device.online) === false;
+  }
+
+  private updateFaultState() {
+    if (this.service.testCharacteristic(this.platform.Characteristic.StatusActive)) {
+      this.service.updateCharacteristic(
+        this.platform.Characteristic.StatusActive,
+        this.isDeviceOffline() ? 0 : 1,
+      );
+    }
+
+    if (!this.service.testCharacteristic(this.platform.Characteristic.StatusFault)) {
+      return;
+    }
+    const nextFault = (this.hasNoScentVialsDetected() || this.isDeviceOffline())
+      ? this.platform.Characteristic.StatusFault.GENERAL_FAULT
+      : this.platform.Characteristic.StatusFault.NO_FAULT;
+    this.service.updateCharacteristic(this.platform.Characteristic.StatusFault, nextFault);
   }
 
   private getActiveBay(): PuraBay | undefined {
@@ -117,7 +144,7 @@ export class PuraPlatformAccessory {
           ? normalizedPreferred
           : (this.device.bay1 ? 1 : this.device.bay2 ? 2 : 1);
         const bay = targetBay === 1 ? this.device.bay1 : this.device.bay2;
-        const noScentVialsDetected = !this.device.bay1 && !this.device.bay2;
+        const noScentVialsDetected = this.hasNoScentVialsDetected();
         if (!bay && this.platform.isDebugEnabled()) {
           this.platform.log.warn(
             `No bay payload available for ${this.accessory.displayName}; using fallback bay ${targetBay}.`,
@@ -133,6 +160,7 @@ export class PuraPlatformAccessory {
         if (noScentVialsDetected) {
           this.currentStateActive = false;
           this.applyCurrentState();
+          this.updateFaultState();
           this.platform.log.warn(`No scent vials detected on ${this.accessory.displayName}.`);
           throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
         }
