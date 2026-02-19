@@ -136,6 +136,7 @@ export class PuraApi {
     method: string,
     endpoint: string,
     data?: unknown,
+    options?: { suppressHttpErrorLog?: boolean },
   ): Promise<unknown> {
     const url = new URL(endpoint, this.baseUrl).toString();
 
@@ -180,7 +181,9 @@ export class PuraApi {
       }
 
       if (!response.ok) {
-        this.log.error(`API request failed: ${response.status} - ${responseText}`);
+        if (!options?.suppressHttpErrorLog) {
+          this.log.error(`API request failed: ${response.status} - ${responseText}`);
+        }
         throw new Error(`API request failed: ${response.status} - ${responseText}`);
       }
 
@@ -605,9 +608,21 @@ export class PuraApi {
    */
   async stopAll(deviceId: string): Promise<boolean> {
     try {
-      const response = await this.makeRequest('POST', `devices/${deviceId}/stop-all`) as { success?: boolean };
+      const response = await this.makeRequest(
+        'POST',
+        `devices/${deviceId}/stop-all`,
+        undefined,
+        { suppressHttpErrorLog: true },
+      ) as { success?: boolean };
       return response.success === true;
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const isBenignStopFailure = message.includes('API request failed: 500')
+        && message.toLowerCase().includes('could not stop device');
+      if (isBenignStopFailure) {
+        this.log.debug(`Stop-all returned benign 500 for device ${deviceId}; treating as already stopped.`);
+        return true;
+      }
       this.log.error(`Failed to stop all for device ${deviceId}:`, error);
       return false;
     }
