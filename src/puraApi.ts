@@ -136,7 +136,7 @@ export class PuraApi {
     method: string,
     endpoint: string,
     data?: unknown,
-    options?: { suppressHttpErrorLog?: boolean },
+    options?: { suppressHttpErrorLog?: boolean; suppressTransportErrorLog?: boolean },
   ): Promise<unknown> {
     const url = new URL(endpoint, this.baseUrl).toString();
 
@@ -195,7 +195,9 @@ export class PuraApi {
         return responseText;
       }
     } catch (error) {
-      this.log.error('API request error:', error);
+      if (!options?.suppressTransportErrorLog) {
+        this.log.error('API request error:', error);
+      }
       throw error;
     }
   }
@@ -210,16 +212,38 @@ export class PuraApi {
     for (let i = 0; i < endpoints.length; i++) {
       const endpoint = endpoints[i];
       try {
-        const response = await this.makeRequest('GET', endpoint) as Record<string, unknown>;
+        const response = await this.makeRequest('GET', endpoint, undefined, {
+          suppressTransportErrorLog: true,
+        }) as Record<string, unknown>;
         return this.extractDevices(response);
       } catch (error) {
         lastError = error;
         const isPrimaryEndpoint = i === 0;
+        if (this.isTransientNetworkError(error)) {
+          this.log.warn(`Pura devices endpoint timed out (${endpoint}). Retrying shortly...`);
+          await this.delay(1500);
+          try {
+            const retryResponse = await this.makeRequest('GET', endpoint, undefined, {
+              suppressTransportErrorLog: true,
+            }) as Record<string, unknown>;
+            return this.extractDevices(retryResponse);
+          } catch (retryError) {
+            lastError = retryError;
+          }
+          if (!isPrimaryEndpoint) {
+            this.log.debug(`Compatibility endpoint timeout (${endpoint}):`, lastError);
+            continue;
+          }
+          this.log.warn('Primary devices endpoint still timing out. Trying compatibility endpoint.');
+          continue;
+        }
         if (isPrimaryEndpoint && this.isThingTypeError(error)) {
           this.log.warn('Pura devices endpoint returned ThingTypeError. Retrying primary endpoint after brief delay.');
           await this.delay(1500);
           try {
-            const retryResponse = await this.makeRequest('GET', endpoint) as Record<string, unknown>;
+            const retryResponse = await this.makeRequest('GET', endpoint, undefined, {
+              suppressTransportErrorLog: true,
+            }) as Record<string, unknown>;
             return this.extractDevices(retryResponse);
           } catch (retryError) {
             lastError = retryError;
@@ -233,6 +257,11 @@ export class PuraApi {
         }
         throw error;
       }
+    }
+
+    if (this.isTransientNetworkError(lastError)) {
+      this.log.warn('Pura devices endpoint timed out. Returning no device updates this cycle.');
+      return [];
     }
 
     if (this.isThingTypeError(lastError)) {
@@ -268,6 +297,19 @@ export class PuraApi {
       return false;
     }
     return error.message.toLowerCase().includes('thingtypeerror');
+  }
+
+  private isTransientNetworkError(error: unknown): boolean {
+    if (!(error instanceof Error)) {
+      return false;
+    }
+    const message = error.message.toLowerCase();
+    return message.includes('etimedout')
+      || message.includes('econnreset')
+      || message.includes('eai_again')
+      || message.includes('fetch failed')
+      || message.includes('network timeout')
+      || message.includes('socket hang up');
   }
 
   private async delay(ms: number): Promise<void> {
@@ -329,6 +371,8 @@ export class PuraApi {
       }
     }
 
+    const onlineState = this.resolveOnlineState(record);
+
     return {
       id,
       name: name ?? `Pura ${id}`,
@@ -340,14 +384,14 @@ export class PuraApi {
         battery: (record.batteryRemaining || record.battery) as number | undefined,
         firmwareVersion,
         lastSeen: record.lastConnectedAt ? String(record.lastConnectedAt) : undefined,
-        online: (record.connected || record.online) as boolean | undefined,
+        online: onlineState,
       },
       bay1,
       bay2,
       nightlight,
       awayMode: record.awayMode as boolean | undefined,
       ambientMode: record.ambientMode as boolean | undefined,
-      online: (record.connected || record.online) as boolean | undefined,
+      online: onlineState,
       __raw: record,
     };
   }
@@ -452,7 +496,7 @@ export class PuraApi {
     const nowSeconds = Math.floor(Date.now() / 1000);
     const diffusionMode = typeof parent.diffusionMode === 'string' ? parent.diffusionMode : undefined;
     const standardMode = diffusionMode === 'standard';
-    const online = Boolean(parent.connected || parent.online);
+    const online = this.resolveOnlineState(parent) !== false;
     const activeAtWindowSeconds = standardMode && online ? 60 * 60 : 300;
     const activeAtRecent = activeAt !== undefined &&
       Math.abs(nowSeconds - activeAt) < activeAtWindowSeconds;
@@ -480,6 +524,18 @@ export class PuraApi {
       timer: record.timer as PuraTimer | undefined,
       fragrance: record.fragrance as PuraFragrance | undefined,
     };
+  }
+
+  private resolveOnlineState(source: Record<string, unknown>): boolean | undefined {
+    const connected = source.connected;
+    if (typeof connected === 'boolean') {
+      return connected;
+    }
+    const online = source.online;
+    if (typeof online === 'boolean') {
+      return online;
+    }
+    return undefined;
   }
 
   private normalizeBayIntensity(value: unknown): number | null {

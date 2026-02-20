@@ -102,6 +102,16 @@ export class PuraPlatformAccessory {
     this.service.updateCharacteristic(this.platform.Characteristic.StatusFault, nextFault);
   }
 
+  private enforceOffVisualState() {
+    this.currentStateActive = false;
+    this.applyCurrentState();
+    // Home may optimistically show ON after onSet succeeds; push OFF again on next tick.
+    setTimeout(() => {
+      this.currentStateActive = false;
+      this.applyCurrentState();
+    }, 100);
+  }
+
   private getActiveBay(): PuraBay | undefined {
     const bay1 = this.device.bay1;
     const bay2 = this.device.bay2;
@@ -152,8 +162,7 @@ export class PuraPlatformAccessory {
           : undefined;
         const intensity = Math.max(1, Math.min(100, preferredIntensity ?? candidateIntensity ?? 60));
         if (noScentVialsDetected || deviceOffline) {
-          this.currentStateActive = false;
-          this.applyCurrentState();
+          this.enforceOffVisualState();
           this.updateFaultState();
           if (deviceOffline) {
             this.platform.log.warn(`${this.accessory.displayName} appears offline (Wi-Fi lost or unplugged).`);
@@ -184,8 +193,7 @@ export class PuraPlatformAccessory {
         }
       } else {
         if (this.isDeviceOffline()) {
-          this.currentStateActive = false;
-          this.applyCurrentState();
+          this.enforceOffVisualState();
           this.updateFaultState();
           this.platform.log.warn(`${this.accessory.displayName} appears offline (Wi-Fi lost or unplugged).`);
           return;
