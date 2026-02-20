@@ -250,8 +250,8 @@ export class PuraPlatformAccessory {
       this.lastAwayModeEnabledState = awayModeEnabled;
       if (awayModeEnabled) {
         this.platform.log.warn(
-          `Away mode is enabled on ${this.accessory.displayName}, ` +
-          'and is recommended to be disabled in the Pura app.',
+          `Away mode is currently enabled on ${this.accessory.displayName}. ` +
+          'For best results, please disable it in the Pura app.',
         );
       }
     }
@@ -260,9 +260,9 @@ export class PuraPlatformAccessory {
     if (autoAlternativeLikelyOff !== this.lastAutoAlternativeOffState) {
       this.lastAutoAlternativeOffState = autoAlternativeLikelyOff;
       if (autoAlternativeLikelyOff) {
-        this.platform.log.info(
-          `Auto-alternate fragrances is not enabled on ${this.accessory.displayName}, ` +
-          'and is recommended to be enabled in the Pura app.',
+        this.platform.log.warn(
+          `Auto-alternate fragrances is currently disabled on ${this.accessory.displayName}. ` +
+          'For best results, please enable it in the Pura app.',
         );
       }
     }
