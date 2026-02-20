@@ -166,6 +166,8 @@ export class PuraPlatformAccessory {
           this.updateFaultState();
           if (deviceOffline) {
             this.platform.log.warn(`${this.accessory.displayName} appears offline (Wi-Fi lost or unplugged).`);
+            // Surface an actionable HomeKit error when the device is unreachable.
+            throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
           } else {
             this.platform.log.warn(`No scent vials detected on ${this.accessory.displayName}.`);
           }
