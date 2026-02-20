@@ -172,7 +172,10 @@ export class PuraPlatformAccessory {
             // Surface an actionable HomeKit error when the device is unreachable.
             throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
           } else {
-            this.platform.log.warn(`No scent vials detected on ${this.accessory.displayName}.`);
+            this.platform.log.warn(
+              `${this.accessory.displayName} was turned on, but no scent vials were detected. ` +
+              'The accessory was turned off as a result.',
+            );
           }
           return;
         }
