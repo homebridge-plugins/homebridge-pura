@@ -15,6 +15,8 @@ export class PuraPlatformAccessory {
 
   private currentStateActive = false;
   private lastNightlightOffAt = 0;
+  private lastAwayModeEnabledState: boolean | null = null;
+  private lastAutoAlternativeOffState: boolean | null = null;
 
   constructor(
     private readonly platform: PuraPlatform,
@@ -69,6 +71,7 @@ export class PuraPlatformAccessory {
 
     this.updateCurrentState();
     this.updateFaultState();
+    this.logRecommendationHints(this.device);
   }
 
   private updateCurrentState() {
@@ -230,6 +233,7 @@ export class PuraPlatformAccessory {
     const previousOnline = this.normalizeOnlineState(this.device.online);
     const nextOnline = this.normalizeOnlineState(device.online);
     this.logOnlineStateTransition(previousOnline, nextOnline);
+    this.logRecommendationHints(device);
     this.device = device;
     this.accessory.context.device = device;
     this.updateAccessoryInformation();
@@ -238,6 +242,49 @@ export class PuraPlatformAccessory {
     }
     this.updateCurrentState();
     void this.maybeForceNightlightOff();
+  }
+
+  private logRecommendationHints(device: PuraDevice) {
+    const awayModeEnabled = this.isAwayModeEnabled(device);
+    if (awayModeEnabled !== this.lastAwayModeEnabledState) {
+      this.lastAwayModeEnabledState = awayModeEnabled;
+      if (awayModeEnabled) {
+        this.platform.log.warn(
+          `Away mode is enabled on ${this.accessory.displayName}, ` +
+          'and is recommended to be disabled in the Pura app.',
+        );
+      }
+    }
+
+    const autoAlternativeLikelyOff = this.isAutoAlternativeLikelyOff(device);
+    if (autoAlternativeLikelyOff !== this.lastAutoAlternativeOffState) {
+      this.lastAutoAlternativeOffState = autoAlternativeLikelyOff;
+      if (autoAlternativeLikelyOff) {
+        this.platform.log.info(
+          `Auto-alternate fragrances is not enabled on ${this.accessory.displayName}, ` +
+          'and is recommended to be enabled in the Pura app.',
+        );
+      }
+    }
+  }
+
+  private isAwayModeEnabled(device: PuraDevice): boolean {
+    const rawAwayMode = device.__raw?.awayMode;
+    if (typeof rawAwayMode === 'boolean') {
+      return rawAwayMode;
+    }
+    if (rawAwayMode && typeof rawAwayMode === 'object') {
+      const record = rawAwayMode as Record<string, unknown>;
+      if (typeof record.enabled === 'boolean') {
+        return record.enabled;
+      }
+    }
+    return Boolean(device.awayMode);
+  }
+
+  private isAutoAlternativeLikelyOff(device: PuraDevice): boolean {
+    const mode = (device.diffusionMode ?? '').toLowerCase();
+    return mode === 'standard';
   }
 
   private normalizeOnlineState(value: unknown): boolean | undefined {
