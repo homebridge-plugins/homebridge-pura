@@ -6,7 +6,7 @@
 
 This plugin is intentionally simple. It exposes a single on/off switch per diffuser, allowing you to control each device using HomeKit.
 
-It’s designed to be used with Pura’s auto-away and scheduling features disabled, so HomeKit can act as the primary automation layer.
+It’s designed to be used with Pura’s away mode and scheduling features disabled, so HomeKit can act as the primary automation layer.
 
 ## Supported Diffusers
 This plugin has been designed and tested for the following diffusers.
