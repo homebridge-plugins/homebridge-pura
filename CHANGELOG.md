@@ -1,5 +1,15 @@
 # Release Notes
 
+## 1.6.1 - 2026-02-20
+- Merge dependency update PR:
+  - `tar` from `7.5.7` to `7.5.8`.
+- Improve offline detection reliability by preserving explicit `online=false` values from API payloads.
+- Improve Home app behavior for unavailable devices:
+  - Turn-on attempts now short-circuit cleanly when device is offline or no scent vials are detected.
+  - Force visual state back to off to reduce optimistic on-state flicker.
+- Improve user-facing recommendation logs for Away mode and Auto-alternate fragrances, including clearer wording and webhook-transition messaging.
+- Update README guidance.
+
 ## 1.6.0 - 2026-02-19
 - Improve no-vial handling so turn-on requests short-circuit cleanly instead of cascading API errors.
 - Keep Home app behavior stable when no vials are installed or device is offline (avoid error-driven flicker/no-response behavior from this path).
