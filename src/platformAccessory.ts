@@ -294,6 +294,19 @@ export class PuraPlatformAccessory {
   }
 
   private isAutoAlternativeLikelyOff(device: PuraDevice): boolean {
+    // Auto-alternate is currently supported on newer models only.
+    const model = (device.type ?? '').toLowerCase();
+    const supportsAutoAlternate = model.includes('pura 4') || model.includes('pura plus');
+    if (!supportsAutoAlternate) {
+      return false;
+    }
+
+    // Guard for malformed payloads on supported models.
+    const appearsSingleBayModel = model.includes('mini') || model.includes('car');
+    const hasSecondBay = Boolean(device.bay2 || (device.__raw as Record<string, unknown> | undefined)?.bay2);
+    if (appearsSingleBayModel || !hasSecondBay) {
+      return false;
+    }
     const mode = (device.diffusionMode ?? '').toLowerCase();
     return mode === 'standard';
   }
