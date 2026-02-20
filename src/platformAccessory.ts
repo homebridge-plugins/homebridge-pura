@@ -247,22 +247,30 @@ export class PuraPlatformAccessory {
   private logRecommendationHints(device: PuraDevice) {
     const awayModeEnabled = this.isAwayModeEnabled(device);
     if (awayModeEnabled !== this.lastAwayModeEnabledState) {
+      const isInitialLog = this.lastAwayModeEnabledState === null;
       this.lastAwayModeEnabledState = awayModeEnabled;
       if (awayModeEnabled) {
         this.platform.log.warn(
-          `Away mode is currently enabled on ${this.accessory.displayName}. ` +
-          'For best results, please disable it in the Pura app.',
+          isInitialLog
+            ? `Away mode is currently enabled on ${this.accessory.displayName}. ` +
+              'For best results, please disable it in the Pura app.'
+            : `Away mode was enabled on ${this.accessory.displayName}. ` +
+              'For best results, please disable it in the Pura app.',
         );
       }
     }
 
     const autoAlternativeLikelyOff = this.isAutoAlternativeLikelyOff(device);
     if (autoAlternativeLikelyOff !== this.lastAutoAlternativeOffState) {
+      const isInitialLog = this.lastAutoAlternativeOffState === null;
       this.lastAutoAlternativeOffState = autoAlternativeLikelyOff;
       if (autoAlternativeLikelyOff) {
         this.platform.log.warn(
-          `Auto-alternate fragrances is currently disabled on ${this.accessory.displayName}. ` +
-          'For best results, please enable it in the Pura app.',
+          isInitialLog
+            ? `Auto-alternate fragrances is currently disabled on ${this.accessory.displayName}. ` +
+              'For best results, please enable it in the Pura app.'
+            : `Auto-alternate fragrances was disabled on ${this.accessory.displayName}. ` +
+              'For best results, please re-enable it in the Pura app.',
         );
       }
     }
