@@ -227,6 +227,10 @@ export class PuraPlatformAccessory {
   }
 
   async getOn(): Promise<CharacteristicValue> {
+    if (this.isDeviceOffline()) {
+      this.updateFaultState();
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
     const isActive = this.getCurrentStateValue();
     this.platform.log.debug(`Get Characteristic Active for ${this.accessory.displayName} ->`, isActive);
     return isActive;
