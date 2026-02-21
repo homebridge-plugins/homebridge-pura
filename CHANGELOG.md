@@ -1,5 +1,13 @@
 # Release Notes
 
+## 1.6.3 - 2026-02-21
+- Improve offline inference when cloud `online` status appears stale:
+  - Treat devices as unavailable when payload reports `online=true` but bay payload is empty for an extended period.
+  - Surface this inferred unavailable state consistently in HomeKit read paths to reduce false "online" behavior.
+
+## 1.6.2 - 2026-02-20
+- Limit auto-alternate recommendation messaging to models that support the feature (Pura 4 / Pura Plus).
+
 ## 1.6.1 - 2026-02-20
 - Merge dependency update PR:
   - `tar` from `7.5.7` to `7.5.8`.
