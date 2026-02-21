@@ -15,6 +15,7 @@ export class PuraPlatformAccessory {
 
   private currentStateActive = false;
   private lastNightlightOffAt = 0;
+  private inferredOfflineFromStaleState = false;
   private lastAwayModeEnabledState: boolean | null = null;
   private lastAutoAlternativeOffState: boolean | null = null;
 
@@ -95,11 +96,26 @@ export class PuraPlatformAccessory {
     return this.normalizeOnlineState(this.device.online) === false;
   }
 
+  private isLikelyOfflineFromStaleStatus(): boolean {
+    if (this.normalizeOnlineState(this.device.online) !== true) {
+      return false;
+    }
+    if (!this.hasNoScentVialsDetected()) {
+      return false;
+    }
+    const ageMs = this.getLastSeenAgeMs();
+    return ageMs !== undefined && ageMs > 120000;
+  }
+
+  private isDeviceUnavailable(): boolean {
+    return this.isDeviceOffline() || this.isLikelyOfflineFromStaleStatus();
+  }
+
   private updateFaultState() {
     if (!this.service.testCharacteristic(this.platform.Characteristic.StatusFault)) {
       return;
     }
-    const nextFault = (this.hasNoScentVialsDetected() || this.isDeviceOffline())
+    const nextFault = (this.hasNoScentVialsDetected() || this.isDeviceUnavailable())
       ? this.platform.Characteristic.StatusFault.GENERAL_FAULT
       : this.platform.Characteristic.StatusFault.NO_FAULT;
     this.service.updateCharacteristic(this.platform.Characteristic.StatusFault, nextFault);
@@ -151,7 +167,7 @@ export class PuraPlatformAccessory {
           : (this.device.bay1 ? 1 : this.device.bay2 ? 2 : 1);
         const bay = targetBay === 1 ? this.device.bay1 : this.device.bay2;
         const noScentVialsDetected = this.hasNoScentVialsDetected();
-        const deviceOffline = this.isDeviceOffline();
+        const deviceUnavailable = this.isDeviceUnavailable();
         if (!bay && this.platform.isDebugEnabled()) {
           this.platform.log.warn(
             `No bay payload available for ${this.accessory.displayName}; using fallback bay ${targetBay}.`,
@@ -164,10 +180,10 @@ export class PuraPlatformAccessory {
           ? this.accessory.context.lastIntensity
           : undefined;
         const intensity = Math.max(1, Math.min(100, preferredIntensity ?? candidateIntensity ?? 60));
-        if (noScentVialsDetected || deviceOffline) {
+        if (noScentVialsDetected || deviceUnavailable) {
           this.enforceOffVisualState();
           this.updateFaultState();
-          if (deviceOffline) {
+          if (deviceUnavailable) {
             this.platform.log.warn(`${this.accessory.displayName} appears offline (Wi-Fi lost or unplugged).`);
             // Surface an actionable HomeKit error when the device is unreachable.
             throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
@@ -200,7 +216,7 @@ export class PuraPlatformAccessory {
           throw new Error('Failed to turn on device');
         }
       } else {
-        if (this.isDeviceOffline()) {
+        if (this.isDeviceUnavailable()) {
           this.enforceOffVisualState();
           this.updateFaultState();
           this.platform.log.warn(`${this.accessory.displayName} appears offline (Wi-Fi lost or unplugged).`);
@@ -227,7 +243,7 @@ export class PuraPlatformAccessory {
   }
 
   async getOn(): Promise<CharacteristicValue> {
-    if (this.isDeviceOffline()) {
+    if (this.isDeviceUnavailable()) {
       this.updateFaultState();
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
@@ -240,8 +256,9 @@ export class PuraPlatformAccessory {
     const previousOnline = this.normalizeOnlineState(this.device.online);
     const nextOnline = this.normalizeOnlineState(device.online);
     this.logOnlineStateTransition(previousOnline, nextOnline);
-    this.logRecommendationHints(device);
     this.device = device;
+    this.logInferredOfflineTransition();
+    this.logRecommendationHints(device);
     this.accessory.context.device = device;
     this.updateAccessoryInformation();
     if (this.platform.isDebugEnabled()) {
@@ -249,6 +266,21 @@ export class PuraPlatformAccessory {
     }
     this.updateCurrentState();
     void this.maybeForceNightlightOff();
+  }
+
+  private logInferredOfflineTransition() {
+    const inferredOffline = this.isLikelyOfflineFromStaleStatus();
+    if (inferredOffline === this.inferredOfflineFromStaleState) {
+      return;
+    }
+    this.inferredOfflineFromStaleState = inferredOffline;
+    if (inferredOffline) {
+      this.platform.log.warn(
+        `${this.accessory.displayName} appears offline (cloud status may be stale; reported online without bay payload).`,
+      );
+    } else {
+      this.platform.log.info(`${this.accessory.displayName} cloud status appears current again.`);
+    }
   }
 
   private logRecommendationHints(device: PuraDevice) {
@@ -307,6 +339,29 @@ export class PuraPlatformAccessory {
       return value;
     }
     return undefined;
+  }
+
+  private getLastSeenAgeMs(): number | undefined {
+    const raw = this.device.state?.lastSeen;
+    if (!raw) {
+      return undefined;
+    }
+    const trimmed = String(raw).trim();
+    if (!trimmed) {
+      return undefined;
+    }
+    const numeric = Number(trimmed);
+    let timestampMs: number;
+    if (Number.isFinite(numeric)) {
+      timestampMs = numeric > 1e12 ? numeric : numeric * 1000;
+    } else {
+      const parsed = Date.parse(trimmed);
+      if (!Number.isFinite(parsed)) {
+        return undefined;
+      }
+      timestampMs = parsed;
+    }
+    return Date.now() - timestampMs;
   }
 
   private logOnlineStateTransition(previousOnline?: boolean, nextOnline?: boolean) {
