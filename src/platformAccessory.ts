@@ -1590,6 +1590,40 @@ export class PuraPlatformAccessory {
   }
 
   private stabilizeNightlightDuringIntentWindow(device: PuraDevice): PuraDevice {
+    if (!this.pendingNightlightIntent && device.nightlight) {
+      const forceNightlightOff = Boolean((this.platform.config as PuraConfig).forceNightlightOff);
+      const recentNightlightInteraction = this.platform.getRecentNightlightInteraction(this.device.id);
+      const previousNightlightActive = Boolean(this.device.nightlight?.active);
+      const incomingNightlightActive = Boolean(device.nightlight.active);
+      const sinceDiffuserOnMs = this.lastSuccessfulOnWriteAt !== undefined
+        ? Date.now() - this.lastSuccessfulOnWriteAt
+        : undefined;
+      const inDiffuserOnStabilizationWindow = sinceDiffuserOnMs !== undefined
+        && sinceDiffuserOnMs >= 0
+        && sinceDiffuserOnMs <= 8000;
+      // Some devices briefly report nightlight=on when a diffuser starts even when no HomeKit
+      // nightlight command was sent. Hold the prior OFF state during the startup window.
+      if (!forceNightlightOff
+        && inDiffuserOnStabilizationWindow
+        && !recentNightlightInteraction
+        && !previousNightlightActive
+        && incomingNightlightActive) {
+        if (this.platform.isDebugEnabled()) {
+          this.platform.log.debug(
+            `[Nightlight] Suppressing transient ON snapshot for ${this.accessory.displayName} ` +
+            `(sinceDiffuserOnMs=${sinceDiffuserOnMs}).`,
+          );
+        }
+        return {
+          ...device,
+          nightlight: {
+            ...device.nightlight,
+            active: false,
+          },
+        };
+      }
+    }
+
     if (!this.pendingNightlightIntent) {
       return device;
     }
