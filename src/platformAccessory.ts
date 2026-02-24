@@ -300,25 +300,43 @@ export class PuraPlatformAccessory {
     const orderedBays = availableBays.includes(targetBay)
       ? [targetBay, ...availableBays.filter((bay) => bay !== targetBay)]
       : availableBays;
+    const [primaryBay, ...secondaryBays] = orderedBays;
 
-    let primarySuccess = false;
-    const secondaryFailures: Array<1 | 2> = [];
-    for (const bay of orderedBays) {
+    const primarySuccess = await this.puraApi.setIntensity(this.device.id, primaryBay, intensity, controller);
+    if (!primarySuccess) {
+      return false;
+    }
+
+    if (secondaryBays.length > 0) {
+      void this.syncSecondaryBayIntensities(secondaryBays, intensity, controller);
+    }
+
+    return true;
+  }
+
+  private async syncSecondaryBayIntensities(
+    bays: Array<1 | 2>,
+    intensity: number,
+    controller: string,
+  ): Promise<void> {
+    const failedBays: Array<1 | 2> = [];
+    for (const bay of bays) {
       const success = await this.puraApi.setIntensity(this.device.id, bay, intensity, controller);
-      if (bay === targetBay) {
-        primarySuccess = success;
-      } else if (!success) {
-        secondaryFailures.push(bay);
+      if (!success) {
+        failedBays.push(bay);
       }
     }
-
-    if (secondaryFailures.length > 0) {
+    if (failedBays.length > 0) {
       this.platform.log.warn(
-        `${this.accessory.displayName} intensity synced to active bay, but failed on bay(s): ${secondaryFailures.join(', ')}.`,
+        `${this.accessory.displayName} intensity synced to active bay, but failed on bay(s): ${failedBays.join(', ')}.`,
+      );
+      return;
+    }
+    if (this.platform.isDebugEnabled()) {
+      this.platform.log.debug(
+        `${this.accessory.displayName} intensity synced to secondary bay(s): ${bays.join(', ')}.`,
       );
     }
-
-    return primarySuccess;
   }
 
   async setOn(value: CharacteristicValue) {
