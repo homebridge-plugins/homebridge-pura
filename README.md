@@ -68,7 +68,7 @@ The plugin will automatically:
 
 ## Recommended Usage
 
-- Use this plugin in lieu of Pura schedules or auto-away.
+- Use this plugin in lieu of Pura schedules or away mode.
 - Enable **Auto-alternative fragrances** in the Pura app to ensure equal scent distribution.
 
 ## Troubleshooting

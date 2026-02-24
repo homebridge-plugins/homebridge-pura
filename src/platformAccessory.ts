@@ -973,6 +973,21 @@ export class PuraPlatformAccessory {
       hkBrightnessPercent,
       sentLevel,
     };
+    if (action === 'on') {
+      if (requestedOn) {
+        this.platform.log.info(
+          `${this.accessory.displayName} nightlight turned on ` +
+          `(brightness ${Math.round(hkBrightnessPercent)}%, level ${sentLevel}/10).`,
+        );
+      } else {
+        this.platform.log.info(`${this.accessory.displayName} nightlight turned off.`);
+      }
+      return;
+    }
+    this.platform.log.info(
+      `${this.accessory.displayName} nightlight brightness set to ` +
+      `${Math.round(hkBrightnessPercent)}% (level ${sentLevel}/10).`,
+    );
   }
 
   private async applyNightlightColor(
