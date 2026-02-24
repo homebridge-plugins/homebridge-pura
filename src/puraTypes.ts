@@ -9,6 +9,7 @@ export interface PuraConfig extends PlatformConfig {
   password: string;
   forceNightlightOff?: boolean;
   useFanService?: boolean;
+  enableNightlightAccessory?: boolean;
 }
 
 export interface PuraDevice {

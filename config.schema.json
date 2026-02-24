@@ -40,6 +40,12 @@
         "type": "boolean",
         "default": false,
         "description": "Pura turns the nightlight on/off with the diffuser. If enabled, the plugin will send a nightlight off command right after turning on a diffuser."
+      },
+      "enableNightlightAccessory": {
+        "title": "Enable Nightlight Accessory",
+        "type": "boolean",
+        "default": false,
+        "description": "Expose a separate HomeKit Lightbulb service for the diffuser nightlight (On + Brightness)."
       }
     }
   },

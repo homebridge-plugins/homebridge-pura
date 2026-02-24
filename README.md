@@ -29,9 +29,10 @@ Add the following platform to your `config.json`:
     {
       "name": "Pura Smart Diffuser",
       "platform": "PuraSmartDiffuser",
-      "email": "your-pura-email@example.com",
+      "username": "your-pura-email@example.com",
       "password": "your-pura-password",
-      "forceNightlightOff": false
+      "forceNightlightOff": false,
+      "enableNightlightAccessory": false
     }
   ]
 }
@@ -39,9 +40,10 @@ Add the following platform to your `config.json`:
 
 ### Configuration Options
 
-- **email**: Your Pura email - *required*
+- **username**: Your Pura email - *required*
 - **password**: Your Pura password - *required*
 - **forceNightlightOff**: Pura turns the nightlight on/off with the diffuser. Enable to prevent the light from staying on. (default: false)
+- **enableNightlightAccessory**: Exposes a separate Lightbulb service for the diffuser nightlight with On/Brightness control. (default: false)
 
 ## Usage
 

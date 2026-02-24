@@ -707,16 +707,33 @@ export class PuraApi {
       const clamped = Math.max(0, Math.min(100, Number(brightness) || 0));
       const scaledBrightness = Math.max(1, Math.min(10, Math.round((clamped / 100) * 10)));
       const normalizedColor = color.replace('#', '');
+      this.log.debug(
+        `[Nightlight] Request device=${deviceId} active=${active} ` +
+        `inputBrightness=${brightness} clampedBrightness=${clamped} scaledBrightness=${scaledBrightness} ` +
+        `color=${normalizedColor} controller=${controller}`,
+      );
       const response = await this.makeRequest('POST', `devices/${deviceId}/nightlight`, {
         active,
         brightness: scaledBrightness,
         color: normalizedColor,
         controller,
-      }) as { success?: boolean };
-      return response.success === true;
+      }) as Record<string, unknown>;
+      const success = response.success === true;
+      this.log.debug(
+        `[Nightlight] Response device=${deviceId} success=${success} payload=${this.formatDebugPayload(response)}`,
+      );
+      return success;
     } catch (error) {
       this.log.error(`Failed to set nightlight for device ${deviceId}:`, error);
       return false;
+    }
+  }
+
+  private formatDebugPayload(payload: unknown): string {
+    try {
+      return JSON.stringify(payload);
+    } catch {
+      return String(payload);
     }
   }
 

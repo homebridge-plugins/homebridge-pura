@@ -1,5 +1,11 @@
 # Release Notes
 
+## 1.6.4-alpha.0 - 2026-02-24
+- Add optional Nightlight Lightbulb service (opt-in via `enableNightlightAccessory` config).
+- Add detailed nightlight debug logging and round-trip profiling to map HomeKit brightness writes to cloud-reported levels.
+- Add API-side nightlight request/response debug payload logging for level-mapping diagnostics.
+- Update config schema and README for the new nightlight accessory option.
+
 ## 1.6.3 - 2026-02-21
 - Improve offline inference when cloud `online` status appears stale:
   - Treat devices as unavailable when payload reports `online=true` but bay payload is empty for an extended period.

@@ -6,18 +6,27 @@ import { PuraConfig, PuraDevice, PuraBay } from './puraTypes.js';
 
 /**
  * Pura Platform Accessory
- * One Switch service per diffuser (On/Off) by default.
+ * One diffuser service per device, with optional Nightlight Lightbulb service.
  */
 export class PuraPlatformAccessory {
   private service: Service;
+  private nightlightService?: Service;
   private device: PuraDevice;
   private useFanService: boolean;
+  private enableNightlightAccessory: boolean;
 
   private currentStateActive = false;
   private lastNightlightOffAt = 0;
   private inferredOfflineFromStaleState = false;
   private lastAwayModeEnabledState: boolean | null = null;
   private lastAutoAlternativeOffState: boolean | null = null;
+  private lastNightlightCommand?: {
+    at: number;
+    action: 'brightness' | 'on';
+    requestedOn: boolean;
+    hkBrightnessPercent: number;
+    sentLevel: number;
+  };
 
   constructor(
     private readonly platform: PuraPlatform,
@@ -47,6 +56,7 @@ export class PuraPlatformAccessory {
     }
 
     this.useFanService = Boolean((this.platform.config as PuraConfig).useFanService);
+    this.enableNightlightAccessory = Boolean((this.platform.config as PuraConfig).enableNightlightAccessory);
     const fanService = this.accessory.getService(this.platform.Service.Fanv2);
     const switchService = this.accessory.getService(this.platform.Service.Switch);
     if (this.useFanService) {
@@ -70,9 +80,31 @@ export class PuraPlatformAccessory {
       .onSet(this.setOn.bind(this))
       .onGet(this.getOn.bind(this));
 
+    this.configureNightlightService();
     this.updateCurrentState();
     this.updateFaultState();
     this.logRecommendationHints(this.device);
+  }
+
+  private configureNightlightService() {
+    const existing = this.accessory.getServiceById(this.platform.Service.Lightbulb, 'nightlight');
+    if (!this.enableNightlightAccessory || !this.supportsNightlightControl()) {
+      if (existing) {
+        this.accessory.removeService(existing);
+      }
+      this.nightlightService = undefined;
+      return;
+    }
+
+    const name = `${this.accessory.displayName} Nightlight`;
+    this.nightlightService = existing || this.accessory.addService(this.platform.Service.Lightbulb, name, 'nightlight');
+    this.nightlightService.setCharacteristic(this.platform.Characteristic.Name, name);
+    this.nightlightService.getCharacteristic(this.platform.Characteristic.On)
+      .onSet(this.setNightlightOn.bind(this))
+      .onGet(this.getNightlightOn.bind(this));
+    this.nightlightService.getCharacteristic(this.platform.Characteristic.Brightness)
+      .onSet(this.setNightlightBrightness.bind(this))
+      .onGet(this.getNightlightBrightness.bind(this));
   }
 
   private updateCurrentState() {
@@ -85,6 +117,7 @@ export class PuraPlatformAccessory {
       }
     }
     this.applyCurrentState();
+    this.applyNightlightState();
     this.updateFaultState();
   }
 
@@ -252,7 +285,100 @@ export class PuraPlatformAccessory {
     return isActive;
   }
 
+  async setNightlightOn(value: CharacteristicValue) {
+    if (!this.nightlightService || !this.supportsNightlightControl()) {
+      return;
+    }
+    if (this.isDeviceUnavailable()) {
+      this.updateFaultState();
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+
+    const active = Boolean(value);
+    const currentRawBrightness = this.normalizeNightlightLevel(this.device.nightlight?.brightness);
+    const brightnessPercent = this.nightlightLevelToPercent(currentRawBrightness ?? 10);
+    const sentLevel = this.percentToNightlightLevel(brightnessPercent);
+    const controller = this.device.controller || 'default';
+    const color = this.device.nightlight?.color ?? 'ffffff';
+
+    this.platform.log.debug(
+      `[Nightlight] Set On for ${this.accessory.displayName} -> ${active}; ` +
+      `rawBrightness=${currentRawBrightness ?? 'unknown'} mappedBrightness=${brightnessPercent}% color=${color}`,
+    );
+
+    const success = await this.puraApi.setNightlight(this.device.id, active, brightnessPercent, color, controller);
+    if (!success) {
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+
+    this.device.nightlight = {
+      active,
+      brightness: sentLevel,
+      color,
+    };
+    this.recordNightlightCommand('on', active, brightnessPercent, sentLevel);
+    this.applyNightlightState();
+  }
+
+  async getNightlightOn(): Promise<CharacteristicValue> {
+    if (this.isDeviceUnavailable()) {
+      this.updateFaultState();
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+    const active = Boolean(this.device.nightlight?.active);
+    this.platform.log.debug(`[Nightlight] Get On for ${this.accessory.displayName} -> ${active}`);
+    return active;
+  }
+
+  async setNightlightBrightness(value: CharacteristicValue) {
+    if (!this.nightlightService || !this.supportsNightlightControl()) {
+      return;
+    }
+    if (this.isDeviceUnavailable()) {
+      this.updateFaultState();
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+
+    const brightnessPercent = Math.max(0, Math.min(100, Number(value) || 0));
+    const apiLevel = this.percentToNightlightLevel(brightnessPercent);
+    const active = Boolean(this.device.nightlight?.active);
+    const controller = this.device.controller || 'default';
+    const color = this.device.nightlight?.color ?? 'ffffff';
+
+    this.platform.log.debug(
+      `[Nightlight] Set Brightness for ${this.accessory.displayName} -> ${brightnessPercent}% ` +
+      `(mappedLevel=${apiLevel}, active=${active}, color=${color})`,
+    );
+
+    const success = await this.puraApi.setNightlight(this.device.id, active, brightnessPercent, color, controller);
+    if (!success) {
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+
+    this.device.nightlight = {
+      active,
+      brightness: apiLevel,
+      color,
+    };
+    this.recordNightlightCommand('brightness', active, brightnessPercent, apiLevel);
+    this.applyNightlightState();
+  }
+
+  async getNightlightBrightness(): Promise<CharacteristicValue> {
+    if (this.isDeviceUnavailable()) {
+      this.updateFaultState();
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+    const brightness = this.nightlightLevelToPercent(this.device.nightlight?.brightness);
+    this.platform.log.debug(
+      `[Nightlight] Get Brightness for ${this.accessory.displayName} -> ${brightness}% ` +
+      `(raw=${this.device.nightlight?.brightness ?? 'unknown'})`,
+    );
+    return brightness;
+  }
+
   updateDevice(device: PuraDevice) {
+    const previousNightlight = this.device.nightlight;
     const previousOnline = this.normalizeOnlineState(this.device.online);
     const nextOnline = this.normalizeOnlineState(device.online);
     this.logOnlineStateTransition(previousOnline, nextOnline);
@@ -264,6 +390,7 @@ export class PuraPlatformAccessory {
     if (this.platform.isDebugEnabled()) {
       this.platform.log.debug('Device snapshot:', this.summarizeDevice(device));
     }
+    this.logNightlightProfileRoundTrip(previousNightlight, device.nightlight);
     this.updateCurrentState();
     void this.maybeForceNightlightOff();
   }
@@ -571,6 +698,12 @@ export class PuraPlatformAccessory {
       awayMode: device.awayMode,
       ambientMode: device.ambientMode,
       diffusionMode: device.diffusionMode,
+      nightlight: {
+        active: device.nightlight?.active,
+        brightnessRaw: device.nightlight?.brightness,
+        brightnessPercent: this.nightlightLevelToPercent(device.nightlight?.brightness),
+        color: device.nightlight?.color,
+      },
       modelFields,
       bay1: baySummary(device.bay1),
       bay2: baySummary(device.bay2),
@@ -611,6 +744,88 @@ export class PuraPlatformAccessory {
       ? this.platform.Characteristic.Active
       : this.platform.Characteristic.On;
     this.service.updateCharacteristic(activeCharacteristic, value);
+  }
+
+  private applyNightlightState() {
+    if (!this.nightlightService) {
+      return;
+    }
+    const isOn = Boolean(this.device.nightlight?.active);
+    const brightness = this.nightlightLevelToPercent(this.device.nightlight?.brightness);
+    this.nightlightService.updateCharacteristic(this.platform.Characteristic.On, isOn);
+    this.nightlightService.updateCharacteristic(this.platform.Characteristic.Brightness, brightness);
+  }
+
+  private normalizeNightlightLevel(level: unknown): number | undefined {
+    const numeric = Number(level);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+      return undefined;
+    }
+    if (numeric <= 10) {
+      return Math.max(1, Math.min(10, Math.round(numeric)));
+    }
+    return Math.max(1, Math.min(10, Math.round((numeric / 100) * 10)));
+  }
+
+  private nightlightLevelToPercent(level: unknown): number {
+    const normalized = this.normalizeNightlightLevel(level);
+    if (normalized === undefined) {
+      return 100;
+    }
+    return Math.max(1, Math.min(100, Math.round((normalized / 10) * 100)));
+  }
+
+  private percentToNightlightLevel(percent: number): number {
+    const clamped = Math.max(0, Math.min(100, Number(percent) || 0));
+    return Math.max(1, Math.min(10, Math.round((clamped / 100) * 10)));
+  }
+
+  private recordNightlightCommand(
+    action: 'brightness' | 'on',
+    requestedOn: boolean,
+    hkBrightnessPercent: number,
+    sentLevel: number,
+  ) {
+    this.lastNightlightCommand = {
+      at: Date.now(),
+      action,
+      requestedOn,
+      hkBrightnessPercent,
+      sentLevel,
+    };
+  }
+
+  private logNightlightProfileRoundTrip(previous?: PuraDevice['nightlight'], next?: PuraDevice['nightlight']) {
+    if (!this.platform.isDebugEnabled()) {
+      return;
+    }
+    if (!this.lastNightlightCommand) {
+      return;
+    }
+    const ageMs = Date.now() - this.lastNightlightCommand.at;
+    if (ageMs > 20000) {
+      this.lastNightlightCommand = undefined;
+      return;
+    }
+
+    const previousRaw = this.normalizeNightlightLevel(previous?.brightness);
+    const nextRaw = this.normalizeNightlightLevel(next?.brightness);
+    const previousPercent = this.nightlightLevelToPercent(previousRaw);
+    const nextPercent = this.nightlightLevelToPercent(nextRaw);
+    const brightnessChanged = previousRaw !== nextRaw || previousPercent !== nextPercent;
+    const activeChanged = Boolean(previous?.active) !== Boolean(next?.active);
+    if (!brightnessChanged && !activeChanged) {
+      return;
+    }
+
+    const cmd = this.lastNightlightCommand;
+    this.platform.log.debug(
+      `[Nightlight Profile] ${this.accessory.displayName} action=${cmd.action} ` +
+      `hk=${Math.round(cmd.hkBrightnessPercent)}% sentLevel=${cmd.sentLevel} sentOn=${cmd.requestedOn} ` +
+      `-> cloudRaw=${nextRaw ?? 'unknown'} cloudPercent=${nextPercent}% cloudOn=${Boolean(next?.active)} ` +
+      `(prevRaw=${previousRaw ?? 'unknown'} prevPercent=${previousPercent}% ageMs=${ageMs})`,
+    );
+    this.lastNightlightCommand = undefined;
   }
 
   private async ensureNightlightOff() {
