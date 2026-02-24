@@ -549,9 +549,12 @@ export class PuraApi {
       (standardMode && activeAtRecent) ||
       (activeAtRecent && intensityEvidence);
     const active = typeof explicitActive === 'boolean' ? explicitActive : inferredActive;
+    // Preserve reported intensity even when the active flag is stale/missing. The accessory layer
+    // can use this as secondary evidence for current diffusion state.
+    const reportedIntensity = intensityFromRecord ?? intensityFromOscillation ?? 0;
     const normalizedIntensity = active
       ? (intensityFromRecord ?? intensityFromOscillation ?? intensityFromDefaults ?? 0)
-      : 0;
+      : reportedIntensity;
     return {
       id: typeof record.id === 'number' ? record.id : bayNumber,
       name: typeof record.name === 'string' ? record.name : undefined,

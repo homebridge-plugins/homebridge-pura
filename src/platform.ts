@@ -830,6 +830,11 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     if (bay1?.active || bay2?.active) {
       return true;
     }
+    const bay1HasIntensity = Number.isFinite(bay1?.intensity) && Number(bay1?.intensity) > 0;
+    const bay2HasIntensity = Number.isFinite(bay2?.intensity) && Number(bay2?.intensity) > 0;
+    if (bay1HasIntensity || bay2HasIntensity) {
+      return true;
+    }
     return false;
   }
 

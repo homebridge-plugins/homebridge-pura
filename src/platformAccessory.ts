@@ -160,7 +160,7 @@ export class PuraPlatformAccessory {
 
   private updateCurrentState() {
     const activeBay = this.getActiveBay();
-    this.currentStateActive = Boolean(activeBay?.active);
+    this.currentStateActive = Boolean(activeBay);
     if (activeBay) {
       this.accessory.context.lastBay = activeBay === this.device.bay1 ? 1 : 2;
       if (Number.isFinite(activeBay.intensity) && activeBay.intensity > 0) {
@@ -291,6 +291,22 @@ export class PuraPlatformAccessory {
         return bay1ActiveAt > bay2ActiveAt ? bay1 : bay2;
       }
       return bay1.intensity >= bay2.intensity ? bay1 : bay2;
+    }
+    const bay1HasIntensity = Number.isFinite(bay1?.intensity) && Number(bay1?.intensity) > 0;
+    const bay2HasIntensity = Number.isFinite(bay2?.intensity) && Number(bay2?.intensity) > 0;
+    if (bay1HasIntensity && !bay2HasIntensity) {
+      return bay1;
+    }
+    if (bay2HasIntensity && !bay1HasIntensity) {
+      return bay2;
+    }
+    if (bay1HasIntensity && bay2HasIntensity) {
+      const bay1ActiveAt = bay1?.activeAt ?? 0;
+      const bay2ActiveAt = bay2?.activeAt ?? 0;
+      if (bay1ActiveAt !== bay2ActiveAt) {
+        return bay1ActiveAt > bay2ActiveAt ? bay1 : bay2;
+      }
+      return (bay1?.intensity ?? 0) >= (bay2?.intensity ?? 0) ? bay1 : bay2;
     }
     return undefined;
   }
@@ -1717,6 +1733,22 @@ export class PuraPlatformAccessory {
         return bay1ActiveAt > bay2ActiveAt ? bay1 : bay2;
       }
       return bay1.intensity >= bay2.intensity ? bay1 : bay2;
+    }
+    const bay1HasIntensity = Number.isFinite(bay1?.intensity) && Number(bay1?.intensity) > 0;
+    const bay2HasIntensity = Number.isFinite(bay2?.intensity) && Number(bay2?.intensity) > 0;
+    if (bay1HasIntensity && !bay2HasIntensity) {
+      return bay1;
+    }
+    if (bay2HasIntensity && !bay1HasIntensity) {
+      return bay2;
+    }
+    if (bay1HasIntensity && bay2HasIntensity) {
+      const bay1ActiveAt = bay1?.activeAt ?? 0;
+      const bay2ActiveAt = bay2?.activeAt ?? 0;
+      if (bay1ActiveAt !== bay2ActiveAt) {
+        return bay1ActiveAt > bay2ActiveAt ? bay1 : bay2;
+      }
+      return (bay1?.intensity ?? 0) >= (bay2?.intensity ?? 0) ? bay1 : bay2;
     }
     return undefined;
   }
