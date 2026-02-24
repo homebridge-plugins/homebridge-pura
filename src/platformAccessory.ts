@@ -469,7 +469,8 @@ export class PuraPlatformAccessory {
       const snappedSpeed = this.mapIntensityToRotation(mappedIntensity);
       if (this.platform.isDebugEnabled()) {
         this.platform.log.debug(
-          `[Diffuser] Set RotationSpeed for ${this.accessory.displayName}: raw=${value} normalized=${speed} snapped=${snappedSpeed} mappedIntensity=${mappedIntensity}`,
+          `[Diffuser] Set RotationSpeed for ${this.accessory.displayName}: ` +
+          `raw=${value} normalized=${speed} snapped=${snappedSpeed} mappedIntensity=${mappedIntensity}`,
         );
       }
       this.service.updateCharacteristic(this.platform.Characteristic.RotationSpeed, snappedSpeed);
