@@ -531,29 +531,42 @@ export class PuraApi {
     const diffusionMode = typeof parent.diffusionMode === 'string' ? parent.diffusionMode : undefined;
     const standardMode = diffusionMode === 'standard';
     const online = this.resolveOnlineState(parent) !== false;
-    const activeAtWindowSeconds = online ? 300 : 120;
+    // Standard-mode devices can update activeAt less frequently than bay active/intensity fields.
+    // Use a wider window to reduce false OFF transitions between cloud updates.
+    const activeAtWindowSeconds = standardMode
+      ? (online ? 900 : 300)
+      : (online ? 300 : 120);
     const activeAtRecent = activeAt !== undefined &&
       Math.abs(nowSeconds - activeAt) < activeAtWindowSeconds;
-    const explicitActive = record.active ?? record.enabled ?? record.on ?? record.isOn;
+    const explicitActiveValues = [
+      this.normalizeBooleanish(record.active),
+      this.normalizeBooleanish(record.enabled),
+      this.normalizeBooleanish(record.on),
+      this.normalizeBooleanish(record.isOn),
+    ];
+    const explicitActive = explicitActiveValues.find((state): state is boolean => state !== undefined);
+    const hasExplicitActiveSignal = explicitActive !== undefined;
     const intensityFromRecord = this.normalizeBayIntensity(record.intensity ?? record.level ?? record.strength);
     const intensityFromDefaults = this.normalizeBayIntensity(
       (parent.deviceDefaults as Record<string, unknown> | undefined)?.[`bay${bayNumber}Intensity`],
     );
+    const intensityFromParentState = this.normalizeParentStateIntensity(parent, bayNumber);
     const oscillationActive = this.normalizeOscillationActive(parent.oscillation, bayNumber);
     const intensityFromOscillation = this.normalizeOscillationIntensity(parent.oscillation, bayNumber);
     const intensityEvidence = (
       (intensityFromRecord !== null && Number.isFinite(intensityFromRecord) && intensityFromRecord > 0) ||
-      (intensityFromOscillation !== null && Number.isFinite(intensityFromOscillation) && intensityFromOscillation > 0)
+      (intensityFromOscillation !== null && Number.isFinite(intensityFromOscillation) && intensityFromOscillation > 0) ||
+      (intensityFromParentState !== null && Number.isFinite(intensityFromParentState) && intensityFromParentState > 0)
     );
     const inferredActive = oscillationActive ||
-      (standardMode && activeAtRecent) ||
+      (standardMode && !hasExplicitActiveSignal && activeAtRecent) ||
       (activeAtRecent && intensityEvidence);
-    const active = typeof explicitActive === 'boolean' ? explicitActive : inferredActive;
+    const active = explicitActive ?? inferredActive;
     // Preserve reported intensity even when the active flag is stale/missing. The accessory layer
     // can use this as secondary evidence for current diffusion state.
     const reportedIntensity = intensityFromRecord ?? intensityFromOscillation ?? 0;
     const normalizedIntensity = active
-      ? (intensityFromRecord ?? intensityFromOscillation ?? intensityFromDefaults ?? 0)
+      ? (intensityFromRecord ?? intensityFromOscillation ?? intensityFromParentState ?? intensityFromDefaults ?? 0)
       : reportedIntensity;
     return {
       id: typeof record.id === 'number' ? record.id : bayNumber,
@@ -622,6 +635,54 @@ export class PuraApi {
       return 50;
     }
     return 100;
+  }
+
+  private normalizeBooleanish(value: unknown): boolean | undefined {
+    if (typeof value === 'boolean') {
+      return value;
+    }
+    if (typeof value === 'number') {
+      if (value === 1) {
+        return true;
+      }
+      if (value === 0) {
+        return false;
+      }
+      return undefined;
+    }
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (['true', '1', 'on', 'yes', 'active', 'enabled'].includes(normalized)) {
+        return true;
+      }
+      if (['false', '0', 'off', 'no', 'inactive', 'disabled'].includes(normalized)) {
+        return false;
+      }
+    }
+    return undefined;
+  }
+
+  private normalizeParentStateIntensity(parent: Record<string, unknown>, bayNumber: number): number | null {
+    const states = Array.isArray(parent.states) ? parent.states : [];
+    const match = states.find((state) => {
+      if (!state || typeof state !== 'object') {
+        return false;
+      }
+      const stateRecord = state as Record<string, unknown>;
+      return stateRecord.bay === bayNumber;
+    }) as Record<string, unknown> | undefined;
+    if (match) {
+      return this.normalizeBayIntensity(match.intensity ?? match.level ?? match.strength);
+    }
+    const state = parent.state as Record<string, unknown> | undefined;
+    if (!state || typeof state !== 'object') {
+      return null;
+    }
+    const currentIndex = Number(state.currentIndex ?? state.bay ?? state.activeBay);
+    if (Number.isFinite(currentIndex) && currentIndex === bayNumber) {
+      return this.normalizeBayIntensity(state.intensity ?? state.level ?? state.strength);
+    }
+    return null;
   }
 
   private normalizeOscillationIntensity(value: unknown, bayNumber: number): number | null {
