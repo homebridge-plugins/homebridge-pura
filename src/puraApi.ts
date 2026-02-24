@@ -548,14 +548,23 @@ export class PuraApi {
         return 30;
       }
       if (normalized === 'medium') {
-        return 60;
+        return 50;
       }
       if (normalized === 'strong') {
         return 100;
       }
       const asNumber = Number(normalized);
       if (Number.isFinite(asNumber)) {
-        return asNumber <= 10 ? asNumber * 10 : asNumber;
+        if (asNumber <= 0) {
+          return 0;
+        }
+        if (asNumber <= 33) {
+          return 30;
+        }
+        if (asNumber <= 66) {
+          return 50;
+        }
+        return 100;
       }
       return null;
     }
@@ -563,7 +572,16 @@ export class PuraApi {
     if (!Number.isFinite(asNumber)) {
       return null;
     }
-    return asNumber <= 10 ? asNumber * 10 : asNumber;
+    if (asNumber <= 0) {
+      return 0;
+    }
+    if (asNumber <= 33) {
+      return 30;
+    }
+    if (asNumber <= 66) {
+      return 50;
+    }
+    return 100;
   }
 
   private normalizeOscillationIntensity(value: unknown, bayNumber: number): number | null {
