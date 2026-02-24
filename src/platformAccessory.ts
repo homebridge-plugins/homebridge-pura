@@ -326,6 +326,15 @@ export class PuraPlatformAccessory {
 
     try {
       if (isOn) {
+        if (this.currentStateActive) {
+          this.applyCurrentState();
+          if (this.platform.isDebugEnabled()) {
+            this.platform.log.debug(
+              `[Diffuser] Ignoring redundant ON command for ${this.accessory.displayName} because it is already active.`,
+            );
+          }
+          return;
+        }
         const preferredBay = this.accessory.context.lastBay;
         const normalizedPreferred = preferredBay === 1 || preferredBay === 2 ? preferredBay : undefined;
         const targetBay = normalizedPreferred && (normalizedPreferred === 1 ? this.device.bay1 : this.device.bay2)
