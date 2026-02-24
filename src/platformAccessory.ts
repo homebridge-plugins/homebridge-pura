@@ -57,6 +57,7 @@ export class PuraPlatformAccessory {
   };
   private lastSuccessfulOnWriteAt?: number;
   private lastSetOnCommandAt?: number;
+  private lastRequestedOnIntensity?: number;
   private rotationWriteQueue: Promise<void> = Promise.resolve();
 
   constructor(
@@ -424,6 +425,7 @@ export class PuraPlatformAccessory {
                 ttlMs: 12000,
                 intensity: mapped,
               };
+              this.lastRequestedOnIntensity = mapped;
             } else if (!this.pendingPowerOnIntensityIntent) {
               // If Home sends the speed right after Active=1, give it a brief window to arrive.
               await new Promise((resolve) => setTimeout(resolve, 250));
@@ -436,6 +438,7 @@ export class PuraPlatformAccessory {
                   ttlMs: 12000,
                   intensity: afterMapped,
                 };
+                this.lastRequestedOnIntensity = afterMapped;
               }
             }
           }
@@ -462,6 +465,7 @@ export class PuraPlatformAccessory {
           const fallbackIntensity = this.useFanService
             ? defaultIntensity
             : Math.max(1, Math.min(100, candidateIntensity ?? preferredIntensity ?? defaultIntensity));
+          this.lastRequestedOnIntensity = fallbackIntensity;
           if (noScentVialsDetected || deviceUnavailable) {
             this.enforceOffVisualState();
             this.updateFaultState();
@@ -836,12 +840,10 @@ export class PuraPlatformAccessory {
       this.recordNightlightCommand('on', active, brightnessPercent, sentLevel);
       if (active) {
         this.platform.log.info(
-          `${this.accessory.displayName} nightlight turned on (brightness ${brightnessPercent}%, color ${color}).`,
+          `${this.accessory.displayName} nightlight turned on (${brightnessPercent}% brightness).`,
         );
       } else {
-        this.platform.log.info(
-          `${this.accessory.displayName} nightlight turned off.`,
-        );
+        this.platform.log.info(`${this.accessory.displayName} nightlight turned off.`);
       }
       this.applyNightlightState();
     });
@@ -1868,12 +1870,12 @@ export class PuraPlatformAccessory {
 
   private clampIntensityDuringHold(device: PuraDevice): PuraDevice {
     if (!this.recentIntensityHold) {
-      return device;
+      return this.clampRecentOnDrop(device);
     }
     const now = Date.now();
     if (now > this.recentIntensityHold.until) {
       this.recentIntensityHold = undefined;
-      return device;
+      return this.clampRecentOnDrop(device);
     }
     const hold = this.recentIntensityHold.level;
     const clampBay = (bay?: PuraBay) => {
@@ -1882,6 +1884,31 @@ export class PuraPlatformAccessory {
       }
       if (!Number.isFinite(bay.intensity) || bay.intensity < hold) {
         return { ...bay, intensity: hold };
+      }
+      return bay;
+    };
+    return this.clampRecentOnDrop({
+      ...device,
+      bay1: clampBay(device.bay1),
+      bay2: clampBay(device.bay2),
+    });
+  }
+
+  private clampRecentOnDrop(device: PuraDevice): PuraDevice {
+    if (!this.lastSetOnCommandAt || !this.lastRequestedOnIntensity || this.lastRequestedOnIntensity <= 0) {
+      return device;
+    }
+    const ageMs = Date.now() - this.lastSetOnCommandAt;
+    if (ageMs > 5000) {
+      return device;
+    }
+    const minLevel = this.lastRequestedOnIntensity;
+    const clampBay = (bay?: PuraBay) => {
+      if (!bay || !bay.active) {
+        return bay;
+      }
+      if (!Number.isFinite(bay.intensity) || bay.intensity < minLevel) {
+        return { ...bay, intensity: minLevel };
       }
       return bay;
     };
