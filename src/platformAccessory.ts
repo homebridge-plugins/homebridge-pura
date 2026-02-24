@@ -57,6 +57,7 @@ export class PuraPlatformAccessory {
   };
   private lastSuccessfulOnWriteAt?: number;
   private lastSetOnCommandAt?: number;
+  private lastRotationWriteAt?: number;
   private lastRequestedOnIntensity?: number;
   private rotationWriteQueue: Promise<void> = Promise.resolve();
 
@@ -592,6 +593,7 @@ export class PuraPlatformAccessory {
         if (!this.useFanService) {
           return;
         }
+        this.lastRotationWriteAt = Date.now();
         const speed = Math.max(0, Math.min(100, Number(value) || 0));
         const mappedIntensity = this.mapRotationToIntensity(speed);
         const snappedSpeed = mappedIntensity <= 0 ? 0 : this.mapIntensityToRotation(mappedIntensity);
@@ -832,7 +834,7 @@ export class PuraPlatformAccessory {
       };
       this.pendingNightlightIntent = {
         at: Date.now(),
-        ttlMs: active ? 5000 : 15000,
+        ttlMs: active ? 12000 : 15000,
         active,
         level: sentLevel,
         color,
@@ -930,7 +932,7 @@ export class PuraPlatformAccessory {
       };
       this.pendingNightlightIntent = {
         at: Date.now(),
-        ttlMs: active ? 5000 : 15000,
+        ttlMs: active ? 12000 : 15000,
         active,
         level: apiLevel,
         color,
@@ -1585,7 +1587,7 @@ export class PuraPlatformAccessory {
     };
     this.pendingNightlightIntent = {
       at: Date.now(),
-      ttlMs: active ? 5000 : 15000,
+      ttlMs: active ? 12000 : 15000,
       active,
       level: apiLevel,
       color: normalizedColor,
@@ -1895,11 +1897,18 @@ export class PuraPlatformAccessory {
   }
 
   private clampRecentOnDrop(device: PuraDevice): PuraDevice {
-    if (!this.lastSetOnCommandAt || !this.lastRequestedOnIntensity || this.lastRequestedOnIntensity <= 0) {
+    if (!this.lastRequestedOnIntensity || this.lastRequestedOnIntensity <= 0) {
       return device;
     }
-    const ageMs = Date.now() - this.lastSetOnCommandAt;
-    if (ageMs > 5000) {
+    const recentIntentAt = Math.max(
+      this.lastSetOnCommandAt ?? 0,
+      this.lastRotationWriteAt ?? 0,
+    );
+    if (recentIntentAt === 0) {
+      return device;
+    }
+    const ageMs = Date.now() - recentIntentAt;
+    if (ageMs > 20000) {
       return device;
     }
     const minLevel = this.lastRequestedOnIntensity;
