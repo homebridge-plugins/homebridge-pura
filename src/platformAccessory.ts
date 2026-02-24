@@ -834,6 +834,10 @@ export class PuraPlatformAccessory {
         color,
       };
       this.recordNightlightCommand('on', active, brightnessPercent, sentLevel);
+      this.platform.log.info(
+        `${this.accessory.displayName} nightlight turned ${active ? 'on' : 'off'} ` +
+        `(brightness ${brightnessPercent}%, color ${color}).`,
+      );
       this.applyNightlightState();
     });
   }
@@ -925,6 +929,10 @@ export class PuraPlatformAccessory {
         color,
       };
       this.recordNightlightCommand('brightness', active, snappedPercent, apiLevel);
+      this.platform.log.info(
+        `${this.accessory.displayName} nightlight brightness set to ${snappedPercent}% ` +
+        `(level ${apiLevel}, color ${color}).`,
+      );
       this.applyNightlightState();
       this.nightlightService?.updateCharacteristic(this.platform.Characteristic.Brightness, snappedPercent);
     });
@@ -1575,6 +1583,10 @@ export class PuraPlatformAccessory {
       level: apiLevel,
       color: normalizedColor,
     };
+    this.platform.log.info(
+      `${this.accessory.displayName} nightlight color set to ${normalizedColor} ` +
+      `(h=${Math.round(hue)} s=${Math.round(saturation)} level=${apiLevel}, active=${active}).`,
+    );
     this.applyNightlightState();
   }
 
