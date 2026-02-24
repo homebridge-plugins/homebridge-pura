@@ -236,6 +236,24 @@ export class PuraPlatformAccessory {
     return this.isDeviceOffline() || this.isLikelyOfflineFromStaleStatus();
   }
 
+  private shouldResetAwayModeBeforeActivating(): boolean {
+    const raw = this.device.__raw as Record<string, unknown> | undefined;
+    const awayModeValue = raw?.awayMode ?? this.device.awayMode;
+    if (typeof awayModeValue === 'boolean') {
+      return awayModeValue;
+    }
+    if (awayModeValue && typeof awayModeValue === 'object') {
+      const awayModeRecord = awayModeValue as Record<string, unknown>;
+      const away = typeof awayModeRecord.away === 'boolean' ? awayModeRecord.away : undefined;
+      const enabled = typeof awayModeRecord.enabled === 'boolean' ? awayModeRecord.enabled : undefined;
+      if (away !== undefined || enabled !== undefined) {
+        return Boolean(away || enabled);
+      }
+    }
+    // If away-mode state is unknown, preserve existing behavior and clear it before activation.
+    return true;
+  }
+
   private updateFaultState() {
     if (!this.service.testCharacteristic(this.platform.Characteristic.StatusFault)) {
       return;
@@ -435,7 +453,9 @@ export class PuraPlatformAccessory {
             return;
           }
 
-          await this.puraApi.setAwayMode(this.device.id, false);
+          if (this.shouldResetAwayModeBeforeActivating()) {
+            await this.puraApi.setAwayMode(this.device.id, false);
+          }
           const alwaysOn = await this.puraApi.setAlwaysOn(this.device.id, targetBay);
           const requestedPowerOnIntensity = this.getPendingPowerOnIntensityIntentValue();
           const intensity = Math.max(1, Math.min(100, requestedPowerOnIntensity ?? fallbackIntensity));
@@ -646,7 +666,9 @@ export class PuraPlatformAccessory {
           // Stale cloud snapshots can temporarily mark the diffuser inactive even while HomeKit is actively controlling it.
           // Re-assert Always On before applying intensity to avoid dropped writes and slider bounce.
           this.platform.recordIntent(this.device.id, true);
-          await this.puraApi.setAwayMode(this.device.id, false);
+          if (this.shouldResetAwayModeBeforeActivating()) {
+            await this.puraApi.setAwayMode(this.device.id, false);
+          }
           const alwaysOn = await this.puraApi.setAlwaysOn(this.device.id, targetBay);
           if (!alwaysOn) {
             this.platform.log.warn(

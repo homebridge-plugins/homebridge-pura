@@ -201,6 +201,19 @@ export class PuraNightlightAccessory {
       const brightnessPercent = this.nightlightLevelToPercent(this.device.nightlight?.brightness ?? 10);
       const sentLevel = this.percentToNightlightLevel(brightnessPercent);
       const color = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
+      const currentActive = Boolean(this.device.nightlight?.active);
+      const currentLevel = this.normalizeNightlightLevel(this.device.nightlight?.brightness) ?? sentLevel;
+      const currentColor = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
+      if (currentActive === active && currentLevel === sentLevel && currentColor === color) {
+        if (this.platform.isDebugEnabled()) {
+          this.platform.log.debug(
+            `[Nightlight] Skipping redundant On write for ${this.accessory.displayName} -> ${active} ` +
+            `(level=${sentLevel}, color=${color}).`,
+          );
+        }
+        this.applyNightlightState();
+        return;
+      }
       const success = await this.puraApi.setNightlight(
         this.device.id,
         active,
@@ -238,6 +251,19 @@ export class PuraNightlightAccessory {
       const active = !turningOff;
       const apiPercent = this.nightlightLevelToPercent(level);
       const color = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
+      const currentActive = Boolean(this.device.nightlight?.active);
+      const currentLevel = this.normalizeNightlightLevel(this.device.nightlight?.brightness) ?? level;
+      const currentColor = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
+      if (currentActive === active && currentLevel === level && currentColor === color) {
+        if (this.platform.isDebugEnabled()) {
+          this.platform.log.debug(
+            `[Nightlight] Skipping redundant Brightness write for ${this.accessory.displayName} -> ${apiPercent}% ` +
+            `(level=${level}, active=${active}).`,
+          );
+        }
+        this.applyNightlightState();
+        return;
+      }
       const success = await this.puraApi.setNightlight(
         this.device.id,
         active,
@@ -312,6 +338,18 @@ export class PuraNightlightAccessory {
     const normalizedColor = this.normalizeNightlightColor(color);
     const level = this.normalizeNightlightLevel(this.device.nightlight?.brightness) ?? 10;
     const active = true;
+    const currentActive = Boolean(this.device.nightlight?.active);
+    const currentLevel = this.normalizeNightlightLevel(this.device.nightlight?.brightness) ?? level;
+    const currentColor = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
+    if (currentActive === active && currentLevel === level && currentColor === normalizedColor) {
+      if (this.platform.isDebugEnabled()) {
+        this.platform.log.debug(
+          `[Nightlight] Skipping redundant Color write for ${this.accessory.displayName} -> ${normalizedColor}.`,
+        );
+      }
+      this.applyNightlightState();
+      return;
+    }
     const success = await this.puraApi.setNightlight(
       this.device.id,
       active,
