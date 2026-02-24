@@ -1,5 +1,12 @@
 # Release Notes
 
+## 1.6.4 - 2026-02-24
+- Add optional `Nightlight Control` light service (opt-in via `enableNightlightAccessory`) for compatible diffusers.
+- Support nightlight On/Off, Brightness (snapped to 10-step levels: 10%, 20%, ..., 100%), and Color (Hue/Saturation).
+- Reduce HomeKit state bouncing during nightlight changes by serializing writes and stabilizing against out-of-order cloud updates.
+- Update Homebridge UI config to include nightlight toggles and allow saving without re-verifying credentials when unchanged.
+- Update README and config schema for the new nightlight controls.
+
 ## 1.6.4-alpha.0 - 2026-02-24
 - Add optional Nightlight Lightbulb service (opt-in via `enableNightlightAccessory` config).
 - Add detailed nightlight debug logging and round-trip profiling to map HomeKit brightness writes to cloud-reported levels.
