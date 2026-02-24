@@ -29,12 +29,13 @@ export class PuraPlatformAccessory {
     color: string;
     reason: 'on' | 'brightness' | 'hue' | 'saturation';
   };
-  private pendingNightlightIntent?: {
-    at: number;
-    active: boolean;
-    level: number;
-    color: string;
-  };
+	  private pendingNightlightIntent?: {
+	    at: number;
+	    ttlMs: number;
+	    active: boolean;
+	    level: number;
+	    color: string;
+	  };
   private lastNightlightCommand?: {
     at: number;
     action: 'brightness' | 'on';
@@ -337,6 +338,7 @@ export class PuraPlatformAccessory {
         };
         this.pendingNightlightIntent = {
           at: Date.now(),
+          ttlMs: active ? 5000 : 15000,
           active,
           level: sentLevel,
           color,
@@ -369,6 +371,7 @@ export class PuraPlatformAccessory {
       };
       this.pendingNightlightIntent = {
         at: Date.now(),
+        ttlMs: active ? 5000 : 15000,
         active,
         level: sentLevel,
         color,
@@ -411,6 +414,29 @@ export class PuraPlatformAccessory {
       const apiBrightnessPercent = this.nightlightLevelToPercent(apiLevel);
       this.pendingNightlightActive = active;
 
+      // HomeKit scenes/automations can emit redundant brightness writes. Skipping them reduces out-of-order
+      // cloud snapshots that look like "bouncing" in the Home app.
+      const currentActive = Boolean(this.device.nightlight?.active);
+      const currentLevel = this.normalizeNightlightLevel(this.device.nightlight?.brightness) ?? 10;
+      const currentColor = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
+      const isRedundant = currentActive === active && currentLevel === apiLevel && currentColor === color;
+      if (isRedundant) {
+        this.platform.log.debug(
+          `[Nightlight] Skipping redundant Brightness write for ${this.accessory.displayName} -> ${brightnessPercent}% ` +
+          `(snapped=${snappedPercent}%, mappedLevel=${apiLevel}, active=${active}, color=${color}).`,
+        );
+        this.pendingNightlightIntent = {
+          at: Date.now(),
+          ttlMs: active ? 5000 : 15000,
+          active,
+          level: apiLevel,
+          color,
+        };
+        this.applyNightlightState();
+        this.nightlightService?.updateCharacteristic(this.platform.Characteristic.Brightness, snappedPercent);
+        return;
+      }
+
       this.platform.log.debug(
         `[Nightlight] Set Brightness for ${this.accessory.displayName} -> ${brightnessPercent}% ` +
         `(snapped=${snappedPercent}%, apiBrightness=${apiBrightnessPercent}%, mappedLevel=${apiLevel}, active=${active}, color=${color})`,
@@ -435,6 +461,7 @@ export class PuraPlatformAccessory {
       };
       this.pendingNightlightIntent = {
         at: Date.now(),
+        ttlMs: active ? 5000 : 15000,
         active,
         level: apiLevel,
         color,
@@ -991,6 +1018,7 @@ export class PuraPlatformAccessory {
     };
     this.pendingNightlightIntent = {
       at: Date.now(),
+      ttlMs: active ? 5000 : 15000,
       active,
       level: apiLevel,
       color: normalizedColor,
@@ -1012,7 +1040,7 @@ export class PuraPlatformAccessory {
       return device;
     }
     const ageMs = Date.now() - this.pendingNightlightIntent.at;
-    if (ageMs > 5000) {
+    if (ageMs > this.pendingNightlightIntent.ttlMs) {
       this.pendingNightlightIntent = undefined;
       return device;
     }
