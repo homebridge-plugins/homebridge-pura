@@ -4,7 +4,7 @@
 
 **A Homebridge plugin for Pura smart fragrance diffusers.**
 
-This plugin is intentionally simple. It exposes a single on/off switch per diffuser, allowing you to control each device using HomeKit.
+This plugin is intentionally simple. By default it exposes a single on/off switch per diffuser, and can optionally expose a separate nightlight service.
 
 It’s designed to be used with Pura’s away mode and scheduling features disabled, so HomeKit can act as the primary automation layer.
 
@@ -43,15 +43,20 @@ Add the following platform to your `config.json`:
 - **username**: Your Pura email - *required*
 - **password**: Your Pura password - *required*
 - **forceNightlightOff**: Pura turns the nightlight on/off with the diffuser. Enable to prevent the light from staying on. (default: false)
-- **enableNightlightAccessory**: Exposes a separate Lightbulb service for the diffuser nightlight with On/Brightness control. (default: false)
+- **enableNightlightAccessory**: Exposes a separate Lightbulb service for the diffuser nightlight with On/Brightness/Color control. (default: false)
 
 ## Usage
 
 Once configured, your Pura diffusers will appear in the Home app as a single switch per diffuser (e.g., "Living Room Diffuser").
+If `enableNightlightAccessory` is set to `true`, each compatible diffuser also includes a separate `Nightlight` Lightbulb service.
 
 ### Controls
 
 - **Power**: Turn the diffuser on/off
+- **Nightlight (optional)**:
+  - On/Off
+  - Brightness (snapped to supported 10-step levels: 10%, 20%, ..., 100%)
+  - Color (Hue/Saturation)
 
 ### Device Management
 

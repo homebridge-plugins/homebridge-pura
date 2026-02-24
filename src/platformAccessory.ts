@@ -366,16 +366,17 @@ export class PuraPlatformAccessory {
     await this.enqueueNightlightWrite(async () => {
       const brightnessPercent = Math.max(0, Math.min(100, Number(value) || 0));
       const apiLevel = this.percentToNightlightLevel(brightnessPercent);
+      const snappedPercent = this.nightlightLevelToPercent(apiLevel);
       const active = this.pendingNightlightActive ?? Boolean(this.device.nightlight?.active);
       const controller = this.device.controller || 'default';
       const color = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
 
       this.platform.log.debug(
         `[Nightlight] Set Brightness for ${this.accessory.displayName} -> ${brightnessPercent}% ` +
-        `(mappedLevel=${apiLevel}, active=${active}, color=${color})`,
+        `(snapped=${snappedPercent}%, mappedLevel=${apiLevel}, active=${active}, color=${color})`,
       );
 
-      const success = await this.puraApi.setNightlight(this.device.id, active, brightnessPercent, color, controller);
+      const success = await this.puraApi.setNightlight(this.device.id, active, snappedPercent, color, controller);
       if (!success) {
         throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
       }
@@ -391,8 +392,9 @@ export class PuraPlatformAccessory {
         level: apiLevel,
         color,
       };
-      this.recordNightlightCommand('brightness', active, brightnessPercent, apiLevel);
+      this.recordNightlightCommand('brightness', active, snappedPercent, apiLevel);
       this.applyNightlightState();
+      this.nightlightService?.updateCharacteristic(this.platform.Characteristic.Brightness, snappedPercent);
     });
   }
 
