@@ -107,7 +107,7 @@ export class PuraPlatformAccessory {
       .onGet(this.getOn.bind(this));
     if (this.useFanService) {
       this.service.getCharacteristic(this.platform.Characteristic.RotationSpeed)
-        .setProps({ validValues: [30, 50, 100] })
+        .setProps({ validValues: [0, 30, 50, 100] })
         .onSet(this.setRotationSpeed.bind(this))
         .onGet(this.getRotationSpeed.bind(this));
     }
