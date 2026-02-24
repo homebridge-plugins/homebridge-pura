@@ -22,6 +22,7 @@ export class PuraApi {
   private userPool: CognitoUserPool;
   private cognitoUser: CognitoUser | null = null;
   private session: CognitoUserSession | null = null;
+  private refreshInFlight: Promise<PuraAuthTokens> | null = null;
   private readonly log: Logging;
   private readonly baseUrl: string;
   private lastDevicesFetchDegraded = false;
@@ -45,6 +46,7 @@ export class PuraApi {
     });
     this.cognitoUser = null;
     this.session = null;
+    this.refreshInFlight = null;
   }
 
   /**
@@ -109,6 +111,16 @@ export class PuraApi {
     });
   }
 
+  private async refreshTokenWithLock(): Promise<PuraAuthTokens> {
+    if (this.refreshInFlight) {
+      return this.refreshInFlight;
+    }
+    this.refreshInFlight = this.refreshToken().finally(() => {
+      this.refreshInFlight = null;
+    });
+    return this.refreshInFlight;
+  }
+
   /**
    * Get authorization header for API requests
    */
@@ -137,9 +149,10 @@ export class PuraApi {
     method: string,
     endpoint: string,
     data?: unknown,
-    options?: { suppressHttpErrorLog?: boolean; suppressTransportErrorLog?: boolean },
+    options?: { suppressHttpErrorLog?: boolean; suppressTransportErrorLog?: boolean; timeoutMs?: number },
   ): Promise<unknown> {
     const url = new URL(endpoint, this.baseUrl).toString();
+    const timeoutMs = Math.max(1000, options?.timeoutMs ?? 5000);
 
     const isGet = method.toLowerCase() === 'get';
     const buildOptions = (authorization: string): RequestInit => {
@@ -157,9 +170,17 @@ export class PuraApi {
     };
 
     const doRequest = async (authorization: string) => {
-      const response = await fetch(url, buildOptions(authorization));
-      const responseText = await response.text();
-      return { response, responseText };
+      const controller = new AbortController();
+      const timeout = setTimeout(() => {
+        controller.abort();
+      }, timeoutMs);
+      try {
+        const response = await fetch(url, { ...buildOptions(authorization), signal: controller.signal });
+        const responseText = await response.text();
+        return { response, responseText };
+      } finally {
+        clearTimeout(timeout);
+      }
     };
 
     try {
@@ -169,7 +190,7 @@ export class PuraApi {
       // If unauthorized, try refresh then retry once.
       if (response.status === 401) {
         try {
-          await this.refreshToken();
+          await this.refreshTokenWithLock();
           ({ response, responseText } = await doRequest(this.getAuthHeader()));
         } catch (refreshError) {
           this.log.debug('Token refresh failed during request retry:', refreshError);
@@ -216,6 +237,7 @@ export class PuraApi {
       try {
         const response = await this.makeRequest('GET', endpoint, undefined, {
           suppressTransportErrorLog: true,
+          timeoutMs: 7000,
         }) as Record<string, unknown>;
         return this.extractDevices(response);
       } catch (error) {
@@ -227,6 +249,7 @@ export class PuraApi {
           try {
             const retryResponse = await this.makeRequest('GET', endpoint, undefined, {
               suppressTransportErrorLog: true,
+              timeoutMs: 7000,
             }) as Record<string, unknown>;
             return this.extractDevices(retryResponse);
           } catch (retryError) {
@@ -245,6 +268,7 @@ export class PuraApi {
           try {
             const retryResponse = await this.makeRequest('GET', endpoint, undefined, {
               suppressTransportErrorLog: true,
+              timeoutMs: 7000,
             }) as Record<string, unknown>;
             return this.extractDevices(retryResponse);
           } catch (retryError) {
@@ -317,7 +341,9 @@ export class PuraApi {
       || message.includes('eai_again')
       || message.includes('fetch failed')
       || message.includes('network timeout')
-      || message.includes('socket hang up');
+      || message.includes('socket hang up')
+      || message.includes('aborted')
+      || message.includes('aborterror');
   }
 
   private async delay(ms: number): Promise<void> {
@@ -645,11 +671,16 @@ export class PuraApi {
     try {
       const { apiIntensity, controller: defaultController } = this.normalizeIntensity(intensity);
       const resolvedController = controller || defaultController;
-      const response = await this.makeRequest('POST', `devices/${deviceId}/intensity`, {
-        bay,
-        controller: resolvedController,
-        intensity: apiIntensity,
-      }) as { success?: boolean };
+      const response = await this.makeRequest(
+        'POST',
+        `devices/${deviceId}/intensity`,
+        {
+          bay,
+          controller: resolvedController,
+          intensity: apiIntensity,
+        },
+        { timeoutMs: 3500 },
+      ) as { success?: boolean };
       this.log.debug('Pura intensity response:', {
         deviceId,
         bay,
@@ -678,9 +709,12 @@ export class PuraApi {
    */
   async setAlwaysOn(deviceId: string, bay: number): Promise<boolean> {
     try {
-      const response = await this.makeRequest('POST', `devices/${deviceId}/always-on`, {
-        bay,
-      }) as { success?: boolean };
+      const response = await this.makeRequest(
+        'POST',
+        `devices/${deviceId}/always-on`,
+        { bay },
+        { timeoutMs: 3500 },
+      ) as { success?: boolean };
       return response.success === true;
     } catch (error) {
       this.log.error(`Failed to set always on for device ${deviceId}:`, error);
@@ -697,7 +731,7 @@ export class PuraApi {
         'POST',
         `devices/${deviceId}/stop-all`,
         undefined,
-        { suppressHttpErrorLog: true },
+        { suppressHttpErrorLog: true, timeoutMs: 3500 },
       ) as { success?: boolean };
       return response.success === true;
     } catch (error) {
@@ -715,9 +749,12 @@ export class PuraApi {
 
   async setAwayMode(deviceId: string, awayMode: boolean): Promise<boolean> {
     try {
-      const response = await this.makeRequest('POST', `devices/${deviceId}/awayMode`, {
-        awayMode,
-      }) as { success?: boolean };
+      const response = await this.makeRequest(
+        'POST',
+        `devices/${deviceId}/awayMode`,
+        { awayMode },
+        { timeoutMs: 3500 },
+      ) as { success?: boolean };
       return response.success === true;
     } catch (error) {
       this.log.error(`Failed to set away mode for device ${deviceId}:`, error);
@@ -746,7 +783,7 @@ export class PuraApi {
         brightness: scaledBrightness,
         color: normalizedColor,
         controller,
-      }) as Record<string, unknown>;
+      }, { timeoutMs: 3500 }) as Record<string, unknown>;
       const success = response.success === true;
       this.log.debug(
         `[Nightlight] Response device=${deviceId} success=${success} payload=${this.formatDebugPayload(response)}`,
