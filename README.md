@@ -8,7 +8,7 @@ By default this plugin exposes a single on/off switch per diffuser. It’s desig
 
 You can optionally enable:
 - Intensity Control: fan-style accessory with Subtle/Medium/Strong intensity levels.
-- Nightlight Control: A separate nightlight accessory. Supports on/off, Brightness (snapped to Pura's 10-step brightness levels), and color.
+- Nightlight Control: A separate nightlight accessory tile. Supports on/off, Brightness (snapped to Pura's 10-step brightness levels), and color.
 
 ## Supported Diffusers
 This plugin has been designed and tested for the following diffusers.
@@ -60,7 +60,8 @@ If `enableFanService` is set to `true`, each diffuser uses intensity control mod
 
 Switching this setting can require recreating HomeKit scenes and automations for all Pura diffusers in this plugin.
 
-If `enableNightlightAccessory` is set to `true`, each compatible diffuser also includes a separate `Nightlight Control` Lightbulb service.
+If `enableNightlightAccessory` is set to `true`, each compatible diffuser also includes a separate `Nightlight Control` accessory tile.
+You can group it with the diffuser in the Home app if you prefer a combined view.
 
 ### Controls
 
@@ -78,7 +79,7 @@ The plugin will automatically:
 - Create one diffuser accessory per device:
   - Switch by default
   - Intensity control accessory when `enableFanService=true`
-- Optionally add `Nightlight Control` on compatible models when enabled
+- Optionally add a separate `Nightlight Control` accessory on compatible models when enabled
 - Update device status via realtime updates with a 5-minute polling fallback (15s when realtime is down)
 - Handle authentication and token refresh (including periodic Cognito refresh polling)
 

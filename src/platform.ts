@@ -2,6 +2,7 @@ import type { API, Characteristic, DynamicPlatformPlugin, Logging, PlatformAcces
 import WebSocket from 'ws';
 
 import { PuraPlatformAccessory } from './platformAccessory.js';
+import { PuraNightlightAccessory } from './nightlightAccessory.js';
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
 import { PuraApi } from './puraApi.js';
 import { PuraDevice, PuraConfig } from './puraTypes.js';
@@ -10,8 +11,9 @@ import { fetchLatestCognitoConfig } from './pypuraLookup.js';
 type DiffuserAccessory = PlatformAccessory & {
   context: {
     device: PuraDevice;
+    accessoryType?: 'diffuser' | 'nightlight';
   };
-  handler?: PuraPlatformAccessory;
+  handler?: PuraPlatformAccessory | PuraNightlightAccessory;
 };
 
 /**
@@ -225,8 +227,10 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       // Register each device
       const discoveredUuids = new Set<string>();
       for (const device of devices) {
-        const uuid = await this.registerDevice(device);
-        discoveredUuids.add(uuid);
+        const uuids = await this.registerDevice(device);
+        for (const uuid of uuids) {
+          discoveredUuids.add(uuid);
+        }
       }
 
       // Remove accessories that are no longer present
@@ -284,13 +288,17 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   /**
    * Register a Pura device as a HomeKit accessory
    */
-  private async registerDevice(device: PuraDevice): Promise<string> {
+  private async registerDevice(device: PuraDevice): Promise<string[]> {
     this.log.debug('Registering device:', device.name, device.id);
 
-    // Single diffuser accessory (On/Off)
-    return this.registerDiffuserAccessory(device);
-
-    // No nightlight accessory (diffuser switch only)
+    const uuids: string[] = [];
+    uuids.push(await this.registerDiffuserAccessory(device));
+    if ((this.puraConfig.enableNightlightAccessory ?? false) && this.supportsNightlightAccessory(device)) {
+      uuids.push(await this.registerNightlightAccessory(device));
+    } else {
+      this.unregisterNightlightAccessory(device.id);
+    }
+    return uuids;
   }
 
   private async registerDiffuserAccessory(device: PuraDevice): Promise<string> {
@@ -304,18 +312,71 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     if (existingAccessory) {
       this.log.info('Restoring existing accessory from cache:', existingAccessory.displayName);
       existingAccessory.context.device = device;
+      existingAccessory.context.accessoryType = 'diffuser';
       this.api.updatePlatformAccessories([existingAccessory]);
       existingAccessory.handler = new PuraPlatformAccessory(this, existingAccessory, this.puraApi);
     } else {
       this.log.info('Adding new accessory:', accessoryName);
       const accessory = new this.api.platformAccessory(accessoryName, uuid) as DiffuserAccessory;
       accessory.context.device = device;
+      accessory.context.accessoryType = 'diffuser';
       accessory.handler = new PuraPlatformAccessory(this, accessory, this.puraApi);
       this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
       this.accessories.set(uuid, accessory);
     }
 
     return uuid;
+  }
+
+  private async registerNightlightAccessory(device: PuraDevice): Promise<string> {
+    const deviceName = device.name || `Pura ${device.id}`;
+    const accessoryName = `${deviceName} Nightlight`;
+    const uniqueId = `${device.id}-nightlight`;
+    const uuid = this.api.hap.uuid.generate(uniqueId);
+
+    const existingAccessory = this.accessories.get(uuid) as DiffuserAccessory | undefined;
+    if (existingAccessory) {
+      this.log.info('Restoring existing accessory from cache:', existingAccessory.displayName);
+      existingAccessory.context.device = device;
+      existingAccessory.context.accessoryType = 'nightlight';
+      this.api.updatePlatformAccessories([existingAccessory]);
+      existingAccessory.handler = new PuraNightlightAccessory(this, existingAccessory, this.puraApi);
+    } else {
+      this.log.info('Adding new accessory:', accessoryName);
+      const accessory = new this.api.platformAccessory(accessoryName, uuid) as DiffuserAccessory;
+      accessory.context.device = device;
+      accessory.context.accessoryType = 'nightlight';
+      accessory.handler = new PuraNightlightAccessory(this, accessory, this.puraApi);
+      this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+      this.accessories.set(uuid, accessory);
+    }
+
+    return uuid;
+  }
+
+  private unregisterNightlightAccessory(deviceId: string) {
+    const uuid = this.api.hap.uuid.generate(`${deviceId}-nightlight`);
+    const accessory = this.accessories.get(uuid);
+    if (!accessory) {
+      return;
+    }
+    this.log.info('Removing existing accessory from cache:', accessory.displayName);
+    this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+    this.accessories.delete(uuid);
+  }
+
+  private supportsNightlightAccessory(device: PuraDevice): boolean {
+    const model = device.type?.toLowerCase() ?? '';
+    if (model.includes('plus')) {
+      return false;
+    }
+    const raw = device.__raw as Record<string, unknown> | undefined;
+    const hwVersion = typeof raw?.hwVersion === 'string' ? raw.hwVersion : undefined;
+    if (!hwVersion) {
+      return true;
+    }
+    const major = Number(hwVersion.split('.')[0]);
+    return !(Number.isFinite(major) && major === 22);
   }
 
 
@@ -335,9 +396,13 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   private async reconcileDiscoveredDevices(devices: PuraDevice[]): Promise<void> {
     const discoveredUuids = new Set<string>();
     for (const device of devices) {
-      const uuid = this.api.hap.uuid.generate(`${device.id}-diffuser`);
-      discoveredUuids.add(uuid);
-      if (!this.accessories.has(uuid)) {
+      const diffuserUuid = this.api.hap.uuid.generate(`${device.id}-diffuser`);
+      discoveredUuids.add(diffuserUuid);
+      if ((this.puraConfig.enableNightlightAccessory ?? false) && this.supportsNightlightAccessory(device)) {
+        const nightlightUuid = this.api.hap.uuid.generate(`${device.id}-nightlight`);
+        discoveredUuids.add(nightlightUuid);
+      }
+      if (!this.accessories.has(diffuserUuid)) {
         await this.registerDevice(device);
       }
     }
@@ -684,12 +749,16 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     }
 
     void this.updateDiffuserAccessory(normalized);
+    void this.updateNightlightAccessory(normalized);
     return true;
   }
 
   private findAccessoryByDeviceId(deviceId: string): DiffuserAccessory | undefined {
     for (const accessory of this.accessories.values()) {
       const diffuser = accessory as DiffuserAccessory;
+      if (diffuser.context?.accessoryType === 'nightlight') {
+        continue;
+      }
       if (diffuser.context?.device?.id === deviceId) {
         return diffuser;
       }
@@ -797,7 +866,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       
       for (const device of devices) {
         await this.updateDiffuserAccessory(device);
-        // No nightlight accessory
+        await this.updateNightlightAccessory(device);
       }
       this.lastRefreshAt = Date.now();
     } catch (error) {
@@ -811,6 +880,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
             await this.reconcileDiscoveredDevices(devices);
             for (const device of devices) {
               await this.updateDiffuserAccessory(device);
+              await this.updateNightlightAccessory(device);
             }
             this.lastRefreshAt = Date.now();
           } catch (retryError) {
@@ -844,6 +914,21 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       if (handler) {
         handler.updateDevice(device);
       }
+    }
+  }
+
+  private async updateNightlightAccessory(device: PuraDevice) {
+    const uniqueId = `${device.id}-nightlight`;
+    const uuid = this.api.hap.uuid.generate(uniqueId);
+    const accessory = this.accessories.get(uuid) as DiffuserAccessory | undefined;
+    if (!accessory) {
+      return;
+    }
+    accessory.context.device = device;
+    this.api.updatePlatformAccessories([accessory]);
+    const handler = accessory.handler;
+    if (handler) {
+      handler.updateDevice(device);
     }
   }
 

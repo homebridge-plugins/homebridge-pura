@@ -51,7 +51,7 @@
         "title": "Enable Nightlight Controls",
         "type": "boolean",
         "default": false,
-        "description": "Expose separate HomeKit nightlight controls for compatible diffusers (On, Brightness, and Color)."
+        "description": "Adds a separate Nightlight accessory tile for compatible diffusers (On, Brightness, and Color). You can group it with the diffuser in the Home app if desired."
       }
     }
   },

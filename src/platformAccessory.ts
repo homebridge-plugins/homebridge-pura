@@ -43,6 +43,12 @@ export class PuraPlatformAccessory {
     hkBrightnessPercent: number;
     sentLevel: number;
   };
+  private pendingIntensityIntent?: {
+    at: number;
+    ttlMs: number;
+    intensity: number;
+    bay?: 1 | 2;
+  };
 
   constructor(
     private readonly platform: PuraPlatform,
@@ -75,7 +81,8 @@ export class PuraPlatformAccessory {
       (this.platform.config as PuraConfig).enableFanService ??
       (this.platform.config as PuraConfig).useFanService,
     );
-    this.enableNightlightAccessory = Boolean((this.platform.config as PuraConfig).enableNightlightAccessory);
+    // Nightlight is exposed via a separate accessory when enabled.
+    this.enableNightlightAccessory = false;
     const fanService = this.accessory.getService(this.platform.Service.Fanv2);
     const switchService = this.accessory.getService(this.platform.Service.Switch);
     if (this.useFanService) {
@@ -175,7 +182,11 @@ export class PuraPlatformAccessory {
     return 100;
   }
 
-  private getCurrentIntensityValue(): number {
+  private getCurrentIntensityValue(): number | undefined {
+    const pendingIntentIntensity = this.getPendingIntensityIntentValue();
+    if (pendingIntentIntensity !== undefined) {
+      return pendingIntentIntensity;
+    }
     const activeBay = this.getActiveBay();
     const bayIntensity = activeBay?.intensity;
     if (typeof bayIntensity === 'number' && Number.isFinite(bayIntensity) && bayIntensity > 0) {
@@ -185,7 +196,7 @@ export class PuraPlatformAccessory {
     if (Number.isFinite(cachedIntensity) && cachedIntensity > 0) {
       return cachedIntensity;
     }
-    return this.useFanService ? 50 : 60;
+    return undefined;
   }
 
   private hasNoScentVialsDetected(): boolean {
@@ -306,6 +317,12 @@ export class PuraPlatformAccessory {
           this.currentStateActive = true;
           this.accessory.context.lastIntensity = intensity;
           this.accessory.context.lastBay = targetBay;
+          this.pendingIntensityIntent = {
+            at: Date.now(),
+            ttlMs: 8000,
+            intensity,
+            bay: targetBay,
+          };
           this.platform.log.debug(`Successfully turned on ${this.accessory.displayName} with intensity ${intensity}`);
           this.applyCurrentState();
           this.platform.log.info(`${this.accessory.displayName} turned on.`);
@@ -317,6 +334,7 @@ export class PuraPlatformAccessory {
           throw new Error('Failed to turn on device');
         }
       } else {
+        this.pendingIntensityIntent = undefined;
         if (this.isDeviceUnavailable()) {
           this.enforceOffVisualState();
           this.updateFaultState();
@@ -364,7 +382,13 @@ export class PuraPlatformAccessory {
     if (!this.currentStateActive) {
       return 0;
     }
-    return this.mapIntensityToRotation(this.getCurrentIntensityValue());
+    const intensity = this.getCurrentIntensityValue();
+    if (typeof intensity !== 'number') {
+      const currentValue = this.service.getCharacteristic(this.platform.Characteristic.RotationSpeed).value;
+      const numericCurrentValue = Number(currentValue);
+      return Number.isFinite(numericCurrentValue) ? numericCurrentValue : 0;
+    }
+    return this.mapIntensityToRotation(intensity);
   }
 
   async setRotationSpeed(value: CharacteristicValue) {
@@ -402,6 +426,12 @@ export class PuraPlatformAccessory {
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
     this.accessory.context.lastBay = targetBay;
+    this.pendingIntensityIntent = {
+      at: Date.now(),
+      ttlMs: 8000,
+      intensity: mappedIntensity,
+      bay: targetBay,
+    };
     this.platform.log.info(
       `${this.accessory.displayName} intensity set to ${mappedIntensity} ` +
       `(${mappedIntensity === 30 ? 'subtle' : mappedIntensity === 50 ? 'medium' : 'strong'}).`,
@@ -649,7 +679,8 @@ export class PuraPlatformAccessory {
   }
 
   updateDevice(device: PuraDevice) {
-    const stabilizedDevice = this.stabilizeNightlightDuringIntentWindow(device);
+    const nightlightStabilizedDevice = this.stabilizeNightlightDuringIntentWindow(device);
+    const stabilizedDevice = this.stabilizeIntensityDuringIntentWindow(nightlightStabilizedDevice);
     const previousNightlight = this.device.nightlight;
     const previousOnline = this.normalizeOnlineState(this.device.online);
     const nextOnline = this.normalizeOnlineState(stabilizedDevice.online);
@@ -1020,7 +1051,17 @@ export class PuraPlatformAccessory {
       : this.platform.Characteristic.On;
     this.service.updateCharacteristic(activeCharacteristic, value);
     if (this.useFanService && this.service.testCharacteristic(this.platform.Characteristic.RotationSpeed)) {
-      const speed = this.currentStateActive ? this.mapIntensityToRotation(this.getCurrentIntensityValue()) : 0;
+      let speed = 0;
+      if (this.currentStateActive) {
+        const intensity = this.getCurrentIntensityValue();
+        if (typeof intensity === 'number') {
+          speed = this.mapIntensityToRotation(intensity);
+        } else {
+          const currentValue = this.service.getCharacteristic(this.platform.Characteristic.RotationSpeed).value;
+          const numericCurrentValue = Number(currentValue);
+          speed = Number.isFinite(numericCurrentValue) ? numericCurrentValue : 0;
+        }
+      }
       this.service.updateCharacteristic(this.platform.Characteristic.RotationSpeed, speed);
     }
   }
@@ -1196,6 +1237,82 @@ export class PuraPlatformAccessory {
         color: intent.color,
       },
     };
+  }
+
+  private getPendingIntensityIntentValue(): number | undefined {
+    if (!this.pendingIntensityIntent) {
+      return undefined;
+    }
+    const ageMs = Date.now() - this.pendingIntensityIntent.at;
+    if (ageMs > this.pendingIntensityIntent.ttlMs) {
+      this.pendingIntensityIntent = undefined;
+      return undefined;
+    }
+    return this.pendingIntensityIntent.intensity;
+  }
+
+  private stabilizeIntensityDuringIntentWindow(device: PuraDevice): PuraDevice {
+    const intentIntensity = this.getPendingIntensityIntentValue();
+    if (intentIntensity === undefined || !this.pendingIntensityIntent) {
+      return device;
+    }
+    if (!device.bay1 && !device.bay2) {
+      return device;
+    }
+
+    const intentBay = this.pendingIntensityIntent.bay;
+    const ageMs = Date.now() - this.pendingIntensityIntent.at;
+    const incomingBay = intentBay === 1
+      ? device.bay1
+      : intentBay === 2
+        ? device.bay2
+        : this.getActiveBayFromDevice(device);
+    const incomingIntensity = incomingBay?.intensity;
+    if (Number.isFinite(incomingIntensity) && Number(incomingIntensity) === intentIntensity) {
+      return device;
+    }
+
+    if (this.platform.isDebugEnabled()) {
+      this.platform.log.debug(
+        `[Diffuser] Ignoring stale intensity snapshot for ${this.accessory.displayName}: ` +
+        `incoming=${incomingIntensity ?? 'unknown'} expected=${intentIntensity} ` +
+        `bay=${intentBay ?? 'auto'} ageMs=${ageMs}`,
+      );
+    }
+
+    if (intentBay === 1 && device.bay1) {
+      return { ...device, bay1: { ...device.bay1, intensity: intentIntensity } };
+    }
+    if (intentBay === 2 && device.bay2) {
+      return { ...device, bay2: { ...device.bay2, intensity: intentIntensity } };
+    }
+    if (device.bay1) {
+      return { ...device, bay1: { ...device.bay1, intensity: intentIntensity } };
+    }
+    if (device.bay2) {
+      return { ...device, bay2: { ...device.bay2, intensity: intentIntensity } };
+    }
+    return device;
+  }
+
+  private getActiveBayFromDevice(device: PuraDevice): PuraBay | undefined {
+    const bay1 = device.bay1;
+    const bay2 = device.bay2;
+    if (bay1?.active && !bay2?.active) {
+      return bay1;
+    }
+    if (bay2?.active && !bay1?.active) {
+      return bay2;
+    }
+    if (bay1?.active && bay2?.active) {
+      const bay1ActiveAt = bay1.activeAt ?? 0;
+      const bay2ActiveAt = bay2.activeAt ?? 0;
+      if (bay1ActiveAt !== bay2ActiveAt) {
+        return bay1ActiveAt > bay2ActiveAt ? bay1 : bay2;
+      }
+      return bay1.intensity >= bay2.intensity ? bay1 : bay2;
+    }
+    return undefined;
   }
 
   private normalizeNightlightColor(color: unknown): string {
