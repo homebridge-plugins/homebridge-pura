@@ -20,6 +20,7 @@ export class PuraPlatformAccessory {
   private inferredOfflineFromStaleState = false;
   private lastAwayModeEnabledState: boolean | null = null;
   private lastAutoAlternativeOffState: boolean | null = null;
+  private recentIntensityHold?: { until: number; level: number };
   private nightlightWriteQueue: Promise<void> = Promise.resolve();
   private pendingNightlightActive?: boolean;
   private lastNightlightApiWrite?: {
@@ -749,6 +750,7 @@ export class PuraPlatformAccessory {
           intensity: mappedIntensity,
           bay: targetBay,
         };
+        this.recentIntensityHold = { until: Date.now() + 8000, level: mappedIntensity };
         this.platform.log.info(
           `${this.accessory.displayName} intensity set to ${mappedIntensity} ` +
           `(${mappedIntensity === 30 ? 'subtle' : mappedIntensity === 50 ? 'medium' : 'strong'}).`,
@@ -1698,10 +1700,10 @@ export class PuraPlatformAccessory {
   private stabilizeIntensityDuringIntentWindow(device: PuraDevice): PuraDevice {
     const intentIntensity = this.getPendingIntensityIntentValue();
     if (intentIntensity === undefined || !this.pendingIntensityIntent) {
-      return device;
+      return this.clampIntensityDuringHold(device);
     }
     if (!device.bay1 && !device.bay2) {
-      return device;
+      return this.clampIntensityDuringHold(device);
     }
 
     const intentBay = this.pendingIntensityIntent.bay;
@@ -1734,26 +1736,26 @@ export class PuraPlatformAccessory {
     }
 
     if (intentBay === 1 && device.bay1) {
-      return {
+      return this.clampIntensityDuringHold({
         ...device,
         bay1: { ...device.bay1, intensity: intentIntensity, active: true },
         bay2: device.bay2 ? { ...device.bay2, active: false } : device.bay2,
-      };
+      });
     }
     if (intentBay === 2 && device.bay2) {
-      return {
+      return this.clampIntensityDuringHold({
         ...device,
         bay1: device.bay1 ? { ...device.bay1, active: false } : device.bay1,
         bay2: { ...device.bay2, intensity: intentIntensity, active: true },
-      };
+      });
     }
     if (device.bay1) {
-      return { ...device, bay1: { ...device.bay1, intensity: intentIntensity } };
+      return this.clampIntensityDuringHold({ ...device, bay1: { ...device.bay1, intensity: intentIntensity } });
     }
     if (device.bay2) {
-      return { ...device, bay2: { ...device.bay2, intensity: intentIntensity } };
+      return this.clampIntensityDuringHold({ ...device, bay2: { ...device.bay2, intensity: intentIntensity } });
     }
-    return device;
+    return this.clampIntensityDuringHold(device);
   }
 
   private getActiveBayFromDevice(device: PuraDevice): PuraBay | undefined {
@@ -1845,6 +1847,32 @@ export class PuraPlatformAccessory {
       return { ...bay, intensity: fallback };
     }
     return bay;
+  }
+
+  private clampIntensityDuringHold(device: PuraDevice): PuraDevice {
+    if (!this.recentIntensityHold) {
+      return device;
+    }
+    const now = Date.now();
+    if (now > this.recentIntensityHold.until) {
+      this.recentIntensityHold = undefined;
+      return device;
+    }
+    const hold = this.recentIntensityHold.level;
+    const clampBay = (bay?: PuraBay) => {
+      if (!bay || !bay.active) {
+        return bay;
+      }
+      if (!Number.isFinite(bay.intensity) || bay.intensity < hold) {
+        return { ...bay, intensity: hold };
+      }
+      return bay;
+    };
+    return {
+      ...device,
+      bay1: clampBay(device.bay1),
+      bay2: clampBay(device.bay2),
+    };
   }
 
   private normalizeNightlightColor(color: unknown): string {
