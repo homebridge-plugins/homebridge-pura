@@ -55,6 +55,7 @@ export class PuraPlatformAccessory {
     intensity: number;
   };
   private lastSetOnCommandAt?: number;
+  private rotationWriteQueue: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly platform: PuraPlatform,
@@ -317,7 +318,7 @@ export class PuraPlatformAccessory {
     }
 
     if (secondaryBays.length > 0) {
-      void this.syncSecondaryBayIntensities(secondaryBays, intensity, controller);
+      await this.syncSecondaryBayIntensities(secondaryBays, intensity, controller);
     }
 
     return true;
@@ -349,154 +350,156 @@ export class PuraPlatformAccessory {
   }
 
   async setOn(value: CharacteristicValue) {
-    const isOn = this.useFanService
-      ? value === this.platform.Characteristic.Active.ACTIVE
-      : Boolean(value);
-    this.lastSetOnCommandAt = Date.now();
-    this.platform.log.debug(`Set Characteristic Active for ${this.accessory.displayName} ->`, value);
-    this.platform.recordIntent(this.device.id, isOn);
+    await this.enqueueRotationWrite(async () => {
+      const isOn = this.useFanService
+        ? value === this.platform.Characteristic.Active.ACTIVE
+        : Boolean(value);
+      this.lastSetOnCommandAt = Date.now();
+      this.platform.log.debug(`Set Characteristic Active for ${this.accessory.displayName} ->`, value);
+      this.platform.recordIntent(this.device.id, isOn);
 
-    try {
-      if (isOn) {
-        if (this.currentStateActive) {
-          this.applyCurrentState();
-          if (this.platform.isDebugEnabled()) {
-            this.platform.log.debug(
-              `[Diffuser] Ignoring redundant ON command for ${this.accessory.displayName} because it is already active.`,
-            );
+      try {
+        if (isOn) {
+          if (this.currentStateActive) {
+            this.applyCurrentState();
+            if (this.platform.isDebugEnabled()) {
+              this.platform.log.debug(
+                `[Diffuser] Ignoring redundant ON command for ${this.accessory.displayName} because it is already active.`,
+              );
+            }
+            return;
           }
-          return;
-        }
-        if (this.useFanService && this.service.testCharacteristic(this.platform.Characteristic.RotationSpeed)) {
-          // Home commonly sets RotationSpeed=100 when turning the accessory on via icon tap.
-          // Capture that value early so we turn on at 100 without briefly showing the cached intensity.
-          const currentValue = this.service.getCharacteristic(this.platform.Characteristic.RotationSpeed).value;
-          const numericSpeed = Math.max(0, Math.min(100, Number(currentValue) || 0));
-          const mapped = this.mapRotationToIntensity(numericSpeed);
-          if (mapped > 0) {
-            this.pendingPowerOnIntensityIntent = {
-              at: Date.now(),
-              ttlMs: 12000,
-              intensity: mapped,
-            };
-          } else if (!this.pendingPowerOnIntensityIntent) {
-            // If Home sends the speed right after Active=1, give it a brief window to arrive.
-            await new Promise((resolve) => setTimeout(resolve, 250));
-            const afterValue = this.service.getCharacteristic(this.platform.Characteristic.RotationSpeed).value;
-            const afterSpeed = Math.max(0, Math.min(100, Number(afterValue) || 0));
-            const afterMapped = this.mapRotationToIntensity(afterSpeed);
-            if (afterMapped > 0) {
+          if (this.useFanService && this.service.testCharacteristic(this.platform.Characteristic.RotationSpeed)) {
+            // Home commonly sets RotationSpeed=100 when turning the accessory on via icon tap.
+            // Capture that value early so we turn on at 100 without briefly showing the cached intensity.
+            const currentValue = this.service.getCharacteristic(this.platform.Characteristic.RotationSpeed).value;
+            const numericSpeed = Math.max(0, Math.min(100, Number(currentValue) || 0));
+            const mapped = this.mapRotationToIntensity(numericSpeed);
+            if (mapped > 0) {
               this.pendingPowerOnIntensityIntent = {
                 at: Date.now(),
                 ttlMs: 12000,
-                intensity: afterMapped,
+                intensity: mapped,
               };
+            } else if (!this.pendingPowerOnIntensityIntent) {
+              // If Home sends the speed right after Active=1, give it a brief window to arrive.
+              await new Promise((resolve) => setTimeout(resolve, 250));
+              const afterValue = this.service.getCharacteristic(this.platform.Characteristic.RotationSpeed).value;
+              const afterSpeed = Math.max(0, Math.min(100, Number(afterValue) || 0));
+              const afterMapped = this.mapRotationToIntensity(afterSpeed);
+              if (afterMapped > 0) {
+                this.pendingPowerOnIntensityIntent = {
+                  at: Date.now(),
+                  ttlMs: 12000,
+                  intensity: afterMapped,
+                };
+              }
             }
           }
-        }
-        const preferredBay = this.accessory.context.lastBay;
-        const normalizedPreferred = preferredBay === 1 || preferredBay === 2 ? preferredBay : undefined;
-        const targetBay = normalizedPreferred && (normalizedPreferred === 1 ? this.device.bay1 : this.device.bay2)
-          ? normalizedPreferred
-          : (this.device.bay1 ? 1 : this.device.bay2 ? 2 : 1);
-        const bay = targetBay === 1 ? this.device.bay1 : this.device.bay2;
-        const noScentVialsDetected = this.hasNoScentVialsDetected();
-        const deviceUnavailable = this.isDeviceUnavailable();
-        if (!bay && this.platform.isDebugEnabled()) {
-          this.platform.log.warn(
-            `No bay payload available for ${this.accessory.displayName}; using fallback bay ${targetBay}.`,
-          );
-        }
-        const candidateIntensity = bay && Number.isFinite(bay.intensity) && bay.intensity > 0
-          ? bay.intensity
-          : undefined;
-        const preferredIntensity = Number.isFinite(this.accessory.context.lastIntensity) && this.accessory.context.lastIntensity > 0
-          ? this.accessory.context.lastIntensity
-          : undefined;
-        const defaultIntensity = this.useFanService ? 100 : 60;
-        const fallbackIntensity = this.useFanService
-          ? defaultIntensity
-          : Math.max(1, Math.min(100, candidateIntensity ?? preferredIntensity ?? defaultIntensity));
-        if (noScentVialsDetected || deviceUnavailable) {
-          this.enforceOffVisualState();
-          this.updateFaultState();
-          if (deviceUnavailable) {
-            this.platform.log.warn(`${this.accessory.displayName} appears offline (Wi-Fi lost or unplugged).`);
-            // Surface an actionable HomeKit error when the device is unreachable.
-            throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-          } else {
+          const preferredBay = this.accessory.context.lastBay;
+          const normalizedPreferred = preferredBay === 1 || preferredBay === 2 ? preferredBay : undefined;
+          const targetBay = normalizedPreferred && (normalizedPreferred === 1 ? this.device.bay1 : this.device.bay2)
+            ? normalizedPreferred
+            : (this.device.bay1 ? 1 : this.device.bay2 ? 2 : 1);
+          const bay = targetBay === 1 ? this.device.bay1 : this.device.bay2;
+          const noScentVialsDetected = this.hasNoScentVialsDetected();
+          const deviceUnavailable = this.isDeviceUnavailable();
+          if (!bay && this.platform.isDebugEnabled()) {
             this.platform.log.warn(
-              `${this.accessory.displayName} was turned on, but no scent vials were detected. ` +
-              'The accessory was turned off as a result.',
+              `No bay payload available for ${this.accessory.displayName}; using fallback bay ${targetBay}.`,
             );
           }
-          return;
-        }
+          const candidateIntensity = bay && Number.isFinite(bay.intensity) && bay.intensity > 0
+            ? bay.intensity
+            : undefined;
+          const preferredIntensity = Number.isFinite(this.accessory.context.lastIntensity) && this.accessory.context.lastIntensity > 0
+            ? this.accessory.context.lastIntensity
+            : undefined;
+          const defaultIntensity = this.useFanService ? 100 : 60;
+          const fallbackIntensity = this.useFanService
+            ? defaultIntensity
+            : Math.max(1, Math.min(100, candidateIntensity ?? preferredIntensity ?? defaultIntensity));
+          if (noScentVialsDetected || deviceUnavailable) {
+            this.enforceOffVisualState();
+            this.updateFaultState();
+            if (deviceUnavailable) {
+              this.platform.log.warn(`${this.accessory.displayName} appears offline (Wi-Fi lost or unplugged).`);
+              // Surface an actionable HomeKit error when the device is unreachable.
+              throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+            } else {
+              this.platform.log.warn(
+                `${this.accessory.displayName} was turned on, but no scent vials were detected. ` +
+                'The accessory was turned off as a result.',
+              );
+            }
+            return;
+          }
 
-        await this.puraApi.stopAll(this.device.id);
-        await this.puraApi.setAwayMode(this.device.id, false);
-        const alwaysOn = await this.puraApi.setAlwaysOn(this.device.id, targetBay);
-        const requestedPowerOnIntensity = this.getPendingPowerOnIntensityIntentValue();
-        const intensity = Math.max(1, Math.min(100, requestedPowerOnIntensity ?? fallbackIntensity));
-        const controller = this.device.controller || 'default';
-        const success = alwaysOn && await this.setIntensityAcrossAvailableBays(targetBay, intensity, controller);
-        if (success) {
-          this.currentStateActive = true;
+          await this.puraApi.stopAll(this.device.id);
+          await this.puraApi.setAwayMode(this.device.id, false);
+          const alwaysOn = await this.puraApi.setAlwaysOn(this.device.id, targetBay);
+          const requestedPowerOnIntensity = this.getPendingPowerOnIntensityIntentValue();
+          const intensity = Math.max(1, Math.min(100, requestedPowerOnIntensity ?? fallbackIntensity));
+          const controller = this.device.controller || 'default';
+          const success = alwaysOn && await this.setIntensityAcrossAvailableBays(targetBay, intensity, controller);
+          if (success) {
+            this.currentStateActive = true;
+            this.pendingPowerOnIntensityIntent = undefined;
+            this.accessory.context.lastIntensity = intensity;
+            this.accessory.context.lastBay = targetBay;
+            this.pendingIntensityIntent = {
+              at: Date.now(),
+              ttlMs: 8000,
+              intensity,
+              bay: targetBay,
+            };
+            this.platform.log.debug(`Successfully turned on ${this.accessory.displayName} with intensity ${intensity}`);
+            this.applyCurrentState();
+            this.platform.log.info(`${this.accessory.displayName} turned on.`);
+            if ((this.platform.config as PuraConfig).forceNightlightOff && this.supportsNightlightControl()) {
+              await this.ensureNightlightOff();
+            }
+          } else {
+            this.platform.log.error(`Failed to turn on ${this.accessory.displayName}`);
+            throw new Error('Failed to turn on device');
+          }
+        } else {
+          this.pendingIntensityIntent = undefined;
           this.pendingPowerOnIntensityIntent = undefined;
-          this.accessory.context.lastIntensity = intensity;
-          this.accessory.context.lastBay = targetBay;
-          this.pendingIntensityIntent = {
-            at: Date.now(),
-            ttlMs: 8000,
-            intensity,
-            bay: targetBay,
-          };
-          this.platform.log.debug(`Successfully turned on ${this.accessory.displayName} with intensity ${intensity}`);
-          this.applyCurrentState();
-          this.platform.log.info(`${this.accessory.displayName} turned on.`);
-          if ((this.platform.config as PuraConfig).forceNightlightOff && this.supportsNightlightControl()) {
-            await this.ensureNightlightOff();
+          if (!this.currentStateActive) {
+            this.applyCurrentState();
+            if (this.platform.isDebugEnabled()) {
+              this.platform.log.debug(
+                `[Diffuser] Ignoring redundant OFF command for ${this.accessory.displayName} because it is already inactive.`,
+              );
+            }
+            return;
           }
-        } else {
-          this.platform.log.error(`Failed to turn on ${this.accessory.displayName}`);
-          throw new Error('Failed to turn on device');
-        }
-      } else {
-        this.pendingIntensityIntent = undefined;
-        this.pendingPowerOnIntensityIntent = undefined;
-        if (!this.currentStateActive) {
-          this.applyCurrentState();
-          if (this.platform.isDebugEnabled()) {
-            this.platform.log.debug(
-              `[Diffuser] Ignoring redundant OFF command for ${this.accessory.displayName} because it is already inactive.`,
-            );
+          if (this.isDeviceUnavailable()) {
+            this.enforceOffVisualState();
+            this.updateFaultState();
+            this.platform.log.warn(`${this.accessory.displayName} appears offline (Wi-Fi lost or unplugged).`);
+            return;
           }
-          return;
+          const success = await this.puraApi.stopAll(this.device.id);
+          if (success) {
+            this.currentStateActive = false;
+            this.platform.log.debug(`Successfully turned off ${this.accessory.displayName}`);
+            this.applyCurrentState();
+            this.platform.log.info(`${this.accessory.displayName} turned off.`);
+          } else {
+            this.platform.log.error(`Failed to turn off ${this.accessory.displayName}`);
+            throw new Error('Failed to turn off device');
+          }
         }
-        if (this.isDeviceUnavailable()) {
-          this.enforceOffVisualState();
-          this.updateFaultState();
-          this.platform.log.warn(`${this.accessory.displayName} appears offline (Wi-Fi lost or unplugged).`);
-          return;
+      } catch (error) {
+        if (error instanceof this.platform.api.hap.HapStatusError) {
+          throw error;
         }
-        const success = await this.puraApi.stopAll(this.device.id);
-        if (success) {
-          this.currentStateActive = false;
-          this.platform.log.debug(`Successfully turned off ${this.accessory.displayName}`);
-          this.applyCurrentState();
-          this.platform.log.info(`${this.accessory.displayName} turned off.`);
-        } else {
-          this.platform.log.error(`Failed to turn off ${this.accessory.displayName}`);
-          throw new Error('Failed to turn off device');
-        }
+        this.platform.log.error(`Error setting On state for ${this.accessory.displayName}:`, error);
+        throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
       }
-    } catch (error) {
-      if (error instanceof this.platform.api.hap.HapStatusError) {
-        throw error;
-      }
-      this.platform.log.error(`Error setting On state for ${this.accessory.displayName}:`, error);
-      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-    }
+    });
   }
 
   async getOn(): Promise<CharacteristicValue> {
@@ -530,141 +533,151 @@ export class PuraPlatformAccessory {
   }
 
   async setRotationSpeed(value: CharacteristicValue) {
-    try {
-      if (!this.useFanService) {
-        return;
-      }
-      const speed = Math.max(0, Math.min(100, Number(value) || 0));
-      const mappedIntensity = this.mapRotationToIntensity(speed);
-      const snappedSpeed = mappedIntensity <= 0 ? 0 : this.mapIntensityToRotation(mappedIntensity);
-      if (speed <= 0) {
-        this.service.updateCharacteristic(this.platform.Characteristic.RotationSpeed, 0);
-        this.pendingIntensityIntent = undefined;
-        this.pendingPowerOnIntensityIntent = undefined;
-        if (!this.currentStateActive) {
+    await this.enqueueRotationWrite(async () => {
+      try {
+        if (!this.useFanService) {
+          return;
+        }
+        const speed = Math.max(0, Math.min(100, Number(value) || 0));
+        const mappedIntensity = this.mapRotationToIntensity(speed);
+        const snappedSpeed = mappedIntensity <= 0 ? 0 : this.mapIntensityToRotation(mappedIntensity);
+        if (speed <= 0) {
+          this.service.updateCharacteristic(this.platform.Characteristic.RotationSpeed, 0);
+          this.pendingIntensityIntent = undefined;
+          this.pendingPowerOnIntensityIntent = undefined;
+          if (!this.currentStateActive) {
+            this.applyCurrentState();
+            return;
+          }
+          if (this.isDeviceUnavailable()) {
+            this.enforceOffVisualState();
+            this.updateFaultState();
+            this.platform.log.warn(`${this.accessory.displayName} appears offline (Wi-Fi lost or unplugged).`);
+            return;
+          }
+          this.platform.recordIntent(this.device.id, false);
+          const success = await this.puraApi.stopAll(this.device.id);
+          if (success) {
+            this.currentStateActive = false;
+            this.platform.log.debug(`Successfully turned off ${this.accessory.displayName} via RotationSpeed=0`);
+            this.platform.log.info(`${this.accessory.displayName} turned off.`);
+          } else {
+            this.platform.log.warn(
+              `Failed to turn off ${this.accessory.displayName} via RotationSpeed=0; preserving current state.`,
+            );
+          }
           this.applyCurrentState();
           return;
         }
-        if (this.isDeviceUnavailable()) {
-          this.enforceOffVisualState();
-          this.updateFaultState();
-          this.platform.log.warn(`${this.accessory.displayName} appears offline (Wi-Fi lost or unplugged).`);
+        if (mappedIntensity > 0) {
+          this.pendingPowerOnIntensityIntent = {
+            at: Date.now(),
+            ttlMs: 12000,
+            intensity: mappedIntensity,
+          };
+        }
+        const onCommandAgeMs = this.lastSetOnCommandAt ? Date.now() - this.lastSetOnCommandAt : undefined;
+        const isLikelyHomeImplicitOnSpeed = !this.currentStateActive
+          && speed === 100
+          && onCommandAgeMs !== undefined
+          && onCommandAgeMs >= 0
+          && onCommandAgeMs <= 1500;
+        if (isLikelyHomeImplicitOnSpeed) {
+          if (this.platform.isDebugEnabled()) {
+            this.platform.log.debug(
+              `[Diffuser] Deferring implicit power-on RotationSpeed=100 for ${this.accessory.displayName} ` +
+              `(ageMs=${onCommandAgeMs}). Pending power-on intensity=${mappedIntensity}.`,
+            );
+          }
           return;
         }
-        this.platform.recordIntent(this.device.id, false);
-        const success = await this.puraApi.stopAll(this.device.id);
-        if (success) {
-          this.currentStateActive = false;
-          this.platform.log.debug(`Successfully turned off ${this.accessory.displayName} via RotationSpeed=0`);
-          this.platform.log.info(`${this.accessory.displayName} turned off.`);
-        } else {
+        if (this.platform.isDebugEnabled()) {
+          this.platform.log.debug(
+            `[Diffuser] Set RotationSpeed for ${this.accessory.displayName}: ` +
+            `raw=${value} normalized=${speed} snapped=${snappedSpeed} mappedIntensity=${mappedIntensity}`,
+          );
+        }
+        this.service.updateCharacteristic(this.platform.Characteristic.RotationSpeed, snappedSpeed);
+        const pendingIntentIntensity = this.getPendingIntensityIntentValue();
+        if (pendingIntentIntensity === mappedIntensity) {
+          this.applyCurrentState();
+          if (this.platform.isDebugEnabled()) {
+            this.platform.log.debug(
+              `[Diffuser] Skipping duplicate intensity write for ${this.accessory.displayName}: ${mappedIntensity} (pending intent)`,
+            );
+          }
+          return;
+        }
+        if (!this.currentStateActive) {
+          return;
+        }
+        this.accessory.context.lastIntensity = mappedIntensity;
+        if (this.isDeviceUnavailable()) {
+          this.updateFaultState();
+          throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+        }
+        if (this.hasNoScentVialsDetected()) {
+          this.enforceOffVisualState();
+          this.updateFaultState();
           this.platform.log.warn(
-            `Failed to turn off ${this.accessory.displayName} via RotationSpeed=0; preserving current state.`,
+            `${this.accessory.displayName} was turned on, but no scent vials were detected. ` +
+            'The accessory was turned off as a result.',
           );
+          return;
         }
-        this.applyCurrentState();
-        return;
-      }
-      if (mappedIntensity > 0) {
-        this.pendingPowerOnIntensityIntent = {
+        const preferredBay = this.accessory.context.lastBay;
+        const normalizedPreferred = preferredBay === 1 || preferredBay === 2 ? preferredBay : undefined;
+        const targetBay = normalizedPreferred && (normalizedPreferred === 1 ? this.device.bay1 : this.device.bay2)
+          ? normalizedPreferred
+          : (this.device.bay1 ? 1 : this.device.bay2 ? 2 : 1);
+        if (this.areAllAvailableBaysAtIntensity(mappedIntensity)) {
+          this.applyCurrentState();
+          if (this.platform.isDebugEnabled()) {
+            this.platform.log.debug(
+              `[Diffuser] Skipping duplicate intensity write for ${this.accessory.displayName}: ${mappedIntensity} (already active)`,
+            );
+          }
+          return;
+        }
+        const controller = this.device.controller || 'default';
+        const previousPendingIntent = this.pendingIntensityIntent;
+        this.pendingIntensityIntent = {
           at: Date.now(),
-          ttlMs: 12000,
+          ttlMs: 8000,
           intensity: mappedIntensity,
+          bay: targetBay,
         };
-      }
-      const onCommandAgeMs = this.lastSetOnCommandAt ? Date.now() - this.lastSetOnCommandAt : undefined;
-      const isLikelyHomeImplicitOnSpeed = !this.currentStateActive
-        && speed === 100
-        && onCommandAgeMs !== undefined
-        && onCommandAgeMs >= 0
-        && onCommandAgeMs <= 1500;
-      if (isLikelyHomeImplicitOnSpeed) {
-        if (this.platform.isDebugEnabled()) {
-          this.platform.log.debug(
-            `[Diffuser] Deferring implicit power-on RotationSpeed=100 for ${this.accessory.displayName} ` +
-            `(ageMs=${onCommandAgeMs}). Pending power-on intensity=${mappedIntensity}.`,
+        const success = await this.setIntensityAcrossAvailableBays(targetBay, mappedIntensity, controller);
+        if (!success) {
+          this.pendingIntensityIntent = previousPendingIntent;
+          this.platform.log.warn(
+            `${this.accessory.displayName} intensity write failed (raw=${value}, snapped=${snappedSpeed}, targetBay=${targetBay}). ` +
+            'Keeping last known state to avoid HomeKit no-response.',
           );
+          this.applyCurrentState();
+          return;
         }
-        return;
-      }
-      if (this.platform.isDebugEnabled()) {
-        this.platform.log.debug(
-          `[Diffuser] Set RotationSpeed for ${this.accessory.displayName}: ` +
-          `raw=${value} normalized=${speed} snapped=${snappedSpeed} mappedIntensity=${mappedIntensity}`,
-        );
-      }
-      this.service.updateCharacteristic(this.platform.Characteristic.RotationSpeed, snappedSpeed);
-      const pendingIntentIntensity = this.getPendingIntensityIntentValue();
-      if (pendingIntentIntensity === mappedIntensity && this.areAllAvailableBaysAtIntensity(mappedIntensity)) {
-        this.applyCurrentState();
-        if (this.platform.isDebugEnabled()) {
-          this.platform.log.debug(
-            `[Diffuser] Skipping duplicate intensity write for ${this.accessory.displayName}: ${mappedIntensity} (pending intent)`,
-          );
-        }
-        return;
-      }
-      if (!this.currentStateActive) {
-        return;
-      }
-      this.accessory.context.lastIntensity = mappedIntensity;
-      if (this.isDeviceUnavailable()) {
-        this.updateFaultState();
-        throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-      }
-      if (this.hasNoScentVialsDetected()) {
-        this.enforceOffVisualState();
-        this.updateFaultState();
-        this.platform.log.warn(
-          `${this.accessory.displayName} was turned on, but no scent vials were detected. ` +
-          'The accessory was turned off as a result.',
-        );
-        return;
-      }
-      const preferredBay = this.accessory.context.lastBay;
-      const normalizedPreferred = preferredBay === 1 || preferredBay === 2 ? preferredBay : undefined;
-      const targetBay = normalizedPreferred && (normalizedPreferred === 1 ? this.device.bay1 : this.device.bay2)
-        ? normalizedPreferred
-        : (this.device.bay1 ? 1 : this.device.bay2 ? 2 : 1);
-      if (this.areAllAvailableBaysAtIntensity(mappedIntensity)) {
-        this.applyCurrentState();
-        if (this.platform.isDebugEnabled()) {
-          this.platform.log.debug(
-            `[Diffuser] Skipping duplicate intensity write for ${this.accessory.displayName}: ${mappedIntensity} (already active)`,
-          );
-        }
-        return;
-      }
-      const controller = this.device.controller || 'default';
-      const success = await this.setIntensityAcrossAvailableBays(targetBay, mappedIntensity, controller);
-      if (!success) {
-        this.platform.log.warn(
-          `${this.accessory.displayName} intensity write failed (raw=${value}, snapped=${snappedSpeed}, targetBay=${targetBay}). ` +
-          'Keeping last known state to avoid HomeKit no-response.',
+        this.accessory.context.lastBay = targetBay;
+        this.pendingIntensityIntent = {
+          at: Date.now(),
+          ttlMs: 8000,
+          intensity: mappedIntensity,
+          bay: targetBay,
+        };
+        this.platform.log.info(
+          `${this.accessory.displayName} intensity set to ${mappedIntensity} ` +
+          `(${mappedIntensity === 30 ? 'subtle' : mappedIntensity === 50 ? 'medium' : 'strong'}).`,
         );
         this.applyCurrentState();
-        return;
+      } catch (error) {
+        if (error instanceof this.platform.api.hap.HapStatusError) {
+          throw error;
+        }
+        this.platform.log.error(`Error setting RotationSpeed for ${this.accessory.displayName}:`, error);
+        // Fail soft for slider writes to avoid Home app "No Response" for transient intensity update errors.
+        this.applyCurrentState();
       }
-      this.accessory.context.lastBay = targetBay;
-      this.pendingIntensityIntent = {
-        at: Date.now(),
-        ttlMs: 8000,
-        intensity: mappedIntensity,
-        bay: targetBay,
-      };
-      this.platform.log.info(
-        `${this.accessory.displayName} intensity set to ${mappedIntensity} ` +
-        `(${mappedIntensity === 30 ? 'subtle' : mappedIntensity === 50 ? 'medium' : 'strong'}).`,
-      );
-      this.applyCurrentState();
-    } catch (error) {
-      if (error instanceof this.platform.api.hap.HapStatusError) {
-        throw error;
-      }
-      this.platform.log.error(`Error setting RotationSpeed for ${this.accessory.displayName}:`, error);
-      // Fail soft for slider writes to avoid Home app "No Response" for transient intensity update errors.
-      this.applyCurrentState();
-    }
+    });
   }
 
   async setNightlightOn(value: CharacteristicValue) {
@@ -1418,6 +1431,15 @@ export class PuraPlatformAccessory {
   private async enqueueNightlightWrite(task: () => Promise<void>): Promise<void> {
     const run = this.nightlightWriteQueue.then(task, task);
     this.nightlightWriteQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    await run;
+  }
+
+  private async enqueueRotationWrite(task: () => Promise<void>): Promise<void> {
+    const run = this.rotationWriteQueue.then(task, task);
+    this.rotationWriteQueue = run.then(
       () => undefined,
       () => undefined,
     );
