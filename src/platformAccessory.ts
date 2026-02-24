@@ -498,6 +498,13 @@ export class PuraPlatformAccessory {
       const speed = Math.max(0, Math.min(100, Number(value) || 0));
       const mappedIntensity = this.mapRotationToIntensity(speed);
       const snappedSpeed = mappedIntensity <= 0 ? 0 : this.mapIntensityToRotation(mappedIntensity);
+      if (mappedIntensity > 0) {
+        this.pendingPowerOnIntensityIntent = {
+          at: Date.now(),
+          ttlMs: 12000,
+          intensity: mappedIntensity,
+        };
+      }
       const onCommandAgeMs = this.lastSetOnCommandAt ? Date.now() - this.lastSetOnCommandAt : undefined;
       const isLikelyHomeImplicitOnSpeed = !this.currentStateActive
         && speed === 100
@@ -507,19 +514,12 @@ export class PuraPlatformAccessory {
       if (isLikelyHomeImplicitOnSpeed) {
         if (this.platform.isDebugEnabled()) {
           this.platform.log.debug(
-            `[Diffuser] Ignoring implicit power-on RotationSpeed=100 for ${this.accessory.displayName} ` +
-            `(ageMs=${onCommandAgeMs}). Keeping cached intensity.`,
+            `[Diffuser] Deferring implicit power-on RotationSpeed=100 for ${this.accessory.displayName} ` +
+            `(ageMs=${onCommandAgeMs}). Pending power-on intensity=${mappedIntensity}.`,
           );
         }
         this.applyCurrentState();
         return;
-      }
-      if (mappedIntensity > 0) {
-        this.pendingPowerOnIntensityIntent = {
-          at: Date.now(),
-          ttlMs: 12000,
-          intensity: mappedIntensity,
-        };
       }
       if (this.platform.isDebugEnabled()) {
         this.platform.log.debug(
