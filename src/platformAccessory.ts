@@ -37,6 +37,7 @@ export class PuraPlatformAccessory {
     level: number;
     color: string;
   };
+  private recentNightlightHold?: { until: number; level: number };
   private lastNightlightCommand?: {
     at: number;
     action: 'brightness' | 'on';
@@ -826,6 +827,7 @@ export class PuraPlatformAccessory {
         brightness: sentLevel,
         color,
       };
+      this.recentNightlightHold = active ? { until: Date.now() + 20000, level: sentLevel } : undefined;
       this.lastNightlightApiWrite = {
         at: Date.now(),
         active,
@@ -925,6 +927,7 @@ export class PuraPlatformAccessory {
         brightness: apiLevel,
         color,
       };
+      this.recentNightlightHold = active ? { until: Date.now() + 20000, level: apiLevel } : undefined;
       this.lastNightlightApiWrite = {
         at: Date.now(),
         active,
@@ -1028,7 +1031,9 @@ export class PuraPlatformAccessory {
   }
 
   updateDevice(device: PuraDevice) {
-    const nightlightStabilizedDevice = this.stabilizeNightlightDuringIntentWindow(device);
+    const nightlightStabilizedDevice = this.clampNightlightDuringHold(
+      this.stabilizeNightlightDuringIntentWindow(device),
+    );
     const stabilizedDevice = this.stabilizeIntensityDuringIntentWindow(nightlightStabilizedDevice);
     const previousNightlight = this.device.nightlight;
     const previousOnline = this.normalizeOnlineState(this.device.online);
@@ -1696,6 +1701,37 @@ export class PuraPlatformAccessory {
         active: intent.active,
         brightness: intent.level,
         color: intent.color,
+      },
+    };
+  }
+
+  private clampNightlightDuringHold(device: PuraDevice): PuraDevice {
+    if (!this.recentNightlightHold) {
+      return device;
+    }
+    const now = Date.now();
+    if (now > this.recentNightlightHold.until) {
+      this.recentNightlightHold = undefined;
+      return device;
+    }
+    if (!device.nightlight || device.nightlight.active !== true) {
+      return device;
+    }
+    const incomingLevel = this.normalizeNightlightLevel(device.nightlight.brightness) ?? 1;
+    if (incomingLevel >= this.recentNightlightHold.level) {
+      return device;
+    }
+    if (this.platform.isDebugEnabled()) {
+      this.platform.log.debug(
+        `[Nightlight] Clamping brightness for ${this.accessory.displayName} during hold: ` +
+        `incoming=${incomingLevel} intentHold=${this.recentNightlightHold.level}`,
+      );
+    }
+    return {
+      ...device,
+      nightlight: {
+        ...device.nightlight,
+        brightness: this.recentNightlightHold.level,
       },
     };
   }
