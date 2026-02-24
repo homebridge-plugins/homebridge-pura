@@ -370,10 +370,12 @@ export class PuraPlatformAccessory {
         ? (this.normalizeNightlightLevel(this.device.nightlight?.brightness) ?? 1)
         : this.percentToNightlightLevel(brightnessPercent);
       const snappedPercent = turningOff ? 0 : this.nightlightLevelToPercent(apiLevel);
-      const active = turningOff ? false : (this.pendingNightlightActive ?? Boolean(this.device.nightlight?.active));
+      // In HomeKit, setting a non-zero brightness implies turning the light on.
+      const active = turningOff ? false : true;
       const controller = this.device.controller || 'default';
       const color = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
       const apiBrightnessPercent = this.nightlightLevelToPercent(apiLevel);
+      this.pendingNightlightActive = active;
 
       this.platform.log.debug(
         `[Nightlight] Set Brightness for ${this.accessory.displayName} -> ${brightnessPercent}% ` +
@@ -427,6 +429,8 @@ export class PuraPlatformAccessory {
     }
 
     await this.enqueueNightlightWrite(async () => {
+      // In HomeKit, setting color implies turning the light on.
+      this.pendingNightlightActive = true;
       const hue = Math.max(0, Math.min(360, Number(value) || 0));
       const currentColor = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
       const currentHsv = this.hexToHsv(currentColor);
@@ -455,6 +459,8 @@ export class PuraPlatformAccessory {
     }
 
     await this.enqueueNightlightWrite(async () => {
+      // In HomeKit, setting color implies turning the light on.
+      this.pendingNightlightActive = true;
       const saturation = Math.max(0, Math.min(100, Number(value) || 0));
       const currentColor = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
       const currentHsv = this.hexToHsv(currentColor);
