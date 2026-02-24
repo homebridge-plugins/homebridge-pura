@@ -585,7 +585,6 @@ export class PuraPlatformAccessory {
             `(ageMs=${onCommandAgeMs}). Pending power-on intensity=${mappedIntensity}.`,
           );
         }
-        this.applyCurrentState();
         return;
       }
       if (this.platform.isDebugEnabled()) {
@@ -606,7 +605,6 @@ export class PuraPlatformAccessory {
         return;
       }
       if (!this.currentStateActive) {
-        this.applyCurrentState();
         return;
       }
       this.accessory.context.lastIntensity = mappedIntensity;
@@ -1510,7 +1508,16 @@ export class PuraPlatformAccessory {
         ? device.bay2
         : this.getActiveBayFromDevice(device);
     const incomingIntensity = incomingBay?.intensity;
-    if (Number.isFinite(incomingIntensity) && Number(incomingIntensity) === intentIntensity) {
+    const incomingMatchesIntentIntensity = Number.isFinite(incomingIntensity) && Number(incomingIntensity) === intentIntensity;
+    if (intentBay === 1 || intentBay === 2) {
+      const targetBay = intentBay === 1 ? device.bay1 : device.bay2;
+      const otherBay = intentBay === 1 ? device.bay2 : device.bay1;
+      const targetActive = Boolean(targetBay?.active);
+      const otherActive = Boolean(otherBay?.active);
+      if (incomingMatchesIntentIntensity && targetActive && !otherActive) {
+        return device;
+      }
+    } else if (incomingMatchesIntentIntensity) {
       return device;
     }
 
@@ -1523,10 +1530,18 @@ export class PuraPlatformAccessory {
     }
 
     if (intentBay === 1 && device.bay1) {
-      return { ...device, bay1: { ...device.bay1, intensity: intentIntensity } };
+      return {
+        ...device,
+        bay1: { ...device.bay1, intensity: intentIntensity, active: true },
+        bay2: device.bay2 ? { ...device.bay2, active: false } : device.bay2,
+      };
     }
     if (intentBay === 2 && device.bay2) {
-      return { ...device, bay2: { ...device.bay2, intensity: intentIntensity } };
+      return {
+        ...device,
+        bay1: device.bay1 ? { ...device.bay1, active: false } : device.bay1,
+        bay2: { ...device.bay2, intensity: intentIntensity, active: true },
+      };
     }
     if (device.bay1) {
       return { ...device, bay1: { ...device.bay1, intensity: intentIntensity } };
