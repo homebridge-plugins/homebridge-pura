@@ -24,6 +24,7 @@ export class PuraApi {
   private session: CognitoUserSession | null = null;
   private readonly log: Logging;
   private readonly baseUrl: string;
+  private lastDevicesFetchDegraded = false;
 
   constructor(log: Logging) {
     this.log = log;
@@ -206,6 +207,7 @@ export class PuraApi {
    * Get all devices
    */
   async getDevices(): Promise<PuraDevice[]> {
+    this.lastDevicesFetchDegraded = false;
     const endpoints = ['v2/users/devices', 'users/devices', 'devices'];
     let lastError: unknown;
 
@@ -260,16 +262,22 @@ export class PuraApi {
     }
 
     if (this.isTransientNetworkError(lastError)) {
+      this.lastDevicesFetchDegraded = true;
       this.log.warn('Pura devices endpoint timed out. Returning no device updates this cycle.');
       return [];
     }
 
     if (this.isThingTypeError(lastError)) {
+      this.lastDevicesFetchDegraded = true;
       this.log.warn('Pura API rejected one or more device thing types. Returning no devices this cycle.');
       return [];
     }
 
     throw (lastError instanceof Error ? lastError : new Error('Failed to get devices'));
+  }
+
+  wasLastDevicesFetchDegraded(): boolean {
+    return this.lastDevicesFetchDegraded;
   }
 
   private extractDevices(response: Record<string, unknown>): PuraDevice[] {
@@ -497,7 +505,7 @@ export class PuraApi {
     const diffusionMode = typeof parent.diffusionMode === 'string' ? parent.diffusionMode : undefined;
     const standardMode = diffusionMode === 'standard';
     const online = this.resolveOnlineState(parent) !== false;
-    const activeAtWindowSeconds = standardMode && online ? 60 * 60 : 300;
+    const activeAtWindowSeconds = online ? 300 : 120;
     const activeAtRecent = activeAt !== undefined &&
       Math.abs(nowSeconds - activeAt) < activeAtWindowSeconds;
     const explicitActive = record.active ?? record.enabled ?? record.on ?? record.isOn;
@@ -507,14 +515,17 @@ export class PuraApi {
     );
     const oscillationActive = this.normalizeOscillationActive(parent.oscillation, bayNumber);
     const intensityFromOscillation = this.normalizeOscillationIntensity(parent.oscillation, bayNumber);
-    const inferredActive = oscillationActive ||
+    const intensityEvidence = (
       (intensityFromRecord !== null && Number.isFinite(intensityFromRecord) && intensityFromRecord > 0) ||
-      (intensityFromOscillation !== null && Number.isFinite(intensityFromOscillation) && intensityFromOscillation > 0) ||
-      (standardMode && activeAtRecent);
-    const active = explicitActive === true ? true : inferredActive;
-    const normalizedIntensity = intensityFromRecord ??
-      (active ? (intensityFromOscillation ?? intensityFromDefaults) : null) ??
-      0;
+      (intensityFromOscillation !== null && Number.isFinite(intensityFromOscillation) && intensityFromOscillation > 0)
+    );
+    const inferredActive = oscillationActive ||
+      (standardMode && activeAtRecent) ||
+      (activeAtRecent && intensityEvidence);
+    const active = typeof explicitActive === 'boolean' ? explicitActive : inferredActive;
+    const normalizedIntensity = active
+      ? (intensityFromRecord ?? intensityFromOscillation ?? intensityFromDefaults ?? 0)
+      : 0;
     return {
       id: typeof record.id === 'number' ? record.id : bayNumber,
       name: typeof record.name === 'string' ? record.name : undefined,

@@ -367,6 +367,33 @@ export class PuraPlatformAccessory {
           }
           return;
         }
+        if (this.useFanService && this.service.testCharacteristic(this.platform.Characteristic.RotationSpeed)) {
+          // Home commonly sets RotationSpeed=100 when turning the accessory on via icon tap.
+          // Capture that value early so we turn on at 100 without briefly showing the cached intensity.
+          const currentValue = this.service.getCharacteristic(this.platform.Characteristic.RotationSpeed).value;
+          const numericSpeed = Math.max(0, Math.min(100, Number(currentValue) || 0));
+          const mapped = this.mapRotationToIntensity(numericSpeed);
+          if (mapped > 0) {
+            this.pendingPowerOnIntensityIntent = {
+              at: Date.now(),
+              ttlMs: 12000,
+              intensity: mapped,
+            };
+          } else if (!this.pendingPowerOnIntensityIntent) {
+            // If Home sends the speed right after Active=1, give it a brief window to arrive.
+            await new Promise((resolve) => setTimeout(resolve, 250));
+            const afterValue = this.service.getCharacteristic(this.platform.Characteristic.RotationSpeed).value;
+            const afterSpeed = Math.max(0, Math.min(100, Number(afterValue) || 0));
+            const afterMapped = this.mapRotationToIntensity(afterSpeed);
+            if (afterMapped > 0) {
+              this.pendingPowerOnIntensityIntent = {
+                at: Date.now(),
+                ttlMs: 12000,
+                intensity: afterMapped,
+              };
+            }
+          }
+        }
         const preferredBay = this.accessory.context.lastBay;
         const normalizedPreferred = preferredBay === 1 || preferredBay === 2 ? preferredBay : undefined;
         const targetBay = normalizedPreferred && (normalizedPreferred === 1 ? this.device.bay1 : this.device.bay2)
@@ -386,8 +413,10 @@ export class PuraPlatformAccessory {
         const preferredIntensity = Number.isFinite(this.accessory.context.lastIntensity) && this.accessory.context.lastIntensity > 0
           ? this.accessory.context.lastIntensity
           : undefined;
-        const defaultIntensity = this.useFanService ? 50 : 60;
-        const fallbackIntensity = Math.max(1, Math.min(100, candidateIntensity ?? preferredIntensity ?? defaultIntensity));
+        const defaultIntensity = this.useFanService ? 100 : 60;
+        const fallbackIntensity = this.useFanService
+          ? defaultIntensity
+          : Math.max(1, Math.min(100, candidateIntensity ?? preferredIntensity ?? defaultIntensity));
         if (noScentVialsDetected || deviceUnavailable) {
           this.enforceOffVisualState();
           this.updateFaultState();
@@ -413,6 +442,7 @@ export class PuraPlatformAccessory {
         const success = alwaysOn && await this.setIntensityAcrossAvailableBays(targetBay, intensity, controller);
         if (success) {
           this.currentStateActive = true;
+          this.pendingPowerOnIntensityIntent = undefined;
           this.accessory.context.lastIntensity = intensity;
           this.accessory.context.lastBay = targetBay;
           this.pendingIntensityIntent = {
@@ -434,6 +464,15 @@ export class PuraPlatformAccessory {
       } else {
         this.pendingIntensityIntent = undefined;
         this.pendingPowerOnIntensityIntent = undefined;
+        if (!this.currentStateActive) {
+          this.applyCurrentState();
+          if (this.platform.isDebugEnabled()) {
+            this.platform.log.debug(
+              `[Diffuser] Ignoring redundant OFF command for ${this.accessory.displayName} because it is already inactive.`,
+            );
+          }
+          return;
+        }
         if (this.isDeviceUnavailable()) {
           this.enforceOffVisualState();
           this.updateFaultState();
@@ -498,6 +537,34 @@ export class PuraPlatformAccessory {
       const speed = Math.max(0, Math.min(100, Number(value) || 0));
       const mappedIntensity = this.mapRotationToIntensity(speed);
       const snappedSpeed = mappedIntensity <= 0 ? 0 : this.mapIntensityToRotation(mappedIntensity);
+      if (speed <= 0) {
+        this.service.updateCharacteristic(this.platform.Characteristic.RotationSpeed, 0);
+        this.pendingIntensityIntent = undefined;
+        this.pendingPowerOnIntensityIntent = undefined;
+        if (!this.currentStateActive) {
+          this.applyCurrentState();
+          return;
+        }
+        if (this.isDeviceUnavailable()) {
+          this.enforceOffVisualState();
+          this.updateFaultState();
+          this.platform.log.warn(`${this.accessory.displayName} appears offline (Wi-Fi lost or unplugged).`);
+          return;
+        }
+        this.platform.recordIntent(this.device.id, false);
+        const success = await this.puraApi.stopAll(this.device.id);
+        if (success) {
+          this.currentStateActive = false;
+          this.platform.log.debug(`Successfully turned off ${this.accessory.displayName} via RotationSpeed=0`);
+          this.platform.log.info(`${this.accessory.displayName} turned off.`);
+        } else {
+          this.platform.log.warn(
+            `Failed to turn off ${this.accessory.displayName} via RotationSpeed=0; preserving current state.`,
+          );
+        }
+        this.applyCurrentState();
+        return;
+      }
       if (mappedIntensity > 0) {
         this.pendingPowerOnIntensityIntent = {
           at: Date.now(),
@@ -538,7 +605,7 @@ export class PuraPlatformAccessory {
         }
         return;
       }
-      if (!this.currentStateActive || speed <= 0) {
+      if (!this.currentStateActive) {
         this.applyCurrentState();
         return;
       }

@@ -53,6 +53,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   private realtimeFailures = 0;
   private realtimeConnectionAnnounced = false;
   private disabledDueToConfig = false;
+  private preservingAccessoriesDueToDegradedDiscovery = false;
 
   constructor(
     public readonly log: Logging,
@@ -234,7 +235,9 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       }
 
       // Remove accessories that are no longer present
-      this.removeStaleAccessories(discoveredUuids);
+      if (!this.shouldPreserveAccessoriesOnEmptyDiscovery(devices)) {
+        this.removeStaleAccessories(discoveredUuids);
+      }
 
       // Set up refresh interval
       this.setupRefreshInterval();
@@ -394,6 +397,9 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   }
 
   private async reconcileDiscoveredDevices(devices: PuraDevice[]): Promise<void> {
+    if (this.shouldPreserveAccessoriesOnEmptyDiscovery(devices)) {
+      return;
+    }
     const discoveredUuids = new Set<string>();
     for (const device of devices) {
       const diffuserUuid = this.api.hap.uuid.generate(`${device.id}-diffuser`);
@@ -407,6 +413,21 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       }
     }
     this.removeStaleAccessories(discoveredUuids);
+  }
+
+  private shouldPreserveAccessoriesOnEmptyDiscovery(devices: PuraDevice[]): boolean {
+    const shouldPreserve = this.puraApi.wasLastDevicesFetchDegraded()
+      && devices.length === 0
+      && this.accessories.size > 0;
+    if (shouldPreserve && !this.preservingAccessoriesDueToDegradedDiscovery) {
+      this.log.warn(
+        'Received an empty device list after a degraded API fetch. Preserving cached accessories until recovery.',
+      );
+    } else if (!shouldPreserve && this.preservingAccessoriesDueToDegradedDiscovery) {
+      this.log.info('Device discovery recovered; stale accessory reconciliation resumed.');
+    }
+    this.preservingAccessoriesDueToDegradedDiscovery = shouldPreserve;
+    return shouldPreserve;
   }
 
   /**
