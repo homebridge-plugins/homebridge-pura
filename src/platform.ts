@@ -49,6 +49,8 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   private webhookReceived = false;
   private intentWindowMs = 8000;
   private lastIntentAt: Map<string, { state: boolean; at: number }> = new Map();
+  private lastNightlightInteraction?: { deviceId: string; at: number };
+  private readonly crossDeviceNightlightOffGuardMs = 8000;
   private realtimeSocket: WebSocket | null = null;
   private realtimeReconnectTimer: NodeJS.Timeout | null = null;
   private realtimeFailures = 0;
@@ -833,6 +835,28 @@ export class PuraPlatform implements DynamicPlatformPlugin {
 
   recordIntent(deviceId: string, state: boolean) {
     this.lastIntentAt.set(deviceId, { state, at: Date.now() });
+  }
+
+  recordNightlightInteraction(deviceId: string) {
+    this.lastNightlightInteraction = { deviceId, at: Date.now() };
+  }
+
+  getRecentCrossDeviceNightlightInteraction(deviceId: string): { deviceId: string; ageMs: number } | undefined {
+    const recent = this.lastNightlightInteraction;
+    if (!recent) {
+      return undefined;
+    }
+    if (recent.deviceId === deviceId) {
+      return undefined;
+    }
+    const ageMs = Date.now() - recent.at;
+    if (ageMs < 0 || ageMs > this.crossDeviceNightlightOffGuardMs) {
+      return undefined;
+    }
+    return {
+      deviceId: recent.deviceId,
+      ageMs,
+    };
   }
 
   private triggerWebhookRefresh() {

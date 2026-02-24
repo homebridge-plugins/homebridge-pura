@@ -197,6 +197,7 @@ export class PuraNightlightAccessory {
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
     await this.enqueueWrite(async () => {
+      this.platform.recordNightlightInteraction(this.device.id);
       const active = Boolean(value);
       const brightnessPercent = this.nightlightLevelToPercent(this.device.nightlight?.brightness ?? 10);
       const sentLevel = this.percentToNightlightLevel(brightnessPercent);
@@ -244,6 +245,7 @@ export class PuraNightlightAccessory {
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
     await this.enqueueWrite(async () => {
+      this.platform.recordNightlightInteraction(this.device.id);
       const brightnessPercent = Math.max(0, Math.min(100, Number(value) || 0));
       const turningOff = brightnessPercent <= 0;
       const level = turningOff ? (this.normalizeNightlightLevel(this.device.nightlight?.brightness) ?? 1)
@@ -296,6 +298,7 @@ export class PuraNightlightAccessory {
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
     await this.enqueueWrite(async () => {
+      this.platform.recordNightlightInteraction(this.device.id);
       const hue = Math.max(0, Math.min(360, Number(value) || 0));
       const current = this.hexToHsv(this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff'));
       const nextColor = this.hsvToHex(hue, current.s);
@@ -319,6 +322,7 @@ export class PuraNightlightAccessory {
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
     await this.enqueueWrite(async () => {
+      this.platform.recordNightlightInteraction(this.device.id);
       const saturation = Math.max(0, Math.min(100, Number(value) || 0));
       const current = this.hexToHsv(this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff'));
       const nextColor = this.hsvToHex(current.h, saturation);

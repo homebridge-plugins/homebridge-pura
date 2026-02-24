@@ -751,6 +751,7 @@ export class PuraPlatformAccessory {
     }
 
     await this.enqueueNightlightWrite(async () => {
+      this.platform.recordNightlightInteraction(this.device.id);
       const active = Boolean(value);
       const currentRawBrightness = this.normalizeNightlightLevel(this.device.nightlight?.brightness);
       const brightnessPercent = this.nightlightLevelToPercent(currentRawBrightness ?? 10);
@@ -834,6 +835,7 @@ export class PuraPlatformAccessory {
     }
 
     await this.enqueueNightlightWrite(async () => {
+      this.platform.recordNightlightInteraction(this.device.id);
       const brightnessPercent = Math.max(0, Math.min(100, Number(value) || 0));
       const turningOff = brightnessPercent <= 0;
       const apiLevel = turningOff
@@ -930,6 +932,7 @@ export class PuraPlatformAccessory {
     }
 
     await this.enqueueNightlightWrite(async () => {
+      this.platform.recordNightlightInteraction(this.device.id);
       // In HomeKit, setting color implies turning the light on.
       this.pendingNightlightActive = true;
       const hue = Math.max(0, Math.min(360, Number(value) || 0));
@@ -960,6 +963,7 @@ export class PuraPlatformAccessory {
     }
 
     await this.enqueueNightlightWrite(async () => {
+      this.platform.recordNightlightInteraction(this.device.id);
       // In HomeKit, setting color implies turning the light on.
       this.pendingNightlightActive = true;
       const saturation = Math.max(0, Math.min(100, Number(value) || 0));
@@ -1378,6 +1382,15 @@ export class PuraPlatformAccessory {
   private shouldSuppressConflictingOffCommand(origin: 'setOn' | 'rotation'): boolean {
     if (!this.currentStateActive) {
       return false;
+    }
+    const recentCrossDeviceNightlight = this.platform.getRecentCrossDeviceNightlightInteraction(this.device.id);
+    if (recentCrossDeviceNightlight) {
+      this.platform.log.warn(
+        `[Diffuser] Suppressing OFF command for ${this.accessory.displayName} ` +
+        `(origin=${origin}, recentNightlightDevice=${recentCrossDeviceNightlight.deviceId}, ` +
+        `ageMs=${recentCrossDeviceNightlight.ageMs}).`,
+      );
+      return true;
     }
     if (this.lastSuccessfulOnWriteAt === undefined) {
       return false;
