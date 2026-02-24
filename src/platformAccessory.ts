@@ -20,6 +20,8 @@ export class PuraPlatformAccessory {
   private inferredOfflineFromStaleState = false;
   private lastAwayModeEnabledState: boolean | null = null;
   private lastAutoAlternativeOffState: boolean | null = null;
+  private nightlightWriteQueue: Promise<void> = Promise.resolve();
+  private pendingNightlightActive?: boolean;
   private lastNightlightCommand?: {
     at: number;
     action: 'brightness' | 'on';
@@ -295,30 +297,33 @@ export class PuraPlatformAccessory {
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
 
-    const active = Boolean(value);
-    const currentRawBrightness = this.normalizeNightlightLevel(this.device.nightlight?.brightness);
-    const brightnessPercent = this.nightlightLevelToPercent(currentRawBrightness ?? 10);
-    const sentLevel = this.percentToNightlightLevel(brightnessPercent);
-    const controller = this.device.controller || 'default';
-    const color = this.device.nightlight?.color ?? 'ffffff';
+    await this.enqueueNightlightWrite(async () => {
+      const active = Boolean(value);
+      const currentRawBrightness = this.normalizeNightlightLevel(this.device.nightlight?.brightness);
+      const brightnessPercent = this.nightlightLevelToPercent(currentRawBrightness ?? 10);
+      const sentLevel = this.percentToNightlightLevel(brightnessPercent);
+      const controller = this.device.controller || 'default';
+      const color = this.device.nightlight?.color ?? 'ffffff';
+      this.pendingNightlightActive = active;
 
-    this.platform.log.debug(
-      `[Nightlight] Set On for ${this.accessory.displayName} -> ${active}; ` +
-      `rawBrightness=${currentRawBrightness ?? 'unknown'} mappedBrightness=${brightnessPercent}% color=${color}`,
-    );
+      this.platform.log.debug(
+        `[Nightlight] Set On for ${this.accessory.displayName} -> ${active}; ` +
+        `rawBrightness=${currentRawBrightness ?? 'unknown'} mappedBrightness=${brightnessPercent}% color=${color}`,
+      );
 
-    const success = await this.puraApi.setNightlight(this.device.id, active, brightnessPercent, color, controller);
-    if (!success) {
-      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-    }
+      const success = await this.puraApi.setNightlight(this.device.id, active, brightnessPercent, color, controller);
+      if (!success) {
+        throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+      }
 
-    this.device.nightlight = {
-      active,
-      brightness: sentLevel,
-      color,
-    };
-    this.recordNightlightCommand('on', active, brightnessPercent, sentLevel);
-    this.applyNightlightState();
+      this.device.nightlight = {
+        active,
+        brightness: sentLevel,
+        color,
+      };
+      this.recordNightlightCommand('on', active, brightnessPercent, sentLevel);
+      this.applyNightlightState();
+    });
   }
 
   async getNightlightOn(): Promise<CharacteristicValue> {
@@ -340,29 +345,31 @@ export class PuraPlatformAccessory {
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
 
-    const brightnessPercent = Math.max(0, Math.min(100, Number(value) || 0));
-    const apiLevel = this.percentToNightlightLevel(brightnessPercent);
-    const active = Boolean(this.device.nightlight?.active);
-    const controller = this.device.controller || 'default';
-    const color = this.device.nightlight?.color ?? 'ffffff';
+    await this.enqueueNightlightWrite(async () => {
+      const brightnessPercent = Math.max(0, Math.min(100, Number(value) || 0));
+      const apiLevel = this.percentToNightlightLevel(brightnessPercent);
+      const active = this.pendingNightlightActive ?? Boolean(this.device.nightlight?.active);
+      const controller = this.device.controller || 'default';
+      const color = this.device.nightlight?.color ?? 'ffffff';
 
-    this.platform.log.debug(
-      `[Nightlight] Set Brightness for ${this.accessory.displayName} -> ${brightnessPercent}% ` +
-      `(mappedLevel=${apiLevel}, active=${active}, color=${color})`,
-    );
+      this.platform.log.debug(
+        `[Nightlight] Set Brightness for ${this.accessory.displayName} -> ${brightnessPercent}% ` +
+        `(mappedLevel=${apiLevel}, active=${active}, color=${color})`,
+      );
 
-    const success = await this.puraApi.setNightlight(this.device.id, active, brightnessPercent, color, controller);
-    if (!success) {
-      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-    }
+      const success = await this.puraApi.setNightlight(this.device.id, active, brightnessPercent, color, controller);
+      if (!success) {
+        throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+      }
 
-    this.device.nightlight = {
-      active,
-      brightness: apiLevel,
-      color,
-    };
-    this.recordNightlightCommand('brightness', active, brightnessPercent, apiLevel);
-    this.applyNightlightState();
+      this.device.nightlight = {
+        active,
+        brightness: apiLevel,
+        color,
+      };
+      this.recordNightlightCommand('brightness', active, brightnessPercent, apiLevel);
+      this.applyNightlightState();
+    });
   }
 
   async getNightlightBrightness(): Promise<CharacteristicValue> {
@@ -384,6 +391,9 @@ export class PuraPlatformAccessory {
     const nextOnline = this.normalizeOnlineState(device.online);
     this.logOnlineStateTransition(previousOnline, nextOnline);
     this.device = device;
+    if (typeof device.nightlight?.active === 'boolean') {
+      this.pendingNightlightActive = device.nightlight.active;
+    }
     this.logInferredOfflineTransition();
     this.logRecommendationHints(device);
     this.accessory.context.device = device;
@@ -794,6 +804,15 @@ export class PuraPlatformAccessory {
       hkBrightnessPercent,
       sentLevel,
     };
+  }
+
+  private async enqueueNightlightWrite(task: () => Promise<void>): Promise<void> {
+    const run = this.nightlightWriteQueue.then(task, task);
+    this.nightlightWriteQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    await run;
   }
 
   private logNightlightProfileRoundTrip(previous?: PuraDevice['nightlight'], next?: PuraDevice['nightlight']) {
