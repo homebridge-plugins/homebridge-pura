@@ -43,12 +43,12 @@ Add the following platform to your `config.json`:
 - **username**: Your Pura email - *required*
 - **password**: Your Pura password - *required*
 - **forceNightlightOff**: Pura turns the nightlight on/off with the diffuser. Enable to prevent the light from staying on. (default: false)
-- **enableNightlightAccessory**: Exposes a separate Lightbulb service for the diffuser nightlight with On/Brightness/Color control. (default: false)
+- **enableNightlightAccessory**: Enables nightlight controls for compatible diffusers, including On/Brightness/Color. (default: false)
 
 ## Usage
 
 Once configured, your Pura diffusers will appear in the Home app as a single switch per diffuser (e.g., "Living Room Diffuser").
-If `enableNightlightAccessory` is set to `true`, each compatible diffuser also includes a separate `Nightlight` Lightbulb service.
+If `enableNightlightAccessory` is set to `true`, each compatible diffuser also includes a separate `Nightlight Control` service.
 
 ### Controls
 

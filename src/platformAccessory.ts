@@ -6,7 +6,7 @@ import { PuraConfig, PuraDevice, PuraBay } from './puraTypes.js';
 
 /**
  * Pura Platform Accessory
- * One diffuser service per device, with optional Nightlight Lightbulb service.
+ * One diffuser service per device, with optional Nightlight Control service.
  */
 export class PuraPlatformAccessory {
   private service: Service;
@@ -104,7 +104,7 @@ export class PuraPlatformAccessory {
       return;
     }
 
-    const name = `${this.accessory.displayName} Nightlight`;
+    const name = `${this.accessory.displayName} Nightlight Control`;
     this.nightlightService = existing || this.accessory.addService(this.platform.Service.Lightbulb, name, 'nightlight');
     this.nightlightService.setCharacteristic(this.platform.Characteristic.Name, name);
     this.nightlightService.getCharacteristic(this.platform.Characteristic.On)
