@@ -262,6 +262,61 @@ export class PuraPlatformAccessory {
     return undefined;
   }
 
+  private getAvailableBays(): Array<1 | 2> {
+    const bays: Array<1 | 2> = [];
+    if (this.device.bay1) {
+      bays.push(1);
+    }
+    if (this.device.bay2) {
+      bays.push(2);
+    }
+    return bays;
+  }
+
+  private areAllAvailableBaysAtIntensity(intensity: number): boolean {
+    const bays = this.getAvailableBays();
+    if (bays.length === 0) {
+      return false;
+    }
+    return bays.every((bay) => {
+      const payload = bay === 1 ? this.device.bay1 : this.device.bay2;
+      return Number(payload?.intensity) === intensity;
+    });
+  }
+
+  private async setIntensityAcrossAvailableBays(
+    targetBay: 1 | 2,
+    intensity: number,
+    controller: string,
+  ): Promise<boolean> {
+    const availableBays = this.getAvailableBays();
+    if (availableBays.length === 0) {
+      return false;
+    }
+    const orderedBays = availableBays.includes(targetBay)
+      ? [targetBay, ...availableBays.filter((bay) => bay !== targetBay)]
+      : availableBays;
+
+    let primarySuccess = false;
+    const secondaryFailures: Array<1 | 2> = [];
+    for (const bay of orderedBays) {
+      const success = await this.puraApi.setIntensity(this.device.id, bay, intensity, controller);
+      if (bay === targetBay) {
+        primarySuccess = success;
+      } else if (!success) {
+        secondaryFailures.push(bay);
+      }
+    }
+
+    if (secondaryFailures.length > 0) {
+      this.platform.log.warn(
+        `${this.accessory.displayName} intensity synced to active bay, but failed on bay(s): ${secondaryFailures.join(', ')}.`,
+      );
+    }
+
+    return primarySuccess;
+  }
+
   async setOn(value: CharacteristicValue) {
     const isOn = this.useFanService
       ? value === this.platform.Characteristic.Active.ACTIVE
@@ -312,7 +367,7 @@ export class PuraPlatformAccessory {
         await this.puraApi.setAwayMode(this.device.id, false);
         const alwaysOn = await this.puraApi.setAlwaysOn(this.device.id, targetBay);
         const controller = this.device.controller || 'default';
-        const success = alwaysOn && await this.puraApi.setIntensity(this.device.id, targetBay, intensity, controller);
+        const success = alwaysOn && await this.setIntensityAcrossAvailableBays(targetBay, intensity, controller);
         if (success) {
           this.currentStateActive = true;
           this.accessory.context.lastIntensity = intensity;
@@ -398,6 +453,16 @@ export class PuraPlatformAccessory {
     const speed = Math.max(0, Math.min(100, Number(value) || 0));
     const mappedIntensity = this.mapRotationToIntensity(speed);
     this.accessory.context.lastIntensity = mappedIntensity;
+    const pendingIntentIntensity = this.getPendingIntensityIntentValue();
+    if (pendingIntentIntensity === mappedIntensity && this.areAllAvailableBaysAtIntensity(mappedIntensity)) {
+      this.applyCurrentState();
+      if (this.platform.isDebugEnabled()) {
+        this.platform.log.debug(
+          `[Diffuser] Skipping duplicate intensity write for ${this.accessory.displayName}: ${mappedIntensity} (pending intent)`,
+        );
+      }
+      return;
+    }
     if (!this.currentStateActive || speed <= 0) {
       this.applyCurrentState();
       return;
@@ -420,8 +485,17 @@ export class PuraPlatformAccessory {
     const targetBay = normalizedPreferred && (normalizedPreferred === 1 ? this.device.bay1 : this.device.bay2)
       ? normalizedPreferred
       : (this.device.bay1 ? 1 : this.device.bay2 ? 2 : 1);
+    if (this.areAllAvailableBaysAtIntensity(mappedIntensity)) {
+      this.applyCurrentState();
+      if (this.platform.isDebugEnabled()) {
+        this.platform.log.debug(
+          `[Diffuser] Skipping duplicate intensity write for ${this.accessory.displayName}: ${mappedIntensity} (already active)`,
+        );
+      }
+      return;
+    }
     const controller = this.device.controller || 'default';
-    const success = await this.puraApi.setIntensity(this.device.id, targetBay, mappedIntensity, controller);
+    const success = await this.setIntensityAcrossAvailableBays(targetBay, mappedIntensity, controller);
     if (!success) {
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
