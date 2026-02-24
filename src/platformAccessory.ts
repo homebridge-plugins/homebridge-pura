@@ -365,18 +365,22 @@ export class PuraPlatformAccessory {
 
     await this.enqueueNightlightWrite(async () => {
       const brightnessPercent = Math.max(0, Math.min(100, Number(value) || 0));
-      const apiLevel = this.percentToNightlightLevel(brightnessPercent);
-      const snappedPercent = this.nightlightLevelToPercent(apiLevel);
-      const active = this.pendingNightlightActive ?? Boolean(this.device.nightlight?.active);
+      const turningOff = brightnessPercent <= 0;
+      const apiLevel = turningOff
+        ? (this.normalizeNightlightLevel(this.device.nightlight?.brightness) ?? 1)
+        : this.percentToNightlightLevel(brightnessPercent);
+      const snappedPercent = turningOff ? 0 : this.nightlightLevelToPercent(apiLevel);
+      const active = turningOff ? false : (this.pendingNightlightActive ?? Boolean(this.device.nightlight?.active));
       const controller = this.device.controller || 'default';
       const color = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
+      const apiBrightnessPercent = this.nightlightLevelToPercent(apiLevel);
 
       this.platform.log.debug(
         `[Nightlight] Set Brightness for ${this.accessory.displayName} -> ${brightnessPercent}% ` +
-        `(snapped=${snappedPercent}%, mappedLevel=${apiLevel}, active=${active}, color=${color})`,
+        `(snapped=${snappedPercent}%, apiBrightness=${apiBrightnessPercent}%, mappedLevel=${apiLevel}, active=${active}, color=${color})`,
       );
 
-      const success = await this.puraApi.setNightlight(this.device.id, active, snappedPercent, color, controller);
+      const success = await this.puraApi.setNightlight(this.device.id, active, apiBrightnessPercent, color, controller);
       if (!success) {
         throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
       }
@@ -403,7 +407,9 @@ export class PuraPlatformAccessory {
       this.updateFaultState();
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
-    const brightness = this.nightlightLevelToPercent(this.device.nightlight?.brightness);
+    const brightness = Boolean(this.device.nightlight?.active)
+      ? this.nightlightLevelToPercent(this.device.nightlight?.brightness)
+      : 0;
     this.platform.log.debug(
       `[Nightlight] Get Brightness for ${this.accessory.displayName} -> ${brightness}% ` +
       `(raw=${this.device.nightlight?.brightness ?? 'unknown'})`,
@@ -845,7 +851,9 @@ export class PuraPlatformAccessory {
       return;
     }
     const isOn = Boolean(this.device.nightlight?.active);
-    const brightness = this.nightlightLevelToPercent(this.device.nightlight?.brightness);
+    const brightness = isOn
+      ? this.nightlightLevelToPercent(this.device.nightlight?.brightness)
+      : 0;
     const color = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
     const hsv = this.hexToHsv(color);
     this.nightlightService.updateCharacteristic(this.platform.Characteristic.On, isOn);
