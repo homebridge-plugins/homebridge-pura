@@ -460,72 +460,91 @@ export class PuraPlatformAccessory {
   }
 
   async setRotationSpeed(value: CharacteristicValue) {
-    if (!this.useFanService) {
-      return;
-    }
-    const speed = Math.max(0, Math.min(100, Number(value) || 0));
-    const mappedIntensity = this.mapRotationToIntensity(speed);
-    const snappedSpeed = this.mapIntensityToRotation(mappedIntensity);
-    this.service.updateCharacteristic(this.platform.Characteristic.RotationSpeed, snappedSpeed);
-    const pendingIntentIntensity = this.getPendingIntensityIntentValue();
-    if (pendingIntentIntensity === mappedIntensity && this.areAllAvailableBaysAtIntensity(mappedIntensity)) {
-      this.applyCurrentState();
+    try {
+      if (!this.useFanService) {
+        return;
+      }
+      const speed = Math.max(0, Math.min(100, Number(value) || 0));
+      const mappedIntensity = this.mapRotationToIntensity(speed);
+      const snappedSpeed = this.mapIntensityToRotation(mappedIntensity);
       if (this.platform.isDebugEnabled()) {
         this.platform.log.debug(
-          `[Diffuser] Skipping duplicate intensity write for ${this.accessory.displayName}: ${mappedIntensity} (pending intent)`,
+          `[Diffuser] Set RotationSpeed for ${this.accessory.displayName}: raw=${value} normalized=${speed} snapped=${snappedSpeed} mappedIntensity=${mappedIntensity}`,
         );
       }
-      return;
-    }
-    if (!this.currentStateActive || speed <= 0) {
-      this.applyCurrentState();
-      return;
-    }
-    this.accessory.context.lastIntensity = mappedIntensity;
-    if (this.isDeviceUnavailable()) {
-      this.updateFaultState();
-      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-    }
-    if (this.hasNoScentVialsDetected()) {
-      this.enforceOffVisualState();
-      this.updateFaultState();
-      this.platform.log.warn(
-        `${this.accessory.displayName} was turned on, but no scent vials were detected. ` +
-        'The accessory was turned off as a result.',
+      this.service.updateCharacteristic(this.platform.Characteristic.RotationSpeed, snappedSpeed);
+      const pendingIntentIntensity = this.getPendingIntensityIntentValue();
+      if (pendingIntentIntensity === mappedIntensity && this.areAllAvailableBaysAtIntensity(mappedIntensity)) {
+        this.applyCurrentState();
+        if (this.platform.isDebugEnabled()) {
+          this.platform.log.debug(
+            `[Diffuser] Skipping duplicate intensity write for ${this.accessory.displayName}: ${mappedIntensity} (pending intent)`,
+          );
+        }
+        return;
+      }
+      if (!this.currentStateActive || speed <= 0) {
+        this.applyCurrentState();
+        return;
+      }
+      this.accessory.context.lastIntensity = mappedIntensity;
+      if (this.isDeviceUnavailable()) {
+        this.updateFaultState();
+        throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+      }
+      if (this.hasNoScentVialsDetected()) {
+        this.enforceOffVisualState();
+        this.updateFaultState();
+        this.platform.log.warn(
+          `${this.accessory.displayName} was turned on, but no scent vials were detected. ` +
+          'The accessory was turned off as a result.',
+        );
+        return;
+      }
+      const preferredBay = this.accessory.context.lastBay;
+      const normalizedPreferred = preferredBay === 1 || preferredBay === 2 ? preferredBay : undefined;
+      const targetBay = normalizedPreferred && (normalizedPreferred === 1 ? this.device.bay1 : this.device.bay2)
+        ? normalizedPreferred
+        : (this.device.bay1 ? 1 : this.device.bay2 ? 2 : 1);
+      if (this.areAllAvailableBaysAtIntensity(mappedIntensity)) {
+        this.applyCurrentState();
+        if (this.platform.isDebugEnabled()) {
+          this.platform.log.debug(
+            `[Diffuser] Skipping duplicate intensity write for ${this.accessory.displayName}: ${mappedIntensity} (already active)`,
+          );
+        }
+        return;
+      }
+      const controller = this.device.controller || 'default';
+      const success = await this.setIntensityAcrossAvailableBays(targetBay, mappedIntensity, controller);
+      if (!success) {
+        this.platform.log.warn(
+          `${this.accessory.displayName} intensity write failed (raw=${value}, snapped=${snappedSpeed}, targetBay=${targetBay}). ` +
+          'Keeping last known state to avoid HomeKit no-response.',
+        );
+        this.applyCurrentState();
+        return;
+      }
+      this.accessory.context.lastBay = targetBay;
+      this.pendingIntensityIntent = {
+        at: Date.now(),
+        ttlMs: 8000,
+        intensity: mappedIntensity,
+        bay: targetBay,
+      };
+      this.platform.log.info(
+        `${this.accessory.displayName} intensity set to ${mappedIntensity} ` +
+        `(${mappedIntensity === 30 ? 'subtle' : mappedIntensity === 50 ? 'medium' : 'strong'}).`,
       );
-      return;
-    }
-    const preferredBay = this.accessory.context.lastBay;
-    const normalizedPreferred = preferredBay === 1 || preferredBay === 2 ? preferredBay : undefined;
-    const targetBay = normalizedPreferred && (normalizedPreferred === 1 ? this.device.bay1 : this.device.bay2)
-      ? normalizedPreferred
-      : (this.device.bay1 ? 1 : this.device.bay2 ? 2 : 1);
-    if (this.areAllAvailableBaysAtIntensity(mappedIntensity)) {
       this.applyCurrentState();
-      if (this.platform.isDebugEnabled()) {
-        this.platform.log.debug(
-          `[Diffuser] Skipping duplicate intensity write for ${this.accessory.displayName}: ${mappedIntensity} (already active)`,
-        );
+    } catch (error) {
+      if (error instanceof this.platform.api.hap.HapStatusError) {
+        throw error;
       }
-      return;
+      this.platform.log.error(`Error setting RotationSpeed for ${this.accessory.displayName}:`, error);
+      // Fail soft for slider writes to avoid Home app "No Response" for transient intensity update errors.
+      this.applyCurrentState();
     }
-    const controller = this.device.controller || 'default';
-    const success = await this.setIntensityAcrossAvailableBays(targetBay, mappedIntensity, controller);
-    if (!success) {
-      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-    }
-    this.accessory.context.lastBay = targetBay;
-    this.pendingIntensityIntent = {
-      at: Date.now(),
-      ttlMs: 8000,
-      intensity: mappedIntensity,
-      bay: targetBay,
-    };
-    this.platform.log.info(
-      `${this.accessory.displayName} intensity set to ${mappedIntensity} ` +
-      `(${mappedIntensity === 30 ? 'subtle' : mappedIntensity === 50 ? 'medium' : 'strong'}).`,
-    );
-    this.applyCurrentState();
   }
 
   async setNightlightOn(value: CharacteristicValue) {
