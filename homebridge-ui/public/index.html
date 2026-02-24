@@ -261,6 +261,7 @@
 
       let credentialsVerified = false;
       let testedCredentialKey = '';
+      let initialCredentialKey = '';
 
       const getCredentialKey = () => `${els.username.value.trim()}\n${els.password.value}`;
       const hasCredentialInputs = () => els.username.value.trim().length > 0 && els.password.value.length > 0;
@@ -387,7 +388,8 @@
         applyThemeColorFromNativeSave();
         const hasRequired = els.username.value.trim().length > 0 && els.password.value.length > 0;
         const hasFreshTest = credentialsVerified && testedCredentialKey === getCredentialKey();
-        if (hasRequired && hasFreshTest) {
+        const credentialsUnchanged = initialCredentialKey === getCredentialKey();
+        if (hasRequired && (credentialsUnchanged || hasFreshTest)) {
           homebridge.enableSaveButton();
           setNativeSaveTooltip('');
         } else {
@@ -448,6 +450,7 @@
         els.password.value = current.password || '';
         els.forceNightlightOff.checked = !!current.forceNightlightOff;
         els.enableNightlightAccessory.checked = !!current.enableNightlightAccessory;
+        initialCredentialKey = getCredentialKey();
 
         setUiStatus('');
 

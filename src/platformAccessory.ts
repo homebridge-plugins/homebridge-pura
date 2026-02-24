@@ -22,6 +22,11 @@ export class PuraPlatformAccessory {
   private lastAutoAlternativeOffState: boolean | null = null;
   private nightlightWriteQueue: Promise<void> = Promise.resolve();
   private pendingNightlightActive?: boolean;
+  private pendingNightlightIntent?: {
+    at: number;
+    active: boolean;
+    level: number;
+  };
   private lastNightlightCommand?: {
     at: number;
     action: 'brightness' | 'on';
@@ -321,6 +326,11 @@ export class PuraPlatformAccessory {
         brightness: sentLevel,
         color,
       };
+      this.pendingNightlightIntent = {
+        at: Date.now(),
+        active,
+        level: sentLevel,
+      };
       this.recordNightlightCommand('on', active, brightnessPercent, sentLevel);
       this.applyNightlightState();
     });
@@ -367,6 +377,11 @@ export class PuraPlatformAccessory {
         brightness: apiLevel,
         color,
       };
+      this.pendingNightlightIntent = {
+        at: Date.now(),
+        active,
+        level: apiLevel,
+      };
       this.recordNightlightCommand('brightness', active, brightnessPercent, apiLevel);
       this.applyNightlightState();
     });
@@ -386,22 +401,23 @@ export class PuraPlatformAccessory {
   }
 
   updateDevice(device: PuraDevice) {
+    const stabilizedDevice = this.stabilizeNightlightDuringIntentWindow(device);
     const previousNightlight = this.device.nightlight;
     const previousOnline = this.normalizeOnlineState(this.device.online);
-    const nextOnline = this.normalizeOnlineState(device.online);
+    const nextOnline = this.normalizeOnlineState(stabilizedDevice.online);
     this.logOnlineStateTransition(previousOnline, nextOnline);
-    this.device = device;
-    if (typeof device.nightlight?.active === 'boolean') {
-      this.pendingNightlightActive = device.nightlight.active;
+    this.device = stabilizedDevice;
+    if (typeof stabilizedDevice.nightlight?.active === 'boolean') {
+      this.pendingNightlightActive = stabilizedDevice.nightlight.active;
     }
     this.logInferredOfflineTransition();
-    this.logRecommendationHints(device);
-    this.accessory.context.device = device;
+    this.logRecommendationHints(stabilizedDevice);
+    this.accessory.context.device = stabilizedDevice;
     this.updateAccessoryInformation();
     if (this.platform.isDebugEnabled()) {
-      this.platform.log.debug('Device snapshot:', this.summarizeDevice(device));
+      this.platform.log.debug('Device snapshot:', this.summarizeDevice(stabilizedDevice));
     }
-    this.logNightlightProfileRoundTrip(previousNightlight, device.nightlight);
+    this.logNightlightProfileRoundTrip(previousNightlight, stabilizedDevice.nightlight);
     this.updateCurrentState();
     void this.maybeForceNightlightOff();
   }
@@ -813,6 +829,47 @@ export class PuraPlatformAccessory {
       () => undefined,
     );
     await run;
+  }
+
+  private stabilizeNightlightDuringIntentWindow(device: PuraDevice): PuraDevice {
+    if (!this.pendingNightlightIntent) {
+      return device;
+    }
+    const ageMs = Date.now() - this.pendingNightlightIntent.at;
+    if (ageMs > 5000) {
+      this.pendingNightlightIntent = undefined;
+      return device;
+    }
+    if (!device.nightlight) {
+      return device;
+    }
+
+    const intent = this.pendingNightlightIntent;
+    const incomingLevel = this.normalizeNightlightLevel(device.nightlight.brightness);
+    const incomingActive = Boolean(device.nightlight.active);
+    const matchesIntent = incomingActive === intent.active && incomingLevel === intent.level;
+    if (matchesIntent) {
+      this.pendingNightlightIntent = undefined;
+      return device;
+    }
+
+    if (this.platform.isDebugEnabled()) {
+      this.platform.log.debug(
+        `[Nightlight] Ignoring stale cloud snapshot for ${this.accessory.displayName}: ` +
+        `incoming(active=${incomingActive}, level=${incomingLevel ?? 'unknown'}) ` +
+        `expected(active=${intent.active}, level=${intent.level}) ageMs=${ageMs}`,
+      );
+    }
+
+    return {
+      ...device,
+      nightlight: {
+        ...device.nightlight,
+        active: intent.active,
+        brightness: intent.level,
+        color: device.nightlight.color ?? this.device.nightlight?.color ?? 'ffffff',
+      },
+    };
   }
 
   private logNightlightProfileRoundTrip(previous?: PuraDevice['nightlight'], next?: PuraDevice['nightlight']) {
