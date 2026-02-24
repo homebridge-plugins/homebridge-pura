@@ -49,6 +49,12 @@ export class PuraPlatformAccessory {
     intensity: number;
     bay?: 1 | 2;
   };
+  private pendingPowerOnIntensityIntent?: {
+    at: number;
+    ttlMs: number;
+    intensity: number;
+  };
+  private lastSetOnCommandAt?: number;
 
   constructor(
     private readonly platform: PuraPlatform,
@@ -346,6 +352,7 @@ export class PuraPlatformAccessory {
     const isOn = this.useFanService
       ? value === this.platform.Characteristic.Active.ACTIVE
       : Boolean(value);
+    this.lastSetOnCommandAt = Date.now();
     this.platform.log.debug(`Set Characteristic Active for ${this.accessory.displayName} ->`, value);
     this.platform.recordIntent(this.device.id, isOn);
 
@@ -380,7 +387,7 @@ export class PuraPlatformAccessory {
           ? this.accessory.context.lastIntensity
           : undefined;
         const defaultIntensity = this.useFanService ? 50 : 60;
-        const intensity = Math.max(1, Math.min(100, candidateIntensity ?? preferredIntensity ?? defaultIntensity));
+        const fallbackIntensity = Math.max(1, Math.min(100, candidateIntensity ?? preferredIntensity ?? defaultIntensity));
         if (noScentVialsDetected || deviceUnavailable) {
           this.enforceOffVisualState();
           this.updateFaultState();
@@ -400,6 +407,8 @@ export class PuraPlatformAccessory {
         await this.puraApi.stopAll(this.device.id);
         await this.puraApi.setAwayMode(this.device.id, false);
         const alwaysOn = await this.puraApi.setAlwaysOn(this.device.id, targetBay);
+        const requestedPowerOnIntensity = this.getPendingPowerOnIntensityIntentValue();
+        const intensity = Math.max(1, Math.min(100, requestedPowerOnIntensity ?? fallbackIntensity));
         const controller = this.device.controller || 'default';
         const success = alwaysOn && await this.setIntensityAcrossAvailableBays(targetBay, intensity, controller);
         if (success) {
@@ -424,6 +433,7 @@ export class PuraPlatformAccessory {
         }
       } else {
         this.pendingIntensityIntent = undefined;
+        this.pendingPowerOnIntensityIntent = undefined;
         if (this.isDeviceUnavailable()) {
           this.enforceOffVisualState();
           this.updateFaultState();
@@ -488,6 +498,29 @@ export class PuraPlatformAccessory {
       const speed = Math.max(0, Math.min(100, Number(value) || 0));
       const mappedIntensity = this.mapRotationToIntensity(speed);
       const snappedSpeed = mappedIntensity <= 0 ? 0 : this.mapIntensityToRotation(mappedIntensity);
+      const onCommandAgeMs = this.lastSetOnCommandAt ? Date.now() - this.lastSetOnCommandAt : undefined;
+      const isLikelyHomeImplicitOnSpeed = !this.currentStateActive
+        && speed === 100
+        && onCommandAgeMs !== undefined
+        && onCommandAgeMs >= 0
+        && onCommandAgeMs <= 1500;
+      if (isLikelyHomeImplicitOnSpeed) {
+        if (this.platform.isDebugEnabled()) {
+          this.platform.log.debug(
+            `[Diffuser] Ignoring implicit power-on RotationSpeed=100 for ${this.accessory.displayName} ` +
+            `(ageMs=${onCommandAgeMs}). Keeping cached intensity.`,
+          );
+        }
+        this.applyCurrentState();
+        return;
+      }
+      if (mappedIntensity > 0) {
+        this.pendingPowerOnIntensityIntent = {
+          at: Date.now(),
+          ttlMs: 12000,
+          intensity: mappedIntensity,
+        };
+      }
       if (this.platform.isDebugEnabled()) {
         this.platform.log.debug(
           `[Diffuser] Set RotationSpeed for ${this.accessory.displayName}: ` +
@@ -1379,6 +1412,18 @@ export class PuraPlatformAccessory {
       return undefined;
     }
     return this.pendingIntensityIntent.intensity;
+  }
+
+  private getPendingPowerOnIntensityIntentValue(): number | undefined {
+    if (!this.pendingPowerOnIntensityIntent) {
+      return undefined;
+    }
+    const ageMs = Date.now() - this.pendingPowerOnIntensityIntent.at;
+    if (ageMs > this.pendingPowerOnIntensityIntent.ttlMs) {
+      this.pendingPowerOnIntensityIntent = undefined;
+      return undefined;
+    }
+    return this.pendingPowerOnIntensityIntent.intensity;
   }
 
   private stabilizeIntensityDuringIntentWindow(device: PuraDevice): PuraDevice {
