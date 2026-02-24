@@ -26,6 +26,7 @@ export class PuraPlatformAccessory {
     at: number;
     active: boolean;
     level: number;
+    color: string;
   };
   private lastNightlightCommand?: {
     at: number;
@@ -113,6 +114,12 @@ export class PuraPlatformAccessory {
       .setProps({ minStep: 10 })
       .onSet(this.setNightlightBrightness.bind(this))
       .onGet(this.getNightlightBrightness.bind(this));
+    this.nightlightService.getCharacteristic(this.platform.Characteristic.Hue)
+      .onSet(this.setNightlightHue.bind(this))
+      .onGet(this.getNightlightHue.bind(this));
+    this.nightlightService.getCharacteristic(this.platform.Characteristic.Saturation)
+      .onSet(this.setNightlightSaturation.bind(this))
+      .onGet(this.getNightlightSaturation.bind(this));
   }
 
   private updateCurrentState() {
@@ -308,7 +315,7 @@ export class PuraPlatformAccessory {
       const brightnessPercent = this.nightlightLevelToPercent(currentRawBrightness ?? 10);
       const sentLevel = this.percentToNightlightLevel(brightnessPercent);
       const controller = this.device.controller || 'default';
-      const color = this.device.nightlight?.color ?? 'ffffff';
+      const color = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
       this.pendingNightlightActive = active;
 
       this.platform.log.debug(
@@ -330,6 +337,7 @@ export class PuraPlatformAccessory {
         at: Date.now(),
         active,
         level: sentLevel,
+        color,
       };
       this.recordNightlightCommand('on', active, brightnessPercent, sentLevel);
       this.applyNightlightState();
@@ -360,7 +368,7 @@ export class PuraPlatformAccessory {
       const apiLevel = this.percentToNightlightLevel(brightnessPercent);
       const active = this.pendingNightlightActive ?? Boolean(this.device.nightlight?.active);
       const controller = this.device.controller || 'default';
-      const color = this.device.nightlight?.color ?? 'ffffff';
+      const color = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
 
       this.platform.log.debug(
         `[Nightlight] Set Brightness for ${this.accessory.displayName} -> ${brightnessPercent}% ` +
@@ -381,6 +389,7 @@ export class PuraPlatformAccessory {
         at: Date.now(),
         active,
         level: apiLevel,
+        color,
       };
       this.recordNightlightCommand('brightness', active, brightnessPercent, apiLevel);
       this.applyNightlightState();
@@ -398,6 +407,62 @@ export class PuraPlatformAccessory {
       `(raw=${this.device.nightlight?.brightness ?? 'unknown'})`,
     );
     return brightness;
+  }
+
+  async setNightlightHue(value: CharacteristicValue) {
+    if (!this.nightlightService || !this.supportsNightlightControl()) {
+      return;
+    }
+    if (this.isDeviceUnavailable()) {
+      this.updateFaultState();
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+
+    await this.enqueueNightlightWrite(async () => {
+      const hue = Math.max(0, Math.min(360, Number(value) || 0));
+      const currentColor = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
+      const currentHsv = this.hexToHsv(currentColor);
+      const nextColor = this.hsvToHex(hue, currentHsv.s);
+      await this.applyNightlightColor(nextColor, 'hue', hue, currentHsv.s);
+    });
+  }
+
+  async getNightlightHue(): Promise<CharacteristicValue> {
+    if (this.isDeviceUnavailable()) {
+      this.updateFaultState();
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+    const color = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
+    const hsv = this.hexToHsv(color);
+    return hsv.h;
+  }
+
+  async setNightlightSaturation(value: CharacteristicValue) {
+    if (!this.nightlightService || !this.supportsNightlightControl()) {
+      return;
+    }
+    if (this.isDeviceUnavailable()) {
+      this.updateFaultState();
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+
+    await this.enqueueNightlightWrite(async () => {
+      const saturation = Math.max(0, Math.min(100, Number(value) || 0));
+      const currentColor = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
+      const currentHsv = this.hexToHsv(currentColor);
+      const nextColor = this.hsvToHex(currentHsv.h, saturation);
+      await this.applyNightlightColor(nextColor, 'saturation', currentHsv.h, saturation);
+    });
+  }
+
+  async getNightlightSaturation(): Promise<CharacteristicValue> {
+    if (this.isDeviceUnavailable()) {
+      this.updateFaultState();
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+    const color = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
+    const hsv = this.hexToHsv(color);
+    return hsv.s;
   }
 
   updateDevice(device: PuraDevice) {
@@ -779,8 +844,12 @@ export class PuraPlatformAccessory {
     }
     const isOn = Boolean(this.device.nightlight?.active);
     const brightness = this.nightlightLevelToPercent(this.device.nightlight?.brightness);
+    const color = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
+    const hsv = this.hexToHsv(color);
     this.nightlightService.updateCharacteristic(this.platform.Characteristic.On, isOn);
     this.nightlightService.updateCharacteristic(this.platform.Characteristic.Brightness, brightness);
+    this.nightlightService.updateCharacteristic(this.platform.Characteristic.Hue, hsv.h);
+    this.nightlightService.updateCharacteristic(this.platform.Characteristic.Saturation, hsv.s);
   }
 
   private normalizeNightlightLevel(level: unknown): number | undefined {
@@ -822,6 +891,49 @@ export class PuraPlatformAccessory {
     };
   }
 
+  private async applyNightlightColor(
+    color: string,
+    action: 'hue' | 'saturation',
+    hue: number,
+    saturation: number,
+  ) {
+    const normalizedColor = this.normalizeNightlightColor(color);
+    const apiLevel = this.normalizeNightlightLevel(this.device.nightlight?.brightness) ?? 10;
+    const brightnessPercent = this.nightlightLevelToPercent(apiLevel);
+    const active = this.pendingNightlightActive ?? Boolean(this.device.nightlight?.active);
+    const controller = this.device.controller || 'default';
+
+    this.platform.log.debug(
+      `[Nightlight] Set ${action} for ${this.accessory.displayName} -> ` +
+      `h=${Math.round(hue)} s=${Math.round(saturation)} color=${normalizedColor} ` +
+      `(active=${active}, level=${apiLevel})`,
+    );
+
+    const success = await this.puraApi.setNightlight(
+      this.device.id,
+      active,
+      brightnessPercent,
+      normalizedColor,
+      controller,
+    );
+    if (!success) {
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+
+    this.device.nightlight = {
+      active,
+      brightness: apiLevel,
+      color: normalizedColor,
+    };
+    this.pendingNightlightIntent = {
+      at: Date.now(),
+      active,
+      level: apiLevel,
+      color: normalizedColor,
+    };
+    this.applyNightlightState();
+  }
+
   private async enqueueNightlightWrite(task: () => Promise<void>): Promise<void> {
     const run = this.nightlightWriteQueue.then(task, task);
     this.nightlightWriteQueue = run.then(
@@ -847,7 +959,10 @@ export class PuraPlatformAccessory {
     const intent = this.pendingNightlightIntent;
     const incomingLevel = this.normalizeNightlightLevel(device.nightlight.brightness);
     const incomingActive = Boolean(device.nightlight.active);
-    const matchesIntent = incomingActive === intent.active && incomingLevel === intent.level;
+    const incomingColor = this.normalizeNightlightColor(device.nightlight.color);
+    const matchesIntent = incomingActive === intent.active
+      && incomingLevel === intent.level
+      && incomingColor === intent.color;
     if (matchesIntent) {
       this.pendingNightlightIntent = undefined;
       return device;
@@ -857,7 +972,7 @@ export class PuraPlatformAccessory {
       this.platform.log.debug(
         `[Nightlight] Ignoring stale cloud snapshot for ${this.accessory.displayName}: ` +
         `incoming(active=${incomingActive}, level=${incomingLevel ?? 'unknown'}) ` +
-        `expected(active=${intent.active}, level=${intent.level}) ageMs=${ageMs}`,
+        `expected(active=${intent.active}, level=${intent.level}, color=${intent.color}) ageMs=${ageMs}`,
       );
     }
 
@@ -867,9 +982,87 @@ export class PuraPlatformAccessory {
         ...device.nightlight,
         active: intent.active,
         brightness: intent.level,
-        color: device.nightlight.color ?? this.device.nightlight?.color ?? 'ffffff',
+        color: intent.color,
       },
     };
+  }
+
+  private normalizeNightlightColor(color: unknown): string {
+    if (typeof color !== 'string') {
+      return 'ffffff';
+    }
+    const normalized = color.replace('#', '').trim().toLowerCase();
+    if (/^[0-9a-f]{6}$/.test(normalized)) {
+      return normalized;
+    }
+    return 'ffffff';
+  }
+
+  private hexToHsv(hex: string): { h: number; s: number } {
+    const normalized = this.normalizeNightlightColor(hex);
+    const r = parseInt(normalized.slice(0, 2), 16) / 255;
+    const g = parseInt(normalized.slice(2, 4), 16) / 255;
+    const b = parseInt(normalized.slice(4, 6), 16) / 255;
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const delta = max - min;
+
+    let h = 0;
+    if (delta !== 0) {
+      if (max === r) {
+        h = 60 * (((g - b) / delta) % 6);
+      } else if (max === g) {
+        h = 60 * (((b - r) / delta) + 2);
+      } else {
+        h = 60 * (((r - g) / delta) + 4);
+      }
+    }
+    if (h < 0) {
+      h += 360;
+    }
+    const s = max === 0 ? 0 : (delta / max) * 100;
+    return {
+      h: Math.round(h),
+      s: Math.round(s),
+    };
+  }
+
+  private hsvToHex(h: number, s: number): string {
+    const hue = ((Number(h) % 360) + 360) % 360;
+    const sat = Math.max(0, Math.min(100, Number(s) || 0)) / 100;
+    const c = sat;
+    const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
+    const m = 1 - c;
+
+    let rPrime = 0;
+    let gPrime = 0;
+    let bPrime = 0;
+    if (hue < 60) {
+      rPrime = c;
+      gPrime = x;
+    } else if (hue < 120) {
+      rPrime = x;
+      gPrime = c;
+    } else if (hue < 180) {
+      gPrime = c;
+      bPrime = x;
+    } else if (hue < 240) {
+      gPrime = x;
+      bPrime = c;
+    } else if (hue < 300) {
+      rPrime = x;
+      bPrime = c;
+    } else {
+      rPrime = c;
+      bPrime = x;
+    }
+
+    const r = Math.round((rPrime + m) * 255);
+    const g = Math.round((gPrime + m) * 255);
+    const b = Math.round((bPrime + m) * 255);
+    return [r, g, b]
+      .map((value) => value.toString(16).padStart(2, '0'))
+      .join('');
   }
 
   private logNightlightProfileRoundTrip(previous?: PuraDevice['nightlight'], next?: PuraDevice['nightlight']) {
