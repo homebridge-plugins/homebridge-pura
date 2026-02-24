@@ -49,8 +49,8 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   private webhookReceived = false;
   private intentWindowMs = 8000;
   private lastIntentAt: Map<string, { state: boolean; at: number }> = new Map();
-  private lastNightlightInteraction?: { deviceId: string; at: number };
-  private readonly crossDeviceNightlightOffGuardMs = 8000;
+  private readonly lastNightlightInteractionAtByDevice = new Map<string, number>();
+  private readonly sameDeviceNightlightOffGuardMs = 3500;
   private realtimeSocket: WebSocket | null = null;
   private realtimeReconnectTimer: NodeJS.Timeout | null = null;
   private realtimeFailures = 0;
@@ -838,23 +838,20 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   }
 
   recordNightlightInteraction(deviceId: string) {
-    this.lastNightlightInteraction = { deviceId, at: Date.now() };
+    this.lastNightlightInteractionAtByDevice.set(deviceId, Date.now());
   }
 
-  getRecentCrossDeviceNightlightInteraction(deviceId: string): { deviceId: string; ageMs: number } | undefined {
-    const recent = this.lastNightlightInteraction;
-    if (!recent) {
+  getRecentNightlightInteraction(deviceId: string): { ageMs: number } | undefined {
+    const recentAt = this.lastNightlightInteractionAtByDevice.get(deviceId);
+    if (recentAt === undefined) {
       return undefined;
     }
-    if (recent.deviceId === deviceId) {
-      return undefined;
-    }
-    const ageMs = Date.now() - recent.at;
-    if (ageMs < 0 || ageMs > this.crossDeviceNightlightOffGuardMs) {
+    const ageMs = Date.now() - recentAt;
+    if (ageMs < 0 || ageMs > this.sameDeviceNightlightOffGuardMs) {
+      this.lastNightlightInteractionAtByDevice.delete(deviceId);
       return undefined;
     }
     return {
-      deviceId: recent.deviceId,
       ageMs,
     };
   }

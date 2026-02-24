@@ -1383,12 +1383,11 @@ export class PuraPlatformAccessory {
     if (!this.currentStateActive) {
       return false;
     }
-    const recentCrossDeviceNightlight = this.platform.getRecentCrossDeviceNightlightInteraction(this.device.id);
-    if (recentCrossDeviceNightlight) {
+    const recentNightlightInteraction = this.platform.getRecentNightlightInteraction(this.device.id);
+    if (recentNightlightInteraction) {
       this.platform.log.warn(
         `[Diffuser] Suppressing OFF command for ${this.accessory.displayName} ` +
-        `(origin=${origin}, recentNightlightDevice=${recentCrossDeviceNightlight.deviceId}, ` +
-        `ageMs=${recentCrossDeviceNightlight.ageMs}).`,
+        `(origin=${origin}, recentNightlightAgeMs=${recentNightlightInteraction.ageMs}).`,
       );
       return true;
     }
