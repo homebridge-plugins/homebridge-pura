@@ -1798,7 +1798,7 @@ export class PuraPlatformAccessory {
 
   private getActiveBayFromActiveAt(bay1?: PuraBay, bay2?: PuraBay): PuraBay | undefined {
     const nowSec = Math.floor(Date.now() / 1000);
-    const windowSec = 15 * 60; // treat as active if activeAt is within the last 15 minutes
+    const windowSec = 6 * 60 * 60; // treat as active if activeAt is within the last 6 hours
     const chooseIntensity = (): number => {
       const cached = Number(this.accessory.context.lastIntensity);
       if (Number.isFinite(cached) && cached > 0) {
