@@ -318,7 +318,8 @@ export class PuraPlatformAccessory {
     }
 
     if (secondaryBays.length > 0) {
-      await this.syncSecondaryBayIntensities(secondaryBays, intensity, controller);
+      // Do not block the primary command path on secondary bay sync; this keeps HomeKit writes responsive.
+      void this.syncSecondaryBayIntensities(secondaryBays, intensity, controller);
     }
 
     return true;
@@ -607,7 +608,14 @@ export class PuraPlatformAccessory {
           }
           return;
         }
-        if (!this.currentStateActive) {
+        const allowWhileInactive = this.shouldAllowRotationWriteWhileInactive(onCommandAgeMs);
+        if (!allowWhileInactive) {
+          if (this.platform.isDebugEnabled()) {
+            this.platform.log.debug(
+              `[Diffuser] Ignoring RotationSpeed write for ${this.accessory.displayName} while inactive ` +
+              `(raw=${value}, snapped=${snappedSpeed}, onAgeMs=${onCommandAgeMs ?? 'n/a'}).`,
+            );
+          }
           return;
         }
         this.accessory.context.lastIntensity = mappedIntensity;
@@ -633,6 +641,21 @@ export class PuraPlatformAccessory {
         const targetBay = normalizedPreferred && (normalizedPreferred === 1 ? this.device.bay1 : this.device.bay2)
           ? normalizedPreferred
           : (this.device.bay1 ? 1 : this.device.bay2 ? 2 : 1);
+        if (!this.currentStateActive) {
+          // Stale cloud snapshots can temporarily mark the diffuser inactive even while HomeKit is actively controlling it.
+          // Re-assert Always On before applying intensity to avoid dropped writes and slider bounce.
+          this.platform.recordIntent(this.device.id, true);
+          await this.puraApi.setAwayMode(this.device.id, false);
+          const alwaysOn = await this.puraApi.setAlwaysOn(this.device.id, targetBay);
+          if (!alwaysOn) {
+            this.platform.log.warn(
+              `${this.accessory.displayName} could not be re-armed while setting intensity; preserving current state.`,
+            );
+            this.applyCurrentState();
+            return;
+          }
+          this.currentStateActive = true;
+        }
         if (this.areAllAvailableBaysAtIntensity(mappedIntensity)) {
           this.applyCurrentState();
           if (this.platform.isDebugEnabled()) {
@@ -1283,6 +1306,35 @@ export class PuraPlatformAccessory {
         : this.platform.Characteristic.Active.INACTIVE;
     }
     return this.currentStateActive;
+  }
+
+  private isHomeKitShowingActive(): boolean {
+    const activeCharacteristic = this.useFanService
+      ? this.platform.Characteristic.Active
+      : this.platform.Characteristic.On;
+    const currentValue = this.service.getCharacteristic(activeCharacteristic).value;
+    if (this.useFanService) {
+      return currentValue === this.platform.Characteristic.Active.ACTIVE
+        || currentValue === 1
+        || currentValue === true;
+    }
+    return Boolean(currentValue);
+  }
+
+  private shouldAllowRotationWriteWhileInactive(onCommandAgeMs?: number): boolean {
+    if (this.currentStateActive) {
+      return true;
+    }
+    if (this.isHomeKitShowingActive()) {
+      return true;
+    }
+    if (this.getPendingPowerOnIntensityIntentValue() !== undefined) {
+      return true;
+    }
+    if (this.getPendingIntensityIntentValue() !== undefined) {
+      return true;
+    }
+    return onCommandAgeMs !== undefined && onCommandAgeMs >= 0 && onCommandAgeMs <= 15000;
   }
 
   private applyCurrentState() {
