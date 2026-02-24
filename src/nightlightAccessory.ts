@@ -8,6 +8,21 @@ export class PuraNightlightAccessory {
   private service: Service;
   private device: PuraDevice;
   private writeQueue: Promise<void> = Promise.resolve();
+  private pendingNightlightIntent?: {
+    at: number;
+    ttlMs: number;
+    active: boolean;
+    level: number;
+    color: string;
+  };
+  private recentNightlightHold?: { until: number; level: number };
+  private lastNightlightApiWrite?: {
+    at: number;
+    active: boolean;
+    level: number;
+    color: string;
+    reason: 'on' | 'brightness' | 'color';
+  };
 
   constructor(
     private readonly platform: PuraPlatform,
@@ -55,8 +70,9 @@ export class PuraNightlightAccessory {
   }
 
   updateDevice(device: PuraDevice) {
-    this.device = device;
-    this.accessory.context.device = device;
+    const stabilized = this.clampNightlightDuringHold(this.stabilizeNightlightDuringIntentWindow(device));
+    this.device = stabilized;
+    this.accessory.context.device = stabilized;
     this.applyNightlightState();
   }
 
@@ -212,6 +228,15 @@ export class PuraNightlightAccessory {
             `(level=${sentLevel}, color=${color}).`,
           );
         }
+        this.pendingNightlightIntent = {
+          at: Date.now(),
+          ttlMs: active ? 20000 : 15000,
+          active,
+          level: sentLevel,
+          color,
+        };
+        this.recentNightlightHold = active ? { until: Date.now() + 20000, level: sentLevel } : undefined;
+        this.logNightlightToggle(active, brightnessPercent);
         this.applyNightlightState();
         return;
       }
@@ -226,6 +251,16 @@ export class PuraNightlightAccessory {
         throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
       }
       this.device.nightlight = { active, brightness: sentLevel, color };
+      this.recentNightlightHold = active ? { until: Date.now() + 20000, level: sentLevel } : undefined;
+      this.pendingNightlightIntent = {
+        at: Date.now(),
+        ttlMs: active ? 20000 : 15000,
+        active,
+        level: sentLevel,
+        color,
+      };
+      this.lastNightlightApiWrite = { at: Date.now(), active, level: sentLevel, color, reason: 'on' };
+      this.logNightlightToggle(active, brightnessPercent);
       this.applyNightlightState();
     });
   }
@@ -263,6 +298,15 @@ export class PuraNightlightAccessory {
             `(level=${level}, active=${active}).`,
           );
         }
+        this.pendingNightlightIntent = {
+          at: Date.now(),
+          ttlMs: active ? 20000 : 15000,
+          active,
+          level,
+          color,
+        };
+        this.recentNightlightHold = active ? { until: Date.now() + 20000, level } : undefined;
+        this.logNightlightToggle(active, apiPercent);
         this.applyNightlightState();
         return;
       }
@@ -277,6 +321,16 @@ export class PuraNightlightAccessory {
         throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
       }
       this.device.nightlight = { active, brightness: level, color };
+      this.recentNightlightHold = active ? { until: Date.now() + 20000, level } : undefined;
+      this.pendingNightlightIntent = {
+        at: Date.now(),
+        ttlMs: active ? 20000 : 15000,
+        active,
+        level,
+        color,
+      };
+      this.lastNightlightApiWrite = { at: Date.now(), active, level, color, reason: 'brightness' };
+      this.logNightlightToggle(active, apiPercent);
       this.applyNightlightState();
     });
   }
@@ -365,6 +419,97 @@ export class PuraNightlightAccessory {
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
     this.device.nightlight = { active, brightness: level, color: normalizedColor };
+    this.recentNightlightHold = active ? { until: Date.now() + 20000, level } : undefined;
+    this.pendingNightlightIntent = {
+      at: Date.now(),
+      ttlMs: 20000,
+      active,
+      level,
+      color: normalizedColor,
+    };
+    this.lastNightlightApiWrite = { at: Date.now(), active, level, color: normalizedColor, reason: 'color' };
+    this.logNightlightToggle(active, this.nightlightLevelToPercent(level));
     this.applyNightlightState();
+  }
+
+  private stabilizeNightlightDuringIntentWindow(device: PuraDevice): PuraDevice {
+    if (!this.pendingNightlightIntent) {
+      return device;
+    }
+    const ageMs = Date.now() - this.pendingNightlightIntent.at;
+    if (ageMs > this.pendingNightlightIntent.ttlMs) {
+      this.pendingNightlightIntent = undefined;
+      return device;
+    }
+    if (!device.nightlight) {
+      return device;
+    }
+    const intent = this.pendingNightlightIntent;
+    const incomingLevel = this.normalizeNightlightLevel(device.nightlight.brightness);
+    const incomingActive = Boolean(device.nightlight.active);
+    const incomingColor = this.normalizeNightlightColor(device.nightlight.color);
+    const matchesIntent = incomingActive === intent.active
+      && incomingLevel === intent.level
+      && incomingColor === intent.color;
+    if (matchesIntent) {
+      return device;
+    }
+    if (this.platform.isDebugEnabled()) {
+      this.platform.log.debug(
+        `[Nightlight] Ignoring stale cloud snapshot for ${this.accessory.displayName}: ` +
+        `incoming(active=${incomingActive}, level=${incomingLevel ?? 'unknown'}) ` +
+        `expected(active=${intent.active}, level=${intent.level}, color=${intent.color}) ageMs=${ageMs}`,
+      );
+    }
+    return {
+      ...device,
+      nightlight: {
+        ...device.nightlight,
+        active: intent.active,
+        brightness: intent.level,
+        color: intent.color,
+      },
+    };
+  }
+
+  private clampNightlightDuringHold(device: PuraDevice): PuraDevice {
+    if (!this.recentNightlightHold) {
+      return device;
+    }
+    const now = Date.now();
+    if (now > this.recentNightlightHold.until) {
+      this.recentNightlightHold = undefined;
+      return device;
+    }
+    if (!device.nightlight || device.nightlight.active !== true) {
+      return device;
+    }
+    const incomingLevel = this.normalizeNightlightLevel(device.nightlight.brightness) ?? 1;
+    if (incomingLevel >= this.recentNightlightHold.level) {
+      return device;
+    }
+    if (this.platform.isDebugEnabled()) {
+      this.platform.log.debug(
+        `[Nightlight] Clamping brightness for ${this.accessory.displayName} during hold: ` +
+        `incoming=${incomingLevel} hold=${this.recentNightlightHold.level}`,
+      );
+    }
+    return {
+      ...device,
+      nightlight: {
+        ...device.nightlight,
+        brightness: this.recentNightlightHold.level,
+      },
+    };
+  }
+
+  private logNightlightToggle(active: boolean, brightnessPercent: number) {
+    if (active) {
+      this.platform.log.info(
+        `${this.accessory.displayName} nightlight turned on (${Math.round(brightnessPercent)}% brightness).`,
+      );
+    } else {
+      this.platform.log.info(`${this.accessory.displayName} nightlight turned off.`);
+    }
   }
 }
