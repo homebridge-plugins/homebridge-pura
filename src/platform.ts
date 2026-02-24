@@ -12,6 +12,7 @@ type DiffuserAccessory = PlatformAccessory & {
   context: {
     device: PuraDevice;
     accessoryType?: 'diffuser' | 'nightlight';
+    serviceMode?: 'switch' | 'fan';
   };
   handler?: PuraPlatformAccessory | PuraNightlightAccessory;
 };
@@ -304,25 +305,51 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     return uuids;
   }
 
+  private getDiffuserServiceMode(): 'switch' | 'fan' {
+    const fanEnabled = Boolean(
+      this.puraConfig.enableFanService ?? this.puraConfig.useFanService,
+    );
+    return fanEnabled ? 'fan' : 'switch';
+  }
+
+  private getDiffuserUniqueId(deviceId: string, serviceMode = this.getDiffuserServiceMode()): string {
+    return `${deviceId}-diffuser-${serviceMode}`;
+  }
+
+  private getLegacyDiffuserUniqueId(deviceId: string): string {
+    return `${deviceId}-diffuser`;
+  }
+
   private async registerDiffuserAccessory(device: PuraDevice): Promise<string> {
     const deviceName = device.name || `Pura ${device.id}`;
     const baseName = deviceName.endsWith('Diffuser') ? deviceName : `${deviceName} Diffuser`;
     const accessoryName = baseName;
-    const uniqueId = `${device.id}-diffuser`;
+    const serviceMode = this.getDiffuserServiceMode();
+    const uniqueId = this.getDiffuserUniqueId(device.id, serviceMode);
     const uuid = this.api.hap.uuid.generate(uniqueId);
+    const legacyUuid = this.api.hap.uuid.generate(this.getLegacyDiffuserUniqueId(device.id));
+    const alternateMode = serviceMode === 'fan' ? 'switch' : 'fan';
+    const alternateUuid = this.api.hap.uuid.generate(this.getDiffuserUniqueId(device.id, alternateMode));
 
     const existingAccessory = this.accessories.get(uuid) as DiffuserAccessory | undefined;
     if (existingAccessory) {
       this.log.info('Restoring existing accessory from cache:', existingAccessory.displayName);
       existingAccessory.context.device = device;
       existingAccessory.context.accessoryType = 'diffuser';
+      existingAccessory.context.serviceMode = serviceMode;
       this.api.updatePlatformAccessories([existingAccessory]);
       existingAccessory.handler = new PuraPlatformAccessory(this, existingAccessory, this.puraApi);
     } else {
+      if (this.accessories.has(legacyUuid) || this.accessories.has(alternateUuid)) {
+        this.log.info(
+          `Migrating ${accessoryName} to ${serviceMode} service mode; replacing cached diffuser accessory.`,
+        );
+      }
       this.log.info('Adding new accessory:', accessoryName);
       const accessory = new this.api.platformAccessory(accessoryName, uuid) as DiffuserAccessory;
       accessory.context.device = device;
       accessory.context.accessoryType = 'diffuser';
+      accessory.context.serviceMode = serviceMode;
       accessory.handler = new PuraPlatformAccessory(this, accessory, this.puraApi);
       this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
       this.accessories.set(uuid, accessory);
@@ -402,7 +429,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     }
     const discoveredUuids = new Set<string>();
     for (const device of devices) {
-      const diffuserUuid = this.api.hap.uuid.generate(`${device.id}-diffuser`);
+      const diffuserUuid = this.api.hap.uuid.generate(this.getDiffuserUniqueId(device.id));
       discoveredUuids.add(diffuserUuid);
       if ((this.puraConfig.enableNightlightAccessory ?? false) && this.supportsNightlightAccessory(device)) {
         const nightlightUuid = this.api.hap.uuid.generate(`${device.id}-nightlight`);
@@ -921,9 +948,13 @@ export class PuraPlatform implements DynamicPlatformPlugin {
    * Update a device accessory with fresh device data
    */
   private async updateDiffuserAccessory(device: PuraDevice) {
-    const uniqueId = `${device.id}-diffuser`;
+    const uniqueId = this.getDiffuserUniqueId(device.id);
     const uuid = this.api.hap.uuid.generate(uniqueId);
-    const accessory = this.accessories.get(uuid) as DiffuserAccessory | undefined;
+    let accessory = this.accessories.get(uuid) as DiffuserAccessory | undefined;
+    if (!accessory) {
+      const legacyUuid = this.api.hap.uuid.generate(this.getLegacyDiffuserUniqueId(device.id));
+      accessory = this.accessories.get(legacyUuid) as DiffuserAccessory | undefined;
+    }
 
     if (accessory) {
       const intent = this.lastIntentAt.get(device.id);
