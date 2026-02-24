@@ -198,6 +198,14 @@
         </div>
 
         <div class="form-check form-switch ms-1 mb-4">
+          <input class="form-check-input" id="enableFanService" type="checkbox" role="switch" aria-describedby="fanServiceHelp" />
+          <label class="form-check-label" for="enableFanService">Enable Intensity Control</label>
+          <div id="fanServiceHelp" class="form-text">
+            Replaces the on/off switch with intensity control (Subtle, Medium, Strong). Changing this may require recreating HomeKit scenes or automations for all Pura diffusers in this plugin.
+          </div>
+        </div>
+
+        <div class="form-check form-switch ms-1 mb-4">
           <input class="form-check-input" id="enableNightlightAccessory" type="checkbox" role="switch" aria-describedby="nightlightAccessoryHelp" />
           <label class="form-check-label" for="enableNightlightAccessory">Enable Nightlight Controls</label>
           <div id="nightlightAccessoryHelp" class="form-text">
@@ -253,6 +261,7 @@
         password: document.getElementById('password'),
         passwordToggle: document.getElementById('passwordToggle'),
         forceNightlightOff: document.getElementById('forceNightlightOff'),
+        enableFanService: document.getElementById('enableFanService'),
         enableNightlightAccessory: document.getElementById('enableNightlightAccessory'),
         testBtn: document.getElementById('testBtn'),
         testHint: document.getElementById('testHint'),
@@ -407,6 +416,7 @@
           username: '',
           password: '',
           forceNightlightOff: false,
+          enableFanService: false,
           enableNightlightAccessory: false,
         };
       };
@@ -418,6 +428,7 @@
           username: els.username.value.trim(),
           password: els.password.value,
           forceNightlightOff: !!els.forceNightlightOff.checked,
+          enableFanService: !!els.enableFanService.checked,
           enableNightlightAccessory: !!els.enableNightlightAccessory.checked,
         };
         await homebridge.updatePluginConfig([config]);
@@ -449,12 +460,13 @@
         els.username.value = current.username || '';
         els.password.value = current.password || '';
         els.forceNightlightOff.checked = !!current.forceNightlightOff;
+        els.enableFanService.checked = !!(current.enableFanService ?? current.useFanService);
         els.enableNightlightAccessory.checked = !!current.enableNightlightAccessory;
         initialCredentialKey = getCredentialKey();
 
         setUiStatus('');
 
-        for (const field of [els.name, els.forceNightlightOff, els.enableNightlightAccessory]) {
+        for (const field of [els.name, els.forceNightlightOff, els.enableFanService, els.enableNightlightAccessory]) {
           field.addEventListener('change', async () => {
             await syncConfig();
             homebridge.toast.info('Config updated. Click Save to write config.json.');

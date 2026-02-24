@@ -41,6 +41,12 @@
         "default": false,
         "description": "Pura turns the nightlight on/off with the diffuser. If enabled, the plugin will send a nightlight off command right after turning on a diffuser."
       },
+      "enableFanService": {
+        "title": "Enable Intensity Control",
+        "type": "boolean",
+        "default": false,
+        "description": "Replaces the on/off switch with intensity control (Subtle, Medium, Strong). Changing this may require recreating HomeKit scenes or automations for all Pura diffusers in this plugin."
+      },
       "enableNightlightAccessory": {
         "title": "Enable Nightlight Controls",
         "type": "boolean",

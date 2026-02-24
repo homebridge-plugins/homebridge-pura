@@ -8,6 +8,7 @@ export interface PuraConfig extends PlatformConfig {
   username: string;
   password: string;
   forceNightlightOff?: boolean;
+  enableFanService?: boolean;
   useFanService?: boolean;
   enableNightlightAccessory?: boolean;
 }

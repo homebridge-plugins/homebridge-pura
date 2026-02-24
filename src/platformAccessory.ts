@@ -71,7 +71,10 @@ export class PuraPlatformAccessory {
       }
     }
 
-    this.useFanService = Boolean((this.platform.config as PuraConfig).useFanService);
+    this.useFanService = Boolean(
+      (this.platform.config as PuraConfig).enableFanService ??
+      (this.platform.config as PuraConfig).useFanService,
+    );
     this.enableNightlightAccessory = Boolean((this.platform.config as PuraConfig).enableNightlightAccessory);
     const fanService = this.accessory.getService(this.platform.Service.Fanv2);
     const switchService = this.accessory.getService(this.platform.Service.Switch);
@@ -95,6 +98,12 @@ export class PuraPlatformAccessory {
     this.service.getCharacteristic(activeCharacteristic)
       .onSet(this.setOn.bind(this))
       .onGet(this.getOn.bind(this));
+    if (this.useFanService) {
+      this.service.getCharacteristic(this.platform.Characteristic.RotationSpeed)
+        .setProps({ minStep: 1 })
+        .onSet(this.setRotationSpeed.bind(this))
+        .onGet(this.getRotationSpeed.bind(this));
+    }
 
     this.configureNightlightService();
     this.updateCurrentState();
@@ -142,6 +151,41 @@ export class PuraPlatformAccessory {
     this.applyCurrentState();
     this.applyNightlightState();
     this.updateFaultState();
+  }
+
+  private mapRotationToIntensity(speed: number): number {
+    const clamped = Math.max(0, Math.min(100, Number(speed) || 0));
+    if (clamped <= 33) {
+      return 30;
+    }
+    if (clamped <= 66) {
+      return 50;
+    }
+    return 100;
+  }
+
+  private mapIntensityToRotation(intensity: number): number {
+    const clamped = Math.max(0, Math.min(100, Number(intensity) || 0));
+    if (clamped <= 40) {
+      return 30;
+    }
+    if (clamped <= 75) {
+      return 50;
+    }
+    return 100;
+  }
+
+  private getCurrentIntensityValue(): number {
+    const activeBay = this.getActiveBay();
+    const bayIntensity = activeBay?.intensity;
+    if (typeof bayIntensity === 'number' && Number.isFinite(bayIntensity) && bayIntensity > 0) {
+      return bayIntensity;
+    }
+    const cachedIntensity = Number(this.accessory.context.lastIntensity);
+    if (Number.isFinite(cachedIntensity) && cachedIntensity > 0) {
+      return cachedIntensity;
+    }
+    return this.useFanService ? 50 : 60;
   }
 
   private hasNoScentVialsDetected(): boolean {
@@ -235,7 +279,8 @@ export class PuraPlatformAccessory {
         const preferredIntensity = Number.isFinite(this.accessory.context.lastIntensity) && this.accessory.context.lastIntensity > 0
           ? this.accessory.context.lastIntensity
           : undefined;
-        const intensity = Math.max(1, Math.min(100, preferredIntensity ?? candidateIntensity ?? 60));
+        const defaultIntensity = this.useFanService ? 50 : 60;
+        const intensity = Math.max(1, Math.min(100, preferredIntensity ?? candidateIntensity ?? defaultIntensity));
         if (noScentVialsDetected || deviceUnavailable) {
           this.enforceOffVisualState();
           this.updateFaultState();
@@ -306,6 +351,62 @@ export class PuraPlatformAccessory {
     const isActive = this.getCurrentStateValue();
     this.platform.log.debug(`Get Characteristic Active for ${this.accessory.displayName} ->`, isActive);
     return isActive;
+  }
+
+  async getRotationSpeed(): Promise<CharacteristicValue> {
+    if (!this.useFanService) {
+      return 0;
+    }
+    if (this.isDeviceUnavailable()) {
+      this.updateFaultState();
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+    if (!this.currentStateActive) {
+      return 0;
+    }
+    return this.mapIntensityToRotation(this.getCurrentIntensityValue());
+  }
+
+  async setRotationSpeed(value: CharacteristicValue) {
+    if (!this.useFanService) {
+      return;
+    }
+    const speed = Math.max(0, Math.min(100, Number(value) || 0));
+    const mappedIntensity = this.mapRotationToIntensity(speed);
+    this.accessory.context.lastIntensity = mappedIntensity;
+    if (!this.currentStateActive || speed <= 0) {
+      this.applyCurrentState();
+      return;
+    }
+    if (this.isDeviceUnavailable()) {
+      this.updateFaultState();
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+    if (this.hasNoScentVialsDetected()) {
+      this.enforceOffVisualState();
+      this.updateFaultState();
+      this.platform.log.warn(
+        `${this.accessory.displayName} was turned on, but no scent vials were detected. ` +
+        'The accessory was turned off as a result.',
+      );
+      return;
+    }
+    const preferredBay = this.accessory.context.lastBay;
+    const normalizedPreferred = preferredBay === 1 || preferredBay === 2 ? preferredBay : undefined;
+    const targetBay = normalizedPreferred && (normalizedPreferred === 1 ? this.device.bay1 : this.device.bay2)
+      ? normalizedPreferred
+      : (this.device.bay1 ? 1 : this.device.bay2 ? 2 : 1);
+    const controller = this.device.controller || 'default';
+    const success = await this.puraApi.setIntensity(this.device.id, targetBay, mappedIntensity, controller);
+    if (!success) {
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+    this.accessory.context.lastBay = targetBay;
+    this.platform.log.info(
+      `${this.accessory.displayName} intensity set to ${mappedIntensity} ` +
+      `(${mappedIntensity === 30 ? 'subtle' : mappedIntensity === 50 ? 'medium' : 'strong'}).`,
+    );
+    this.applyCurrentState();
   }
 
   async setNightlightOn(value: CharacteristicValue) {
@@ -918,6 +1019,10 @@ export class PuraPlatformAccessory {
       ? this.platform.Characteristic.Active
       : this.platform.Characteristic.On;
     this.service.updateCharacteristic(activeCharacteristic, value);
+    if (this.useFanService && this.service.testCharacteristic(this.platform.Characteristic.RotationSpeed)) {
+      const speed = this.currentStateActive ? this.mapIntensityToRotation(this.getCurrentIntensityValue()) : 0;
+      this.service.updateCharacteristic(this.platform.Characteristic.RotationSpeed, speed);
+    }
   }
 
   private applyNightlightState() {
