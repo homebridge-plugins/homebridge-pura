@@ -404,7 +404,7 @@ export class PuraPlatformAccessory {
       this.platform.recordIntent(this.device.id, isOn);
 
       try {
-    if (isOn) {
+        if (isOn) {
           if (this.currentStateActive) {
             this.applyCurrentState();
             if (this.platform.isDebugEnabled()) {
