@@ -197,6 +197,14 @@
           </div>
         </div>
 
+        <div class="form-check form-switch ms-1 mb-4">
+          <input class="form-check-input" id="enableNightlightAccessory" type="checkbox" role="switch" aria-describedby="nightlightAccessoryHelp" />
+          <label class="form-check-label" for="enableNightlightAccessory">Enable Nightlight Accessory</label>
+          <div id="nightlightAccessoryHelp" class="form-text">
+            Adds a separate HomeKit Lightbulb service for the diffuser nightlight with On and Brightness control.
+          </div>
+        </div>
+
         <div class="d-flex gap-2 align-items-center pt-4">
           <button class="btn btn-outline-primary" id="testBtn" type="button">Test Login</button>
         </div>
@@ -245,6 +253,7 @@
         password: document.getElementById('password'),
         passwordToggle: document.getElementById('passwordToggle'),
         forceNightlightOff: document.getElementById('forceNightlightOff'),
+        enableNightlightAccessory: document.getElementById('enableNightlightAccessory'),
         testBtn: document.getElementById('testBtn'),
         testHint: document.getElementById('testHint'),
         status: statusEl,
@@ -396,6 +405,7 @@
           username: '',
           password: '',
           forceNightlightOff: false,
+          enableNightlightAccessory: false,
         };
       };
 
@@ -406,6 +416,7 @@
           username: els.username.value.trim(),
           password: els.password.value,
           forceNightlightOff: !!els.forceNightlightOff.checked,
+          enableNightlightAccessory: !!els.enableNightlightAccessory.checked,
         };
         await homebridge.updatePluginConfig([config]);
       };
@@ -436,10 +447,11 @@
         els.username.value = current.username || '';
         els.password.value = current.password || '';
         els.forceNightlightOff.checked = !!current.forceNightlightOff;
+        els.enableNightlightAccessory.checked = !!current.enableNightlightAccessory;
 
         setUiStatus('');
 
-        for (const field of [els.name, els.forceNightlightOff]) {
+        for (const field of [els.name, els.forceNightlightOff, els.enableNightlightAccessory]) {
           field.addEventListener('change', async () => {
             await syncConfig();
             homebridge.toast.info('Config updated. Click Save to write config.json.');

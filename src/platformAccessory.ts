@@ -103,6 +103,7 @@ export class PuraPlatformAccessory {
       .onSet(this.setNightlightOn.bind(this))
       .onGet(this.getNightlightOn.bind(this));
     this.nightlightService.getCharacteristic(this.platform.Characteristic.Brightness)
+      .setProps({ minStep: 10 })
       .onSet(this.setNightlightBrightness.bind(this))
       .onGet(this.getNightlightBrightness.bind(this));
   }
