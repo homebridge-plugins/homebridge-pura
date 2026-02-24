@@ -308,6 +308,11 @@ export class PuraPlatformAccessory {
       }
       return (bay1?.intensity ?? 0) >= (bay2?.intensity ?? 0) ? bay1 : bay2;
     }
+    // Fallback: some payloads clear active/intensity but still include a recent activeAt.
+    const inferred = this.getActiveBayFromActiveAt(bay1, bay2);
+    if (inferred) {
+      return inferred;
+    }
     return undefined;
   }
 
@@ -1784,6 +1789,49 @@ export class PuraPlatformAccessory {
       }
       return (bay1?.intensity ?? 0) >= (bay2?.intensity ?? 0) ? bay1 : bay2;
     }
+    const inferred = this.getActiveBayFromActiveAt(bay1, bay2);
+    if (inferred) {
+      return inferred;
+    }
+    return undefined;
+  }
+
+  private getActiveBayFromActiveAt(bay1?: PuraBay, bay2?: PuraBay): PuraBay | undefined {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const windowSec = 15 * 60; // treat as active if activeAt is within the last 15 minutes
+    const chooseIntensity = (): number => {
+      const cached = Number(this.accessory.context.lastIntensity);
+      if (Number.isFinite(cached) && cached > 0) {
+        return cached;
+      }
+      return 30;
+    };
+
+    const bay1Recent = bay1?.activeAt && Math.abs(nowSec - bay1.activeAt) < windowSec;
+    const bay2Recent = bay2?.activeAt && Math.abs(nowSec - bay2.activeAt) < windowSec;
+
+    if (bay1Recent && !bay2Recent) {
+      return { ...bay1, active: true, intensity: bay1?.intensity && bay1.intensity > 0 ? bay1.intensity : chooseIntensity() };
+    }
+    if (bay2Recent && !bay1Recent) {
+      return { ...bay2, active: true, intensity: bay2?.intensity && bay2.intensity > 0 ? bay2.intensity : chooseIntensity() };
+    }
+    if (bay1Recent && bay2Recent) {
+      const bay1ActiveAt = bay1?.activeAt ?? 0;
+      const bay2ActiveAt = bay2?.activeAt ?? 0;
+      if (bay1ActiveAt !== bay2ActiveAt) {
+        return bay1ActiveAt > bay2ActiveAt
+          ? { ...bay1, active: true, intensity: bay1?.intensity && bay1.intensity > 0 ? bay1.intensity : chooseIntensity() }
+          : { ...bay2, active: true, intensity: bay2?.intensity && bay2.intensity > 0 ? bay2.intensity : chooseIntensity() };
+      }
+      // If timestamps equal, prefer higher intensity (or fallback).
+      const bay1Intensity = bay1?.intensity && bay1.intensity > 0 ? bay1.intensity : chooseIntensity();
+      const bay2Intensity = bay2?.intensity && bay2.intensity > 0 ? bay2.intensity : chooseIntensity();
+      return bay1Intensity >= bay2Intensity
+        ? { ...bay1, active: true, intensity: bay1Intensity }
+        : { ...bay2, active: true, intensity: bay2Intensity };
+    }
+
     return undefined;
   }
 

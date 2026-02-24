@@ -1,5 +1,9 @@
 # Release Notes
 
+## 1.6.5 - 2026-02-24
+- Infer diffuser on-state from recent `activeAt` timestamps even when intensity briefly reports `0`, preventing false-off in HomeKit during realtime dropouts.
+- Same nightlight improvements from 1.6.4 (snap levels, color, bounce mitigation, UI toggles).
+
 ## 1.6.4 - 2026-02-24
 - Add optional `Nightlight Control` light service (opt-in via `enableNightlightAccessory`) for compatible diffusers.
 - Support nightlight On/Off, Brightness (snapped to 10-step levels: 10%, 20%, ..., 100%), and Color (Hue/Saturation).
