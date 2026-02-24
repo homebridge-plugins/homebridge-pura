@@ -725,7 +725,12 @@ export class PuraPlatform implements DynamicPlatformPlugin {
         const intent = this.lastIntentAt.get(deviceId);
         const now = Date.now();
         if (intent && now - intent.at <= this.intentWindowMs) {
-          this.triggerWebhookRefreshWithDelay(this.intentWindowMs + 1000);
+          if (this.debugEnabled) {
+            this.log.debug(
+              `Skipping immediate refresh for ${deviceId} during intent window ` +
+              `(ageMs=${now - intent.at}).`,
+            );
+          }
           return;
         }
         this.triggerWebhookRefreshWithDelay(2000);

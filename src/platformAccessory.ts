@@ -302,6 +302,7 @@ export class PuraPlatformAccessory {
     targetBay: 1 | 2,
     intensity: number,
     controller: string,
+    syncSecondary = true,
   ): Promise<boolean> {
     const availableBays = this.getAvailableBays();
     if (availableBays.length === 0) {
@@ -317,7 +318,7 @@ export class PuraPlatformAccessory {
       return false;
     }
 
-    if (secondaryBays.length > 0) {
+    if (syncSecondary && secondaryBays.length > 0) {
       // Do not block the primary command path on secondary bay sync; this keeps HomeKit writes responsive.
       void this.syncSecondaryBayIntensities(secondaryBays, intensity, controller);
     }
@@ -439,7 +440,7 @@ export class PuraPlatformAccessory {
           const requestedPowerOnIntensity = this.getPendingPowerOnIntensityIntentValue();
           const intensity = Math.max(1, Math.min(100, requestedPowerOnIntensity ?? fallbackIntensity));
           const controller = this.device.controller || 'default';
-          const success = alwaysOn && await this.setIntensityAcrossAvailableBays(targetBay, intensity, controller);
+          const success = alwaysOn && await this.setIntensityAcrossAvailableBays(targetBay, intensity, controller, true);
           if (success) {
             this.currentStateActive = true;
             this.pendingPowerOnIntensityIntent = undefined;
@@ -673,7 +674,9 @@ export class PuraPlatformAccessory {
           intensity: mappedIntensity,
           bay: targetBay,
         };
-        const success = await this.setIntensityAcrossAvailableBays(targetBay, mappedIntensity, controller);
+        // For interactive slider changes, prioritize responsiveness by updating the active bay only.
+        // Secondary bay syncing on every step can introduce extra cloud latency and HomeKit timeouts.
+        const success = await this.setIntensityAcrossAvailableBays(targetBay, mappedIntensity, controller, false);
         if (!success) {
           this.pendingIntensityIntent = previousPendingIntent;
           this.platform.log.warn(
