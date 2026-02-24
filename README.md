@@ -4,7 +4,7 @@
 
 **A Homebridge plugin for Pura smart fragrance diffusers.**
 
-This plugin is intentionally simple. It exposes a single on/off switch per diffuser, allowing you to control each device using HomeKit.
+This plugin is intentionally simple. By default it exposes a single on/off switch per diffuser, and can optionally expose a separate nightlight service.
 
 It’s designed to be used with Pura’s away mode and scheduling features disabled, so HomeKit can act as the primary automation layer.
 
@@ -43,21 +43,26 @@ Add the following platform to your `config.json`:
 - **username**: Your Pura email - *required*
 - **password**: Your Pura password - *required*
 - **forceNightlightOff**: Pura turns the nightlight on/off with the diffuser. Enable to prevent the light from staying on. (default: false)
-- **enableNightlightAccessory**: Exposes a separate Lightbulb service for the diffuser nightlight with On/Brightness control. (default: false)
+- **enableNightlightAccessory**: Enables nightlight controls for compatible diffusers, including On/Brightness/Color. (default: false)
 
 ## Usage
 
 Once configured, your Pura diffusers will appear in the Home app as a single switch per diffuser (e.g., "Living Room Diffuser").
+If `enableNightlightAccessory` is set to `true`, each compatible diffuser also includes a separate `Nightlight Control` Lightbulb service.
 
 ### Controls
 
 - **Power**: Turn the diffuser on/off
+- **Nightlight Control (optional)**:
+  - On/Off
+  - Brightness (snapped to support Pura's 10-step brightness levels)
+  - Color (Hue/Saturation)
 
 ### Device Management
 
 The plugin will automatically:
 - Discover all Pura devices on your account
-- Create one switch per diffuser
+- Create one switch per diffuser (plus optional `Nightlight Control` on compatible models)
 - Update device status via realtime updates with a 5-minute polling fallback (15s when realtime is down)
 - Handle authentication and token refresh (including periodic Cognito refresh polling)
 

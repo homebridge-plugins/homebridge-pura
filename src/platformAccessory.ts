@@ -6,7 +6,7 @@ import { PuraConfig, PuraDevice, PuraBay } from './puraTypes.js';
 
 /**
  * Pura Platform Accessory
- * One diffuser service per device, with optional Nightlight Lightbulb service.
+ * One diffuser service per device, with optional Nightlight Control service.
  */
 export class PuraPlatformAccessory {
   private service: Service;
@@ -20,6 +20,22 @@ export class PuraPlatformAccessory {
   private inferredOfflineFromStaleState = false;
   private lastAwayModeEnabledState: boolean | null = null;
   private lastAutoAlternativeOffState: boolean | null = null;
+  private nightlightWriteQueue: Promise<void> = Promise.resolve();
+  private pendingNightlightActive?: boolean;
+  private lastNightlightApiWrite?: {
+    at: number;
+    active: boolean;
+    level: number;
+    color: string;
+    reason: 'on' | 'brightness' | 'hue' | 'saturation';
+  };
+	  private pendingNightlightIntent?: {
+	    at: number;
+	    ttlMs: number;
+	    active: boolean;
+	    level: number;
+	    color: string;
+	  };
   private lastNightlightCommand?: {
     at: number;
     action: 'brightness' | 'on';
@@ -96,15 +112,22 @@ export class PuraPlatformAccessory {
       return;
     }
 
-    const name = `${this.accessory.displayName} Nightlight`;
+    const name = `${this.accessory.displayName} Nightlight Control`;
     this.nightlightService = existing || this.accessory.addService(this.platform.Service.Lightbulb, name, 'nightlight');
     this.nightlightService.setCharacteristic(this.platform.Characteristic.Name, name);
     this.nightlightService.getCharacteristic(this.platform.Characteristic.On)
       .onSet(this.setNightlightOn.bind(this))
       .onGet(this.getNightlightOn.bind(this));
     this.nightlightService.getCharacteristic(this.platform.Characteristic.Brightness)
+      .setProps({ minStep: 10 })
       .onSet(this.setNightlightBrightness.bind(this))
       .onGet(this.getNightlightBrightness.bind(this));
+    this.nightlightService.getCharacteristic(this.platform.Characteristic.Hue)
+      .onSet(this.setNightlightHue.bind(this))
+      .onGet(this.getNightlightHue.bind(this));
+    this.nightlightService.getCharacteristic(this.platform.Characteristic.Saturation)
+      .onSet(this.setNightlightSaturation.bind(this))
+      .onGet(this.getNightlightSaturation.bind(this));
   }
 
   private updateCurrentState() {
@@ -294,30 +317,68 @@ export class PuraPlatformAccessory {
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
 
-    const active = Boolean(value);
-    const currentRawBrightness = this.normalizeNightlightLevel(this.device.nightlight?.brightness);
-    const brightnessPercent = this.nightlightLevelToPercent(currentRawBrightness ?? 10);
-    const sentLevel = this.percentToNightlightLevel(brightnessPercent);
-    const controller = this.device.controller || 'default';
-    const color = this.device.nightlight?.color ?? 'ffffff';
+    await this.enqueueNightlightWrite(async () => {
+      const active = Boolean(value);
+      const currentRawBrightness = this.normalizeNightlightLevel(this.device.nightlight?.brightness);
+      const brightnessPercent = this.nightlightLevelToPercent(currentRawBrightness ?? 10);
+      const sentLevel = this.percentToNightlightLevel(brightnessPercent);
+      const controller = this.device.controller || 'default';
+      const color = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
+      this.pendingNightlightActive = active;
 
-    this.platform.log.debug(
-      `[Nightlight] Set On for ${this.accessory.displayName} -> ${active}; ` +
-      `rawBrightness=${currentRawBrightness ?? 'unknown'} mappedBrightness=${brightnessPercent}% color=${color}`,
-    );
+      // HomeKit commonly sends On=true right after setting Brightness/Color; skip the redundant API write.
+      if (this.shouldSkipRedundantNightlightOnWrite(active)) {
+        this.platform.log.debug(
+          `[Nightlight] Skipping redundant On write for ${this.accessory.displayName} -> ${active} (recent api write).`,
+        );
+        this.device.nightlight = {
+          active,
+          brightness: sentLevel,
+          color,
+        };
+        this.pendingNightlightIntent = {
+          at: Date.now(),
+          ttlMs: active ? 5000 : 15000,
+          active,
+          level: sentLevel,
+          color,
+        };
+        this.applyNightlightState();
+        return;
+      }
 
-    const success = await this.puraApi.setNightlight(this.device.id, active, brightnessPercent, color, controller);
-    if (!success) {
-      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-    }
+      this.platform.log.debug(
+        `[Nightlight] Set On for ${this.accessory.displayName} -> ${active}; ` +
+        `rawBrightness=${currentRawBrightness ?? 'unknown'} mappedBrightness=${brightnessPercent}% color=${color}`,
+      );
 
-    this.device.nightlight = {
-      active,
-      brightness: sentLevel,
-      color,
-    };
-    this.recordNightlightCommand('on', active, brightnessPercent, sentLevel);
-    this.applyNightlightState();
+      const success = await this.puraApi.setNightlight(this.device.id, active, brightnessPercent, color, controller);
+      if (!success) {
+        throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+      }
+
+      this.device.nightlight = {
+        active,
+        brightness: sentLevel,
+        color,
+      };
+      this.lastNightlightApiWrite = {
+        at: Date.now(),
+        active,
+        level: sentLevel,
+        color,
+        reason: 'on',
+      };
+      this.pendingNightlightIntent = {
+        at: Date.now(),
+        ttlMs: active ? 5000 : 15000,
+        active,
+        level: sentLevel,
+        color,
+      };
+      this.recordNightlightCommand('on', active, brightnessPercent, sentLevel);
+      this.applyNightlightState();
+    });
   }
 
   async getNightlightOn(): Promise<CharacteristicValue> {
@@ -339,29 +400,76 @@ export class PuraPlatformAccessory {
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
 
-    const brightnessPercent = Math.max(0, Math.min(100, Number(value) || 0));
-    const apiLevel = this.percentToNightlightLevel(brightnessPercent);
-    const active = Boolean(this.device.nightlight?.active);
-    const controller = this.device.controller || 'default';
-    const color = this.device.nightlight?.color ?? 'ffffff';
+    await this.enqueueNightlightWrite(async () => {
+      const brightnessPercent = Math.max(0, Math.min(100, Number(value) || 0));
+      const turningOff = brightnessPercent <= 0;
+      const apiLevel = turningOff
+        ? (this.normalizeNightlightLevel(this.device.nightlight?.brightness) ?? 1)
+        : this.percentToNightlightLevel(brightnessPercent);
+      const snappedPercent = turningOff ? 0 : this.nightlightLevelToPercent(apiLevel);
+      // In HomeKit, setting a non-zero brightness implies turning the light on.
+      const active = turningOff ? false : true;
+      const controller = this.device.controller || 'default';
+      const color = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
+      const apiBrightnessPercent = this.nightlightLevelToPercent(apiLevel);
+      this.pendingNightlightActive = active;
 
-    this.platform.log.debug(
-      `[Nightlight] Set Brightness for ${this.accessory.displayName} -> ${brightnessPercent}% ` +
-      `(mappedLevel=${apiLevel}, active=${active}, color=${color})`,
-    );
+      // HomeKit scenes/automations can emit redundant brightness writes. Skipping them reduces out-of-order
+      // cloud snapshots that look like "bouncing" in the Home app.
+      const currentActive = Boolean(this.device.nightlight?.active);
+      const currentLevel = this.normalizeNightlightLevel(this.device.nightlight?.brightness) ?? 10;
+      const currentColor = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
+      const isRedundant = currentActive === active && currentLevel === apiLevel && currentColor === color;
+      if (isRedundant) {
+        this.platform.log.debug(
+          `[Nightlight] Skipping redundant Brightness write for ${this.accessory.displayName} -> ${brightnessPercent}% ` +
+          `(snapped=${snappedPercent}%, mappedLevel=${apiLevel}, active=${active}, color=${color}).`,
+        );
+        this.pendingNightlightIntent = {
+          at: Date.now(),
+          ttlMs: active ? 5000 : 15000,
+          active,
+          level: apiLevel,
+          color,
+        };
+        this.applyNightlightState();
+        this.nightlightService?.updateCharacteristic(this.platform.Characteristic.Brightness, snappedPercent);
+        return;
+      }
 
-    const success = await this.puraApi.setNightlight(this.device.id, active, brightnessPercent, color, controller);
-    if (!success) {
-      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-    }
+      this.platform.log.debug(
+        `[Nightlight] Set Brightness for ${this.accessory.displayName} -> ${brightnessPercent}% ` +
+        `(snapped=${snappedPercent}%, apiBrightness=${apiBrightnessPercent}%, mappedLevel=${apiLevel}, active=${active}, color=${color})`,
+      );
 
-    this.device.nightlight = {
-      active,
-      brightness: apiLevel,
-      color,
-    };
-    this.recordNightlightCommand('brightness', active, brightnessPercent, apiLevel);
-    this.applyNightlightState();
+      const success = await this.puraApi.setNightlight(this.device.id, active, apiBrightnessPercent, color, controller);
+      if (!success) {
+        throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+      }
+
+      this.device.nightlight = {
+        active,
+        brightness: apiLevel,
+        color,
+      };
+      this.lastNightlightApiWrite = {
+        at: Date.now(),
+        active,
+        level: apiLevel,
+        color,
+        reason: 'brightness',
+      };
+      this.pendingNightlightIntent = {
+        at: Date.now(),
+        ttlMs: active ? 5000 : 15000,
+        active,
+        level: apiLevel,
+        color,
+      };
+      this.recordNightlightCommand('brightness', active, snappedPercent, apiLevel);
+      this.applyNightlightState();
+      this.nightlightService?.updateCharacteristic(this.platform.Characteristic.Brightness, snappedPercent);
+    });
   }
 
   async getNightlightBrightness(): Promise<CharacteristicValue> {
@@ -369,7 +477,9 @@ export class PuraPlatformAccessory {
       this.updateFaultState();
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
-    const brightness = this.nightlightLevelToPercent(this.device.nightlight?.brightness);
+    const brightness = this.device.nightlight?.active === true
+      ? this.nightlightLevelToPercent(this.device.nightlight?.brightness)
+      : 0;
     this.platform.log.debug(
       `[Nightlight] Get Brightness for ${this.accessory.displayName} -> ${brightness}% ` +
       `(raw=${this.device.nightlight?.brightness ?? 'unknown'})`,
@@ -377,20 +487,84 @@ export class PuraPlatformAccessory {
     return brightness;
   }
 
+  async setNightlightHue(value: CharacteristicValue) {
+    if (!this.nightlightService || !this.supportsNightlightControl()) {
+      return;
+    }
+    if (this.isDeviceUnavailable()) {
+      this.updateFaultState();
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+
+    await this.enqueueNightlightWrite(async () => {
+      // In HomeKit, setting color implies turning the light on.
+      this.pendingNightlightActive = true;
+      const hue = Math.max(0, Math.min(360, Number(value) || 0));
+      const currentColor = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
+      const currentHsv = this.hexToHsv(currentColor);
+      const nextColor = this.hsvToHex(hue, currentHsv.s);
+      await this.applyNightlightColor(nextColor, 'hue', hue, currentHsv.s);
+    });
+  }
+
+  async getNightlightHue(): Promise<CharacteristicValue> {
+    if (this.isDeviceUnavailable()) {
+      this.updateFaultState();
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+    const color = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
+    const hsv = this.hexToHsv(color);
+    return hsv.h;
+  }
+
+  async setNightlightSaturation(value: CharacteristicValue) {
+    if (!this.nightlightService || !this.supportsNightlightControl()) {
+      return;
+    }
+    if (this.isDeviceUnavailable()) {
+      this.updateFaultState();
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+
+    await this.enqueueNightlightWrite(async () => {
+      // In HomeKit, setting color implies turning the light on.
+      this.pendingNightlightActive = true;
+      const saturation = Math.max(0, Math.min(100, Number(value) || 0));
+      const currentColor = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
+      const currentHsv = this.hexToHsv(currentColor);
+      const nextColor = this.hsvToHex(currentHsv.h, saturation);
+      await this.applyNightlightColor(nextColor, 'saturation', currentHsv.h, saturation);
+    });
+  }
+
+  async getNightlightSaturation(): Promise<CharacteristicValue> {
+    if (this.isDeviceUnavailable()) {
+      this.updateFaultState();
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+    const color = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
+    const hsv = this.hexToHsv(color);
+    return hsv.s;
+  }
+
   updateDevice(device: PuraDevice) {
+    const stabilizedDevice = this.stabilizeNightlightDuringIntentWindow(device);
     const previousNightlight = this.device.nightlight;
     const previousOnline = this.normalizeOnlineState(this.device.online);
-    const nextOnline = this.normalizeOnlineState(device.online);
+    const nextOnline = this.normalizeOnlineState(stabilizedDevice.online);
     this.logOnlineStateTransition(previousOnline, nextOnline);
-    this.device = device;
+    this.device = stabilizedDevice;
+    if (typeof stabilizedDevice.nightlight?.active === 'boolean') {
+      this.pendingNightlightActive = stabilizedDevice.nightlight.active;
+    }
     this.logInferredOfflineTransition();
-    this.logRecommendationHints(device);
-    this.accessory.context.device = device;
+    this.logRecommendationHints(stabilizedDevice);
+    this.accessory.context.device = stabilizedDevice;
     this.updateAccessoryInformation();
     if (this.platform.isDebugEnabled()) {
-      this.platform.log.debug('Device snapshot:', this.summarizeDevice(device));
+      this.platform.log.debug('Device snapshot:', this.summarizeDevice(stabilizedDevice));
     }
-    this.logNightlightProfileRoundTrip(previousNightlight, device.nightlight);
+    this.logNightlightProfileRoundTrip(previousNightlight, stabilizedDevice.nightlight);
     this.updateCurrentState();
     void this.maybeForceNightlightOff();
   }
@@ -751,9 +925,15 @@ export class PuraPlatformAccessory {
       return;
     }
     const isOn = Boolean(this.device.nightlight?.active);
-    const brightness = this.nightlightLevelToPercent(this.device.nightlight?.brightness);
+    const brightness = isOn
+      ? this.nightlightLevelToPercent(this.device.nightlight?.brightness)
+      : 0;
+    const color = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
+    const hsv = this.hexToHsv(color);
     this.nightlightService.updateCharacteristic(this.platform.Characteristic.On, isOn);
     this.nightlightService.updateCharacteristic(this.platform.Characteristic.Brightness, brightness);
+    this.nightlightService.updateCharacteristic(this.platform.Characteristic.Hue, hsv.h);
+    this.nightlightService.updateCharacteristic(this.platform.Characteristic.Saturation, hsv.s);
   }
 
   private normalizeNightlightLevel(level: unknown): number | undefined {
@@ -793,6 +973,202 @@ export class PuraPlatformAccessory {
       hkBrightnessPercent,
       sentLevel,
     };
+  }
+
+  private async applyNightlightColor(
+    color: string,
+    action: 'hue' | 'saturation',
+    hue: number,
+    saturation: number,
+  ) {
+    const normalizedColor = this.normalizeNightlightColor(color);
+    const apiLevel = this.normalizeNightlightLevel(this.device.nightlight?.brightness) ?? 10;
+    const brightnessPercent = this.nightlightLevelToPercent(apiLevel);
+    const active = this.pendingNightlightActive ?? Boolean(this.device.nightlight?.active);
+    const controller = this.device.controller || 'default';
+
+    this.platform.log.debug(
+      `[Nightlight] Set ${action} for ${this.accessory.displayName} -> ` +
+      `h=${Math.round(hue)} s=${Math.round(saturation)} color=${normalizedColor} ` +
+      `(active=${active}, level=${apiLevel})`,
+    );
+
+    const success = await this.puraApi.setNightlight(
+      this.device.id,
+      active,
+      brightnessPercent,
+      normalizedColor,
+      controller,
+    );
+    if (!success) {
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+
+    this.device.nightlight = {
+      active,
+      brightness: apiLevel,
+      color: normalizedColor,
+    };
+    this.lastNightlightApiWrite = {
+      at: Date.now(),
+      active,
+      level: apiLevel,
+      color: normalizedColor,
+      reason: action,
+    };
+    this.pendingNightlightIntent = {
+      at: Date.now(),
+      ttlMs: active ? 5000 : 15000,
+      active,
+      level: apiLevel,
+      color: normalizedColor,
+    };
+    this.applyNightlightState();
+  }
+
+  private async enqueueNightlightWrite(task: () => Promise<void>): Promise<void> {
+    const run = this.nightlightWriteQueue.then(task, task);
+    this.nightlightWriteQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    await run;
+  }
+
+  private stabilizeNightlightDuringIntentWindow(device: PuraDevice): PuraDevice {
+    if (!this.pendingNightlightIntent) {
+      return device;
+    }
+    const ageMs = Date.now() - this.pendingNightlightIntent.at;
+    if (ageMs > this.pendingNightlightIntent.ttlMs) {
+      this.pendingNightlightIntent = undefined;
+      return device;
+    }
+    if (!device.nightlight) {
+      return device;
+    }
+
+    const intent = this.pendingNightlightIntent;
+    const incomingLevel = this.normalizeNightlightLevel(device.nightlight.brightness);
+    const incomingActive = Boolean(device.nightlight.active);
+    const incomingColor = this.normalizeNightlightColor(device.nightlight.color);
+    const matchesIntent = incomingActive === intent.active
+      && incomingLevel === intent.level
+      && incomingColor === intent.color;
+    if (matchesIntent) {
+      return device;
+    }
+
+    if (this.platform.isDebugEnabled()) {
+      this.platform.log.debug(
+        `[Nightlight] Ignoring stale cloud snapshot for ${this.accessory.displayName}: ` +
+        `incoming(active=${incomingActive}, level=${incomingLevel ?? 'unknown'}) ` +
+        `expected(active=${intent.active}, level=${intent.level}, color=${intent.color}) ageMs=${ageMs}`,
+      );
+    }
+
+    return {
+      ...device,
+      nightlight: {
+        ...device.nightlight,
+        active: intent.active,
+        brightness: intent.level,
+        color: intent.color,
+      },
+    };
+  }
+
+  private normalizeNightlightColor(color: unknown): string {
+    if (typeof color !== 'string') {
+      return 'ffffff';
+    }
+    const normalized = color.replace('#', '').trim().toLowerCase();
+    if (/^[0-9a-f]{6}$/.test(normalized)) {
+      return normalized;
+    }
+    return 'ffffff';
+  }
+
+  private shouldSkipRedundantNightlightOnWrite(active: boolean): boolean {
+    if (!this.lastNightlightApiWrite) {
+      return false;
+    }
+    const ageMs = Date.now() - this.lastNightlightApiWrite.at;
+    if (ageMs > 2000) {
+      return false;
+    }
+    if (this.lastNightlightApiWrite.active !== active) {
+      return false;
+    }
+    // On writes are often emitted after Brightness/Color writes; skip if the device was just set to that state.
+    return this.lastNightlightApiWrite.reason !== 'on';
+  }
+
+  private hexToHsv(hex: string): { h: number; s: number } {
+    const normalized = this.normalizeNightlightColor(hex);
+    const r = parseInt(normalized.slice(0, 2), 16) / 255;
+    const g = parseInt(normalized.slice(2, 4), 16) / 255;
+    const b = parseInt(normalized.slice(4, 6), 16) / 255;
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const delta = max - min;
+
+    let h = 0;
+    if (delta !== 0) {
+      if (max === r) {
+        h = 60 * (((g - b) / delta) % 6);
+      } else if (max === g) {
+        h = 60 * (((b - r) / delta) + 2);
+      } else {
+        h = 60 * (((r - g) / delta) + 4);
+      }
+    }
+    if (h < 0) {
+      h += 360;
+    }
+    const s = max === 0 ? 0 : (delta / max) * 100;
+    return {
+      h: Math.round(h),
+      s: Math.round(s),
+    };
+  }
+
+  private hsvToHex(h: number, s: number): string {
+    const hue = ((Number(h) % 360) + 360) % 360;
+    const sat = Math.max(0, Math.min(100, Number(s) || 0)) / 100;
+    const c = sat;
+    const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
+    const m = 1 - c;
+
+    let rPrime = 0;
+    let gPrime = 0;
+    let bPrime = 0;
+    if (hue < 60) {
+      rPrime = c;
+      gPrime = x;
+    } else if (hue < 120) {
+      rPrime = x;
+      gPrime = c;
+    } else if (hue < 180) {
+      gPrime = c;
+      bPrime = x;
+    } else if (hue < 240) {
+      gPrime = x;
+      bPrime = c;
+    } else if (hue < 300) {
+      rPrime = x;
+      bPrime = c;
+    } else {
+      rPrime = c;
+      bPrime = x;
+    }
+
+    const r = Math.round((rPrime + m) * 255);
+    const g = Math.round((gPrime + m) * 255);
+    const b = Math.round((bPrime + m) * 255);
+    return [r, g, b]
+      .map((value) => value.toString(16).padStart(2, '0'))
+      .join('');
   }
 
   private logNightlightProfileRoundTrip(previous?: PuraDevice['nightlight'], next?: PuraDevice['nightlight']) {
