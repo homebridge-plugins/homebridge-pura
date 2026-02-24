@@ -276,8 +276,8 @@ export class PuraPlatformAccessory {
   }
 
   private getActiveBay(): PuraBay | undefined {
-    const bay1 = this.device.bay1;
-    const bay2 = this.device.bay2;
+    const bay1 = this.fillBayIntensityFromCache(this.device.bay1);
+    const bay2 = this.fillBayIntensityFromCache(this.device.bay2);
     if (bay1?.active && !bay2?.active) {
       return bay1;
     }
@@ -1757,8 +1757,8 @@ export class PuraPlatformAccessory {
   }
 
   private getActiveBayFromDevice(device: PuraDevice): PuraBay | undefined {
-    const bay1 = device.bay1;
-    const bay2 = device.bay2;
+    const bay1 = this.fillBayIntensityFromCache(device.bay1);
+    const bay2 = this.fillBayIntensityFromCache(device.bay2);
     if (bay1?.active && !bay2?.active) {
       return bay1;
     }
@@ -1833,6 +1833,18 @@ export class PuraPlatformAccessory {
     }
 
     return undefined;
+  }
+
+  private fillBayIntensityFromCache(bay?: PuraBay): PuraBay | undefined {
+    if (!bay) {
+      return bay;
+    }
+    if (bay.active && (!Number.isFinite(bay.intensity) || bay.intensity <= 0)) {
+      const cached = Number(this.accessory.context.lastIntensity);
+      const fallback = Number.isFinite(cached) && cached > 0 ? cached : 30;
+      return { ...bay, intensity: fallback };
+    }
+    return bay;
   }
 
   private normalizeNightlightColor(color: unknown): string {
