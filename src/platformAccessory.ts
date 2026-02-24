@@ -22,6 +22,13 @@ export class PuraPlatformAccessory {
   private lastAutoAlternativeOffState: boolean | null = null;
   private nightlightWriteQueue: Promise<void> = Promise.resolve();
   private pendingNightlightActive?: boolean;
+  private lastNightlightApiWrite?: {
+    at: number;
+    active: boolean;
+    level: number;
+    color: string;
+    reason: 'on' | 'brightness' | 'hue' | 'saturation';
+  };
   private pendingNightlightIntent?: {
     at: number;
     active: boolean;
@@ -318,6 +325,26 @@ export class PuraPlatformAccessory {
       const color = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
       this.pendingNightlightActive = active;
 
+      // HomeKit commonly sends On=true right after setting Brightness/Color; skip the redundant API write.
+      if (this.shouldSkipRedundantNightlightOnWrite(active)) {
+        this.platform.log.debug(
+          `[Nightlight] Skipping redundant On write for ${this.accessory.displayName} -> ${active} (recent api write).`,
+        );
+        this.device.nightlight = {
+          active,
+          brightness: sentLevel,
+          color,
+        };
+        this.pendingNightlightIntent = {
+          at: Date.now(),
+          active,
+          level: sentLevel,
+          color,
+        };
+        this.applyNightlightState();
+        return;
+      }
+
       this.platform.log.debug(
         `[Nightlight] Set On for ${this.accessory.displayName} -> ${active}; ` +
         `rawBrightness=${currentRawBrightness ?? 'unknown'} mappedBrightness=${brightnessPercent}% color=${color}`,
@@ -332,6 +359,13 @@ export class PuraPlatformAccessory {
         active,
         brightness: sentLevel,
         color,
+      };
+      this.lastNightlightApiWrite = {
+        at: Date.now(),
+        active,
+        level: sentLevel,
+        color,
+        reason: 'on',
       };
       this.pendingNightlightIntent = {
         at: Date.now(),
@@ -391,6 +425,13 @@ export class PuraPlatformAccessory {
         active,
         brightness: apiLevel,
         color,
+      };
+      this.lastNightlightApiWrite = {
+        at: Date.now(),
+        active,
+        level: apiLevel,
+        color,
+        reason: 'brightness',
       };
       this.pendingNightlightIntent = {
         at: Date.now(),
@@ -941,6 +982,13 @@ export class PuraPlatformAccessory {
       brightness: apiLevel,
       color: normalizedColor,
     };
+    this.lastNightlightApiWrite = {
+      at: Date.now(),
+      active,
+      level: apiLevel,
+      color: normalizedColor,
+      reason: action,
+    };
     this.pendingNightlightIntent = {
       at: Date.now(),
       active,
@@ -980,7 +1028,6 @@ export class PuraPlatformAccessory {
       && incomingLevel === intent.level
       && incomingColor === intent.color;
     if (matchesIntent) {
-      this.pendingNightlightIntent = undefined;
       return device;
     }
 
@@ -1012,6 +1059,21 @@ export class PuraPlatformAccessory {
       return normalized;
     }
     return 'ffffff';
+  }
+
+  private shouldSkipRedundantNightlightOnWrite(active: boolean): boolean {
+    if (!this.lastNightlightApiWrite) {
+      return false;
+    }
+    const ageMs = Date.now() - this.lastNightlightApiWrite.at;
+    if (ageMs > 2000) {
+      return false;
+    }
+    if (this.lastNightlightApiWrite.active !== active) {
+      return false;
+    }
+    // On writes are often emitted after Brightness/Color writes; skip if the device was just set to that state.
+    return this.lastNightlightApiWrite.reason !== 'on';
   }
 
   private hexToHsv(hex: string): { h: number; s: number } {

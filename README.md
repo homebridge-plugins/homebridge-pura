@@ -55,7 +55,7 @@ If `enableNightlightAccessory` is set to `true`, each compatible diffuser also i
 - **Power**: Turn the diffuser on/off
 - **Nightlight Control (optional)**:
   - On/Off
-  - Brightness (snapped to supported 10-step levels: 10%, 20%, ..., 100%)
+  - Brightness (snapped to support Pura's 10-step brightness levels)
   - Color (Hue/Saturation)
 
 ### Device Management
