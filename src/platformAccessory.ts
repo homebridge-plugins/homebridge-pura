@@ -54,6 +54,7 @@ export class PuraPlatformAccessory {
     ttlMs: number;
     intensity: number;
   };
+  private lastSuccessfulOnWriteAt?: number;
   private lastSetOnCommandAt?: number;
   private rotationWriteQueue: Promise<void> = Promise.resolve();
 
@@ -463,6 +464,7 @@ export class PuraPlatformAccessory {
           const success = alwaysOn && await this.setIntensityAcrossAvailableBays(targetBay, intensity, controller, true);
           if (success) {
             this.currentStateActive = true;
+            this.lastSuccessfulOnWriteAt = Date.now();
             this.pendingPowerOnIntensityIntent = undefined;
             this.accessory.context.lastIntensity = intensity;
             this.accessory.context.lastBay = targetBay;
@@ -500,9 +502,14 @@ export class PuraPlatformAccessory {
             this.platform.log.warn(`${this.accessory.displayName} appears offline (Wi-Fi lost or unplugged).`);
             return;
           }
+          if (this.shouldSuppressConflictingOffCommand('setOn')) {
+            this.applyCurrentState();
+            return;
+          }
           const success = await this.puraApi.stopAll(this.device.id);
           if (success) {
             this.currentStateActive = false;
+            this.lastSuccessfulOnWriteAt = undefined;
             this.platform.log.debug(`Successfully turned off ${this.accessory.displayName}`);
             this.applyCurrentState();
             this.platform.log.info(`${this.accessory.displayName} turned off.`);
@@ -576,10 +583,15 @@ export class PuraPlatformAccessory {
             this.platform.log.warn(`${this.accessory.displayName} appears offline (Wi-Fi lost or unplugged).`);
             return;
           }
+          if (this.shouldSuppressConflictingOffCommand('rotation')) {
+            this.applyCurrentState();
+            return;
+          }
           this.platform.recordIntent(this.device.id, false);
           const success = await this.puraApi.stopAll(this.device.id);
           if (success) {
             this.currentStateActive = false;
+            this.lastSuccessfulOnWriteAt = undefined;
             this.platform.log.debug(`Successfully turned off ${this.accessory.displayName} via RotationSpeed=0`);
             this.platform.log.info(`${this.accessory.displayName} turned off.`);
           } else {
@@ -678,6 +690,7 @@ export class PuraPlatformAccessory {
             return;
           }
           this.currentStateActive = true;
+          this.lastSuccessfulOnWriteAt = Date.now();
         }
         if (this.areAllAvailableBaysAtIntensity(mappedIntensity)) {
           this.applyCurrentState();
@@ -1360,6 +1373,31 @@ export class PuraPlatformAccessory {
       return true;
     }
     return onCommandAgeMs !== undefined && onCommandAgeMs >= 0 && onCommandAgeMs <= 15000;
+  }
+
+  private shouldSuppressConflictingOffCommand(origin: 'setOn' | 'rotation'): boolean {
+    if (!this.currentStateActive) {
+      return false;
+    }
+    if (this.lastSuccessfulOnWriteAt === undefined) {
+      return false;
+    }
+    const now = Date.now();
+    const sinceLastOnMs = now - this.lastSuccessfulOnWriteAt;
+    // Guard against controller bounce where a stale OFF arrives immediately after a successful ON.
+    if (sinceLastOnMs < 0 || sinceLastOnMs > 5000) {
+      return false;
+    }
+    const pendingIntensity = this.getPendingIntensityIntentValue();
+    const pendingPowerOnIntensity = this.getPendingPowerOnIntensityIntentValue();
+    if (pendingIntensity === undefined && pendingPowerOnIntensity === undefined) {
+      return false;
+    }
+    this.platform.log.warn(
+      `[Diffuser] Suppressing conflicting OFF command for ${this.accessory.displayName} ` +
+      `(origin=${origin}, sinceLastOnMs=${sinceLastOnMs}, pendingIntensity=${pendingIntensity ?? 'none'}).`,
+    );
+    return true;
   }
 
   private applyCurrentState() {
