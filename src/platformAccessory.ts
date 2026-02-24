@@ -30,13 +30,13 @@ export class PuraPlatformAccessory {
     color: string;
     reason: 'on' | 'brightness' | 'hue' | 'saturation';
   };
-	  private pendingNightlightIntent?: {
-	    at: number;
-	    ttlMs: number;
-	    active: boolean;
-	    level: number;
-	    color: string;
-	  };
+  private pendingNightlightIntent?: {
+    at: number;
+    ttlMs: number;
+    active: boolean;
+    level: number;
+    color: string;
+  };
   private lastNightlightCommand?: {
     at: number;
     action: 'brightness' | 'on';
@@ -404,7 +404,7 @@ export class PuraPlatformAccessory {
       this.platform.recordIntent(this.device.id, isOn);
 
       try {
-        if (isOn) {
+    if (isOn) {
           if (this.currentStateActive) {
             this.applyCurrentState();
             if (this.platform.isDebugEnabled()) {
@@ -497,7 +497,7 @@ export class PuraPlatformAccessory {
             this.accessory.context.lastBay = targetBay;
             this.pendingIntensityIntent = {
               at: Date.now(),
-              ttlMs: 8000,
+              ttlMs: 15000,
               intensity,
               bay: targetBay,
             };
@@ -633,7 +633,7 @@ export class PuraPlatformAccessory {
         if (mappedIntensity > 0) {
           this.pendingPowerOnIntensityIntent = {
             at: Date.now(),
-            ttlMs: 12000,
+            ttlMs: 20000,
             intensity: mappedIntensity,
           };
         }
@@ -733,7 +733,7 @@ export class PuraPlatformAccessory {
         const previousPendingIntent = this.pendingIntensityIntent;
         this.pendingIntensityIntent = {
           at: Date.now(),
-          ttlMs: 8000,
+          ttlMs: 15000,
           intensity: mappedIntensity,
           bay: targetBay,
         };
@@ -752,11 +752,11 @@ export class PuraPlatformAccessory {
         this.accessory.context.lastBay = targetBay;
         this.pendingIntensityIntent = {
           at: Date.now(),
-          ttlMs: 8000,
+          ttlMs: 15000,
           intensity: mappedIntensity,
           bay: targetBay,
         };
-        this.recentIntensityHold = { until: Date.now() + 8000, level: mappedIntensity };
+        this.recentIntensityHold = { until: Date.now() + 15000, level: mappedIntensity };
         this.platform.log.info(
           `${this.accessory.displayName} intensity set to ${mappedIntensity} ` +
           `(${mappedIntensity === 30 ? 'subtle' : mappedIntensity === 50 ? 'medium' : 'strong'}).`,
@@ -801,11 +801,12 @@ export class PuraPlatformAccessory {
         };
         this.pendingNightlightIntent = {
           at: Date.now(),
-          ttlMs: active ? 5000 : 15000,
+          ttlMs: active ? 20000 : 15000,
           active,
           level: sentLevel,
           color,
         };
+        this.logNightlightToggle(active, brightnessPercent);
         this.applyNightlightState();
         return;
       }
@@ -834,7 +835,7 @@ export class PuraPlatformAccessory {
       };
       this.pendingNightlightIntent = {
         at: Date.now(),
-        ttlMs: active ? 12000 : 15000,
+        ttlMs: active ? 20000 : 15000,
         active,
         level: sentLevel,
         color,
@@ -898,11 +899,14 @@ export class PuraPlatformAccessory {
         );
         this.pendingNightlightIntent = {
           at: Date.now(),
-          ttlMs: active ? 5000 : 15000,
+          ttlMs: active ? 20000 : 15000,
           active,
           level: apiLevel,
           color,
         };
+        if (currentActive !== active) {
+          this.logNightlightToggle(active, snappedPercent);
+        }
         this.applyNightlightState();
         this.nightlightService?.updateCharacteristic(this.platform.Characteristic.Brightness, snappedPercent);
         return;
@@ -932,11 +936,14 @@ export class PuraPlatformAccessory {
       };
       this.pendingNightlightIntent = {
         at: Date.now(),
-        ttlMs: active ? 12000 : 15000,
+        ttlMs: active ? 20000 : 15000,
         active,
         level: apiLevel,
         color,
       };
+      if (currentActive !== active) {
+        this.logNightlightToggle(active, snappedPercent);
+      }
       this.recordNightlightCommand('brightness', active, snappedPercent, apiLevel);
       this.platform.log.info(
         `${this.accessory.displayName} nightlight brightness set to ${snappedPercent}% ` +
@@ -1528,20 +1535,23 @@ export class PuraPlatformAccessory {
       sentLevel,
     };
     if (action === 'on') {
-      if (requestedOn) {
-        this.platform.log.info(
-          `${this.accessory.displayName} nightlight turned on ` +
-          `(brightness ${Math.round(hkBrightnessPercent)}%, level ${sentLevel}/10).`,
-        );
-      } else {
-        this.platform.log.info(`${this.accessory.displayName} nightlight turned off.`);
-      }
+      this.logNightlightToggle(requestedOn, hkBrightnessPercent);
       return;
     }
     this.platform.log.info(
       `${this.accessory.displayName} nightlight brightness set to ` +
       `${Math.round(hkBrightnessPercent)}% (level ${sentLevel}/10).`,
     );
+  }
+
+  private logNightlightToggle(active: boolean, brightnessPercent: number) {
+    if (active) {
+      this.platform.log.info(
+        `${this.accessory.displayName} nightlight turned on (${Math.round(brightnessPercent)}% brightness).`,
+      );
+    } else {
+      this.platform.log.info(`${this.accessory.displayName} nightlight turned off.`);
+    }
   }
 
   private async applyNightlightColor(
@@ -1587,7 +1597,7 @@ export class PuraPlatformAccessory {
     };
     this.pendingNightlightIntent = {
       at: Date.now(),
-      ttlMs: active ? 12000 : 15000,
+      ttlMs: active ? 20000 : 15000,
       active,
       level: apiLevel,
       color: normalizedColor,
