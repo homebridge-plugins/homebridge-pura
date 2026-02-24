@@ -904,9 +904,7 @@ export class PuraPlatformAccessory {
           level: apiLevel,
           color,
         };
-        if (currentActive !== active) {
-          this.logNightlightToggle(active, snappedPercent);
-        }
+        this.logNightlightToggle(active, snappedPercent);
         this.applyNightlightState();
         this.nightlightService?.updateCharacteristic(this.platform.Characteristic.Brightness, snappedPercent);
         return;
@@ -941,9 +939,7 @@ export class PuraPlatformAccessory {
         level: apiLevel,
         color,
       };
-      if (currentActive !== active) {
-        this.logNightlightToggle(active, snappedPercent);
-      }
+      this.logNightlightToggle(active, snappedPercent);
       this.recordNightlightCommand('brightness', active, snappedPercent, apiLevel);
       this.platform.log.info(
         `${this.accessory.displayName} nightlight brightness set to ${snappedPercent}% ` +
