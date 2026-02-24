@@ -407,7 +407,7 @@ export class PuraPlatformAccessory {
       this.updateFaultState();
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
-    const brightness = Boolean(this.device.nightlight?.active)
+    const brightness = this.device.nightlight?.active === true
       ? this.nightlightLevelToPercent(this.device.nightlight?.brightness)
       : 0;
     this.platform.log.debug(
