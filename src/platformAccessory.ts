@@ -107,7 +107,7 @@ export class PuraPlatformAccessory {
       .onGet(this.getOn.bind(this));
     if (this.useFanService) {
       this.service.getCharacteristic(this.platform.Characteristic.RotationSpeed)
-        .setProps({ minStep: 1 })
+        .setProps({ validValues: [30, 50, 100] })
         .onSet(this.setRotationSpeed.bind(this))
         .onGet(this.getRotationSpeed.bind(this));
     }
@@ -452,7 +452,8 @@ export class PuraPlatformAccessory {
     }
     const speed = Math.max(0, Math.min(100, Number(value) || 0));
     const mappedIntensity = this.mapRotationToIntensity(speed);
-    this.accessory.context.lastIntensity = mappedIntensity;
+    const snappedSpeed = this.mapIntensityToRotation(mappedIntensity);
+    this.service.updateCharacteristic(this.platform.Characteristic.RotationSpeed, snappedSpeed);
     const pendingIntentIntensity = this.getPendingIntensityIntentValue();
     if (pendingIntentIntensity === mappedIntensity && this.areAllAvailableBaysAtIntensity(mappedIntensity)) {
       this.applyCurrentState();
@@ -467,6 +468,7 @@ export class PuraPlatformAccessory {
       this.applyCurrentState();
       return;
     }
+    this.accessory.context.lastIntensity = mappedIntensity;
     if (this.isDeviceUnavailable()) {
       this.updateFaultState();
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
