@@ -166,6 +166,9 @@ export class PuraPlatformAccessory {
 
   private mapRotationToIntensity(speed: number): number {
     const clamped = Math.max(0, Math.min(100, Number(speed) || 0));
+    if (clamped <= 0) {
+      return 0;
+    }
     if (clamped <= 33) {
       return 30;
     }
@@ -484,7 +487,7 @@ export class PuraPlatformAccessory {
       }
       const speed = Math.max(0, Math.min(100, Number(value) || 0));
       const mappedIntensity = this.mapRotationToIntensity(speed);
-      const snappedSpeed = this.mapIntensityToRotation(mappedIntensity);
+      const snappedSpeed = mappedIntensity <= 0 ? 0 : this.mapIntensityToRotation(mappedIntensity);
       if (this.platform.isDebugEnabled()) {
         this.platform.log.debug(
           `[Diffuser] Set RotationSpeed for ${this.accessory.displayName}: ` +
