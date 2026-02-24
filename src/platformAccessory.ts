@@ -424,8 +424,6 @@ export class PuraPlatformAccessory {
             this.updateFaultState();
             if (deviceUnavailable) {
               this.platform.log.warn(`${this.accessory.displayName} appears offline (Wi-Fi lost or unplugged).`);
-              // Surface an actionable HomeKit error when the device is unreachable.
-              throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
             } else {
               this.platform.log.warn(
                 `${this.accessory.displayName} was turned on, but no scent vials were detected. ` +
@@ -435,7 +433,6 @@ export class PuraPlatformAccessory {
             return;
           }
 
-          await this.puraApi.stopAll(this.device.id);
           await this.puraApi.setAwayMode(this.device.id, false);
           const alwaysOn = await this.puraApi.setAlwaysOn(this.device.id, targetBay);
           const requestedPowerOnIntensity = this.getPendingPowerOnIntensityIntentValue();
@@ -493,11 +490,9 @@ export class PuraPlatformAccessory {
           }
         }
       } catch (error) {
-        if (error instanceof this.platform.api.hap.HapStatusError) {
-          throw error;
-        }
         this.platform.log.error(`Error setting On state for ${this.accessory.displayName}:`, error);
-        throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+        // Fail soft to avoid Home app "No Response" on transient API errors.
+        this.applyCurrentState();
       }
     });
   }
@@ -505,7 +500,9 @@ export class PuraPlatformAccessory {
   async getOn(): Promise<CharacteristicValue> {
     if (this.isDeviceUnavailable()) {
       this.updateFaultState();
-      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+      const cached = this.getCurrentStateValue();
+      this.platform.log.debug(`Get Characteristic Active for ${this.accessory.displayName} ->`, cached, '(cached; unavailable)');
+      return cached;
     }
     const isActive = this.getCurrentStateValue();
     this.platform.log.debug(`Get Characteristic Active for ${this.accessory.displayName} ->`, isActive);
@@ -518,7 +515,9 @@ export class PuraPlatformAccessory {
     }
     if (this.isDeviceUnavailable()) {
       this.updateFaultState();
-      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+      const currentValue = this.service.getCharacteristic(this.platform.Characteristic.RotationSpeed).value;
+      const cached = Number(currentValue);
+      return Number.isFinite(cached) ? cached : 0;
     }
     if (!this.currentStateActive) {
       return 0;
@@ -614,7 +613,11 @@ export class PuraPlatformAccessory {
         this.accessory.context.lastIntensity = mappedIntensity;
         if (this.isDeviceUnavailable()) {
           this.updateFaultState();
-          throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+          this.platform.log.warn(
+            `${this.accessory.displayName} appears unavailable while adjusting intensity; preserving current state.`,
+          );
+          this.applyCurrentState();
+          return;
         }
         if (this.hasNoScentVialsDetected()) {
           this.enforceOffVisualState();
@@ -670,9 +673,6 @@ export class PuraPlatformAccessory {
         );
         this.applyCurrentState();
       } catch (error) {
-        if (error instanceof this.platform.api.hap.HapStatusError) {
-          throw error;
-        }
         this.platform.log.error(`Error setting RotationSpeed for ${this.accessory.displayName}:`, error);
         // Fail soft for slider writes to avoid Home app "No Response" for transient intensity update errors.
         this.applyCurrentState();
