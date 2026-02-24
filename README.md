@@ -48,12 +48,12 @@ Add the following platform to your `config.json`:
 ## Usage
 
 Once configured, your Pura diffusers will appear in the Home app as a single switch per diffuser (e.g., "Living Room Diffuser").
-If `enableNightlightAccessory` is set to `true`, each compatible diffuser also includes a separate `Nightlight Control` service.
+If `enableNightlightAccessory` is set to `true`, each compatible diffuser also includes a separate `Nightlight Control` Lightbulb service.
 
 ### Controls
 
 - **Power**: Turn the diffuser on/off
-- **Nightlight (optional)**:
+- **Nightlight Control (optional)**:
   - On/Off
   - Brightness (snapped to supported 10-step levels: 10%, 20%, ..., 100%)
   - Color (Hue/Saturation)
@@ -62,7 +62,7 @@ If `enableNightlightAccessory` is set to `true`, each compatible diffuser also i
 
 The plugin will automatically:
 - Discover all Pura devices on your account
-- Create one switch per diffuser
+- Create one switch per diffuser (plus optional `Nightlight Control` on compatible models)
 - Update device status via realtime updates with a 5-minute polling fallback (15s when realtime is down)
 - Handle authentication and token refresh (including periodic Cognito refresh polling)
 
