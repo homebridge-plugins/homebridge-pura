@@ -552,6 +552,10 @@ export class PuraPlatformAccessory {
           if (success) {
             this.currentStateActive = false;
             this.lastSuccessfulOnWriteAt = undefined;
+            // Diffuser OFF often changes nightlight state in cloud. Clear local nightlight intent/hold so
+            // OFF snapshots are not treated as stale and logs can reflect the transition.
+            this.pendingNightlightIntent = undefined;
+            this.recentNightlightHold = undefined;
             this.platform.log.debug(`Successfully turned off ${this.accessory.displayName}`);
             this.applyCurrentState();
             this.platform.log.info(`${this.accessory.displayName} turned off.`);
@@ -637,6 +641,8 @@ export class PuraPlatformAccessory {
           if (success) {
             this.currentStateActive = false;
             this.lastSuccessfulOnWriteAt = undefined;
+            this.pendingNightlightIntent = undefined;
+            this.recentNightlightHold = undefined;
             this.platform.log.debug(`Successfully turned off ${this.accessory.displayName} via RotationSpeed=0`);
             this.platform.log.info(`${this.accessory.displayName} turned off.`);
           } else {
@@ -859,12 +865,13 @@ export class PuraPlatformAccessory {
         color,
       };
       this.recordNightlightCommand('on', active, brightnessPercent, sentLevel);
+      const nightlightLabel = this.getNightlightLogLabel();
       if (active) {
         this.platform.log.info(
-          `${this.accessory.displayName} nightlight turned on (${brightnessPercent}% brightness).`,
+          `${nightlightLabel} turned on (${brightnessPercent}% brightness).`,
         );
       } else {
-        this.platform.log.info(`${this.accessory.displayName} nightlight turned off.`);
+        this.platform.log.info(`${nightlightLabel} turned off.`);
       }
       this.applyNightlightState();
     });
@@ -960,8 +967,9 @@ export class PuraPlatformAccessory {
       };
       this.logNightlightToggle(active, snappedPercent);
       this.recordNightlightCommand('brightness', active, snappedPercent, apiLevel);
+      const nightlightLabel = this.getNightlightLogLabel();
       this.platform.log.info(
-        `${this.accessory.displayName} nightlight brightness set to ${snappedPercent}% ` +
+        `${nightlightLabel} brightness set to ${snappedPercent}% ` +
         `(level ${apiLevel}, color ${color}, active=${active}).`,
       );
       this.applyNightlightState();
@@ -1563,10 +1571,27 @@ export class PuraPlatformAccessory {
       this.logNightlightToggle(requestedOn, hkBrightnessPercent);
       return;
     }
+    const nightlightLabel = this.getNightlightLogLabel();
     this.platform.log.info(
-      `${this.accessory.displayName} nightlight brightness set to ` +
+      `${nightlightLabel} brightness set to ` +
       `${Math.round(hkBrightnessPercent)}% (level ${sentLevel}/10).`,
     );
+  }
+
+  private getNightlightLogLabel(): string {
+    const name = this.accessory.displayName.trim();
+    const hasNightlight = /nightlight/i.test(name);
+    const hasDiffuser = /diffuser/i.test(name);
+    if (hasNightlight && hasDiffuser) {
+      return name;
+    }
+    if (hasNightlight) {
+      return name.replace(/nightlight/i, 'Diffuser Nightlight');
+    }
+    if (hasDiffuser) {
+      return `${name} Nightlight`;
+    }
+    return `${name} Diffuser Nightlight`;
   }
 
   private logNightlightToggle(active: boolean, brightnessPercent: number) {
@@ -1635,8 +1660,7 @@ export class PuraPlatformAccessory {
     }
     this.lastNightlightLog = { at: now, active, level: roundedPercent };
 
-    const includesNightlight = /nightlight/i.test(this.accessory.displayName);
-    const label = includesNightlight ? this.accessory.displayName : `${this.accessory.displayName} nightlight`;
+    const label = this.getNightlightLogLabel();
     if (active) {
       this.platform.log.info(`${label} turned on (${roundedPercent}% brightness).`);
     } else {

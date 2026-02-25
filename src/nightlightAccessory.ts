@@ -585,6 +585,22 @@ export class PuraNightlightAccessory {
     }
   }
 
+  private getNightlightLogLabel(): string {
+    const name = this.accessory.displayName.trim();
+    const hasNightlight = /nightlight/i.test(name);
+    const hasDiffuser = /diffuser/i.test(name);
+    if (hasNightlight && hasDiffuser) {
+      return name;
+    }
+    if (hasNightlight) {
+      return name.replace(/nightlight/i, 'Diffuser Nightlight');
+    }
+    if (hasDiffuser) {
+      return `${name} Nightlight`;
+    }
+    return `${name} Diffuser Nightlight`;
+  }
+
   private emitNightlightLog(kind: 'on' | 'off' | 'brightness', brightnessPercent: number) {
     const now = Date.now();
     const roundedPercent = Math.round(brightnessPercent);
@@ -598,8 +614,7 @@ export class PuraNightlightAccessory {
     }
     this.lastNightlightLog = { at: now, active, level: roundedPercent };
 
-    const includesNightlight = /nightlight/i.test(this.accessory.displayName);
-    const label = includesNightlight ? this.accessory.displayName : `${this.accessory.displayName} nightlight`;
+    const label = this.getNightlightLogLabel();
     if (kind === 'on') {
       this.platform.log.info(`${label} turned on (${roundedPercent}% brightness).`);
       return;
