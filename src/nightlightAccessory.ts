@@ -80,6 +80,15 @@ export class PuraNightlightAccessory {
     if (incomingDiffuserActive && !this.lastDiffuserActive) {
       this.lastDiffuserOnAt = Date.now();
     }
+    if (!incomingDiffuserActive && this.lastDiffuserActive) {
+      const recentNightlightInteraction = this.platform.getRecentNightlightInteraction(this.device.id);
+      // When the diffuser turns off, cloud nightlight OFF should win unless HomeKit just issued
+      // a direct nightlight command for this same device.
+      if (!recentNightlightInteraction) {
+        this.pendingNightlightIntent = undefined;
+        this.recentNightlightHold = undefined;
+      }
+    }
     const stabilized = this.clampNightlightDuringHold(this.stabilizeNightlightDuringIntentWindow(device));
     this.device = stabilized;
     this.lastDiffuserActive = this.isDiffuserActive(stabilized);
@@ -493,6 +502,7 @@ export class PuraNightlightAccessory {
     const inDiffuserStartupWindow = sinceDiffuserOnMs !== undefined
       && sinceDiffuserOnMs >= 0
       && sinceDiffuserOnMs <= 6000;
+    const incomingDiffuserActive = this.isDiffuserActive(device);
     // Diffuser startup can legitimately flip the nightlight ON without a HomeKit nightlight command.
     // If cloud reports ON shortly after startup, prefer cloud truth over stale local OFF intent.
     if (!intent.active && incomingActive && inDiffuserStartupWindow && !recentNightlightInteraction) {
@@ -503,6 +513,18 @@ export class PuraNightlightAccessory {
         );
       }
       this.pendingNightlightIntent = undefined;
+      return device;
+    }
+    // If diffuser is off and cloud reports nightlight OFF, prefer cloud truth over stale ON intent.
+    if (intent.active && !incomingActive && !incomingDiffuserActive && !recentNightlightInteraction) {
+      if (this.platform.isDebugEnabled()) {
+        this.platform.log.debug(
+          `[Nightlight] Accepting cloud OFF snapshot for ${this.accessory.displayName} ` +
+          `(clearing stale ON intent, ageMs=${ageMs}).`,
+        );
+      }
+      this.pendingNightlightIntent = undefined;
+      this.recentNightlightHold = undefined;
       return device;
     }
     const matchesIntent = incomingActive === intent.active
