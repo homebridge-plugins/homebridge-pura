@@ -387,24 +387,25 @@ export class PuraPlatformAccessory {
     }
     if (failedBays.length > 0) {
       this.platform.log.warn(
-        `${this.accessory.displayName} intensity synced to active bay, but failed on bay(s): ${failedBays.join(', ')}.`,
+        `${this.getDiffuserLogLabel()} intensity synced to active bay, but failed on bay(s): ${failedBays.join(', ')}.`,
       );
       return;
     }
     if (this.platform.isDebugEnabled()) {
       this.platform.log.debug(
-        `${this.accessory.displayName} intensity synced to secondary bay(s): ${bays.join(', ')}.`,
+        `${this.getDiffuserLogLabel()} intensity synced to secondary bay(s): ${bays.join(', ')}.`,
       );
     }
   }
 
   async setOn(value: CharacteristicValue) {
     await this.enqueueRotationWrite(async () => {
+      const diffuserLabel = this.getDiffuserLogLabel();
       const isOn = this.useFanService
         ? value === this.platform.Characteristic.Active.ACTIVE
         : Boolean(value);
       this.lastSetOnCommandAt = Date.now();
-      this.platform.log.debug(`Set Characteristic Active for ${this.accessory.displayName} ->`, value);
+      this.platform.log.debug(`Set Characteristic Active for ${diffuserLabel} ->`, value);
       this.platform.recordIntent(this.device.id, isOn);
 
       try {
@@ -413,7 +414,7 @@ export class PuraPlatformAccessory {
             this.applyCurrentState();
             if (this.platform.isDebugEnabled()) {
               this.platform.log.debug(
-                `[Diffuser] Ignoring redundant ON command for ${this.accessory.displayName} because it is already active.`,
+                `[Diffuser] Ignoring redundant ON command for ${diffuserLabel} because it is already active.`,
               );
             }
             return;
@@ -460,7 +461,7 @@ export class PuraPlatformAccessory {
           const deviceUnavailable = this.isDeviceUnavailable();
           if (!bay && this.platform.isDebugEnabled()) {
             this.platform.log.warn(
-              `No bay payload available for ${this.accessory.displayName}; using fallback bay ${targetBay}.`,
+              `No bay payload available for ${diffuserLabel}; using fallback bay ${targetBay}.`,
             );
           }
           const candidateIntensity = bay && Number.isFinite(bay.intensity) && bay.intensity > 0
@@ -478,10 +479,10 @@ export class PuraPlatformAccessory {
             this.enforceOffVisualState();
             this.updateFaultState();
             if (deviceUnavailable) {
-              this.platform.log.warn(`${this.accessory.displayName} appears offline (Wi-Fi lost or unplugged).`);
+              this.platform.log.warn(`${diffuserLabel} appears offline (Wi-Fi lost or unplugged).`);
             } else {
               this.platform.log.warn(
-                `${this.accessory.displayName} was turned on, but no scent vials were detected. ` +
+                `${diffuserLabel} was turned on, but no scent vials were detected. ` +
                 'The accessory was turned off as a result.',
               );
             }
@@ -508,14 +509,14 @@ export class PuraPlatformAccessory {
               intensity,
               bay: targetBay,
             };
-            this.platform.log.debug(`Successfully turned on ${this.accessory.displayName} with intensity ${intensity}`);
+            this.platform.log.debug(`Successfully turned on ${diffuserLabel} with intensity ${intensity}`);
             this.applyCurrentState();
-            this.platform.log.info(`${this.accessory.displayName} turned on.`);
+            this.platform.log.info(`${diffuserLabel} turned on.`);
             // When Home turns the fan accessory on, it commonly sends RotationSpeed writes that we may suppress
             // as "pending intent". Emit the intensity log here so the user still sees the chosen level.
             if (this.useFanService) {
               this.platform.log.info(
-                `${this.accessory.displayName} intensity set to ${intensity} ` +
+                `${diffuserLabel} intensity set to ${intensity} ` +
                 `(${intensity === 30 ? 'subtle' : intensity === 50 ? 'medium' : 'strong'}).`,
               );
             }
@@ -523,7 +524,7 @@ export class PuraPlatformAccessory {
               await this.ensureNightlightOff();
             }
           } else {
-            this.platform.log.error(`Failed to turn on ${this.accessory.displayName}`);
+            this.platform.log.error(`Failed to turn on ${diffuserLabel}`);
             throw new Error('Failed to turn on device');
           }
         } else {
@@ -533,7 +534,7 @@ export class PuraPlatformAccessory {
             this.applyCurrentState();
             if (this.platform.isDebugEnabled()) {
               this.platform.log.debug(
-                `[Diffuser] Ignoring redundant OFF command for ${this.accessory.displayName} because it is already inactive.`,
+                `[Diffuser] Ignoring redundant OFF command for ${diffuserLabel} because it is already inactive.`,
               );
             }
             return;
@@ -541,7 +542,7 @@ export class PuraPlatformAccessory {
           if (this.isDeviceUnavailable()) {
             this.enforceOffVisualState();
             this.updateFaultState();
-            this.platform.log.warn(`${this.accessory.displayName} appears offline (Wi-Fi lost or unplugged).`);
+            this.platform.log.warn(`${diffuserLabel} appears offline (Wi-Fi lost or unplugged).`);
             return;
           }
           if (this.shouldSuppressConflictingOffCommand('setOn')) {
@@ -556,18 +557,18 @@ export class PuraPlatformAccessory {
             // OFF snapshots are not treated as stale and logs can reflect the transition.
             this.pendingNightlightIntent = undefined;
             this.recentNightlightHold = undefined;
-            this.platform.log.debug(`Successfully turned off ${this.accessory.displayName}`);
+            this.platform.log.debug(`Successfully turned off ${diffuserLabel}`);
             this.applyCurrentState();
-            this.platform.log.info(`${this.accessory.displayName} turned off.`);
+            this.platform.log.info(`${diffuserLabel} turned off.`);
             // Reconcile Pura state after power-off. Nightlight state is sometimes omitted from realtime payloads.
             this.platform.requestRefreshSoon(2500);
           } else {
-            this.platform.log.error(`Failed to turn off ${this.accessory.displayName}`);
+            this.platform.log.error(`Failed to turn off ${diffuserLabel}`);
             throw new Error('Failed to turn off device');
           }
         }
       } catch (error) {
-        this.platform.log.error(`Error setting On state for ${this.accessory.displayName}:`, error);
+        this.platform.log.error(`Error setting On state for ${diffuserLabel}:`, error);
         // Fail soft to avoid Home app "No Response" on transient API errors.
         this.applyCurrentState();
       }
@@ -575,14 +576,15 @@ export class PuraPlatformAccessory {
   }
 
   async getOn(): Promise<CharacteristicValue> {
+    const diffuserLabel = this.getDiffuserLogLabel();
     if (this.isDeviceUnavailable()) {
       this.updateFaultState();
       const cached = this.getCurrentStateValue();
-      this.platform.log.debug(`Get Characteristic Active for ${this.accessory.displayName} ->`, cached, '(cached; unavailable)');
+      this.platform.log.debug(`Get Characteristic Active for ${diffuserLabel} ->`, cached, '(cached; unavailable)');
       return cached;
     }
     const isActive = this.getCurrentStateValue();
-    this.platform.log.debug(`Get Characteristic Active for ${this.accessory.displayName} ->`, isActive);
+    this.platform.log.debug(`Get Characteristic Active for ${diffuserLabel} ->`, isActive);
     return isActive;
   }
 
@@ -610,6 +612,7 @@ export class PuraPlatformAccessory {
 
   async setRotationSpeed(value: CharacteristicValue) {
     await this.enqueueRotationWrite(async () => {
+      const diffuserLabel = this.getDiffuserLogLabel();
       try {
         if (!this.useFanService) {
           return;
@@ -629,7 +632,7 @@ export class PuraPlatformAccessory {
           if (this.isDeviceUnavailable()) {
             this.enforceOffVisualState();
             this.updateFaultState();
-            this.platform.log.warn(`${this.accessory.displayName} appears offline (Wi-Fi lost or unplugged).`);
+            this.platform.log.warn(`${diffuserLabel} appears offline (Wi-Fi lost or unplugged).`);
             return;
           }
           if (this.shouldSuppressConflictingOffCommand('rotation')) {
@@ -643,11 +646,11 @@ export class PuraPlatformAccessory {
             this.lastSuccessfulOnWriteAt = undefined;
             this.pendingNightlightIntent = undefined;
             this.recentNightlightHold = undefined;
-            this.platform.log.debug(`Successfully turned off ${this.accessory.displayName} via RotationSpeed=0`);
-            this.platform.log.info(`${this.accessory.displayName} turned off.`);
+            this.platform.log.debug(`Successfully turned off ${diffuserLabel} via RotationSpeed=0`);
+            this.platform.log.info(`${diffuserLabel} turned off.`);
           } else {
             this.platform.log.warn(
-              `Failed to turn off ${this.accessory.displayName} via RotationSpeed=0; preserving current state.`,
+              `Failed to turn off ${diffuserLabel} via RotationSpeed=0; preserving current state.`,
             );
           }
           this.applyCurrentState();
@@ -669,7 +672,7 @@ export class PuraPlatformAccessory {
         if (isLikelyHomeImplicitOnSpeed) {
           if (this.platform.isDebugEnabled()) {
             this.platform.log.debug(
-              `[Diffuser] Deferring implicit power-on RotationSpeed=100 for ${this.accessory.displayName} ` +
+              `[Diffuser] Deferring implicit power-on RotationSpeed=100 for ${diffuserLabel} ` +
               `(ageMs=${onCommandAgeMs}). Pending power-on intensity=${mappedIntensity}.`,
             );
           }
@@ -677,7 +680,7 @@ export class PuraPlatformAccessory {
         }
         if (this.platform.isDebugEnabled()) {
           this.platform.log.debug(
-            `[Diffuser] Set RotationSpeed for ${this.accessory.displayName}: ` +
+            `[Diffuser] Set RotationSpeed for ${diffuserLabel}: ` +
             `raw=${value} normalized=${speed} snapped=${snappedSpeed} mappedIntensity=${mappedIntensity}`,
           );
         }
@@ -687,7 +690,7 @@ export class PuraPlatformAccessory {
           this.applyCurrentState();
           if (this.platform.isDebugEnabled()) {
             this.platform.log.debug(
-              `[Diffuser] Skipping duplicate intensity write for ${this.accessory.displayName}: ${mappedIntensity} (pending intent)`,
+              `[Diffuser] Skipping duplicate intensity write for ${diffuserLabel}: ${mappedIntensity} (pending intent)`,
             );
           }
           return;
@@ -696,7 +699,7 @@ export class PuraPlatformAccessory {
         if (!allowWhileInactive) {
           if (this.platform.isDebugEnabled()) {
             this.platform.log.debug(
-              `[Diffuser] Ignoring RotationSpeed write for ${this.accessory.displayName} while inactive ` +
+              `[Diffuser] Ignoring RotationSpeed write for ${diffuserLabel} while inactive ` +
               `(raw=${value}, snapped=${snappedSpeed}, onAgeMs=${onCommandAgeMs ?? 'n/a'}).`,
             );
           }
@@ -706,7 +709,7 @@ export class PuraPlatformAccessory {
         if (this.isDeviceUnavailable()) {
           this.updateFaultState();
           this.platform.log.warn(
-            `${this.accessory.displayName} appears unavailable while adjusting intensity; preserving current state.`,
+            `${diffuserLabel} appears unavailable while adjusting intensity; preserving current state.`,
           );
           this.applyCurrentState();
           return;
@@ -715,7 +718,7 @@ export class PuraPlatformAccessory {
           this.enforceOffVisualState();
           this.updateFaultState();
           this.platform.log.warn(
-            `${this.accessory.displayName} was turned on, but no scent vials were detected. ` +
+            `${diffuserLabel} was turned on, but no scent vials were detected. ` +
             'The accessory was turned off as a result.',
           );
           return;
@@ -735,7 +738,7 @@ export class PuraPlatformAccessory {
           const alwaysOn = await this.puraApi.setAlwaysOn(this.device.id, targetBay);
           if (!alwaysOn) {
             this.platform.log.warn(
-              `${this.accessory.displayName} could not be re-armed while setting intensity; preserving current state.`,
+              `${diffuserLabel} could not be re-armed while setting intensity; preserving current state.`,
             );
             this.applyCurrentState();
             return;
@@ -747,7 +750,7 @@ export class PuraPlatformAccessory {
           this.applyCurrentState();
           if (this.platform.isDebugEnabled()) {
             this.platform.log.debug(
-              `[Diffuser] Skipping duplicate intensity write for ${this.accessory.displayName}: ${mappedIntensity} (already active)`,
+              `[Diffuser] Skipping duplicate intensity write for ${diffuserLabel}: ${mappedIntensity} (already active)`,
             );
           }
           return;
@@ -766,7 +769,7 @@ export class PuraPlatformAccessory {
         if (!success) {
           this.pendingIntensityIntent = previousPendingIntent;
           this.platform.log.warn(
-            `${this.accessory.displayName} intensity write failed (raw=${value}, snapped=${snappedSpeed}, targetBay=${targetBay}). ` +
+            `${diffuserLabel} intensity write failed (raw=${value}, snapped=${snappedSpeed}, targetBay=${targetBay}). ` +
             'Keeping last known state to avoid HomeKit no-response.',
           );
           this.applyCurrentState();
@@ -781,12 +784,12 @@ export class PuraPlatformAccessory {
         };
         this.recentIntensityHold = { until: Date.now() + 15000, level: mappedIntensity };
         this.platform.log.info(
-          `${this.accessory.displayName} intensity set to ${mappedIntensity} ` +
+          `${diffuserLabel} intensity set to ${mappedIntensity} ` +
           `(${mappedIntensity === 30 ? 'subtle' : mappedIntensity === 50 ? 'medium' : 'strong'}).`,
         );
         this.applyCurrentState();
       } catch (error) {
-        this.platform.log.error(`Error setting RotationSpeed for ${this.accessory.displayName}:`, error);
+        this.platform.log.error(`Error setting RotationSpeed for ${diffuserLabel}:`, error);
         // Fail soft for slider writes to avoid Home app "No Response" for transient intensity update errors.
         this.applyCurrentState();
       }
@@ -1088,6 +1091,7 @@ export class PuraPlatformAccessory {
   }
 
   private logInferredOfflineTransition() {
+    const diffuserLabel = this.getDiffuserLogLabel();
     const inferredOffline = this.isLikelyOfflineFromStaleStatus();
     if (inferredOffline === this.inferredOfflineFromStaleState) {
       return;
@@ -1095,14 +1099,15 @@ export class PuraPlatformAccessory {
     this.inferredOfflineFromStaleState = inferredOffline;
     if (inferredOffline) {
       this.platform.log.warn(
-        `${this.accessory.displayName} appears offline (cloud status may be stale; reported online without bay payload).`,
+        `${diffuserLabel} appears offline (cloud status may be stale; reported online without bay payload).`,
       );
     } else {
-      this.platform.log.info(`${this.accessory.displayName} cloud status appears current again.`);
+      this.platform.log.info(`${diffuserLabel} cloud status appears current again.`);
     }
   }
 
   private logRecommendationHints(device: PuraDevice) {
+    const diffuserLabel = this.getDiffuserLogLabel();
     const awayModeEnabled = this.isAwayModeEnabled(device);
     if (awayModeEnabled !== this.lastAwayModeEnabledState) {
       const isInitialLog = this.lastAwayModeEnabledState === null;
@@ -1110,9 +1115,9 @@ export class PuraPlatformAccessory {
       if (awayModeEnabled) {
         this.platform.log.warn(
           isInitialLog
-            ? `Away mode is currently enabled on ${this.accessory.displayName}. ` +
+            ? `Away mode is currently enabled on ${diffuserLabel}. ` +
               'For best results, please disable it in the Pura app.'
-            : `Away mode was enabled on ${this.accessory.displayName}. ` +
+            : `Away mode was enabled on ${diffuserLabel}. ` +
               'For best results, please disable it in the Pura app.',
         );
       }
@@ -1125,9 +1130,9 @@ export class PuraPlatformAccessory {
       if (autoAlternativeLikelyOff) {
         this.platform.log.warn(
           isInitialLog
-            ? `Auto-alternate fragrances is currently disabled on ${this.accessory.displayName}. ` +
+            ? `Auto-alternate fragrances is currently disabled on ${diffuserLabel}. ` +
               'For best results, please enable it in the Pura app.'
-            : `Auto-alternate fragrances was disabled on ${this.accessory.displayName}. ` +
+            : `Auto-alternate fragrances was disabled on ${diffuserLabel}. ` +
               'For best results, please re-enable it in the Pura app.',
         );
       }
@@ -1197,14 +1202,15 @@ export class PuraPlatformAccessory {
   }
 
   private logOnlineStateTransition(previousOnline?: boolean, nextOnline?: boolean) {
+    const diffuserLabel = this.getDiffuserLogLabel();
     if (previousOnline === undefined || nextOnline === undefined || previousOnline === nextOnline) {
       return;
     }
     if (nextOnline) {
-      this.platform.log.info(`${this.accessory.displayName} is back online.`);
+      this.platform.log.info(`${diffuserLabel} is back online.`);
       return;
     }
-    this.platform.log.warn(`${this.accessory.displayName} appears offline (Wi-Fi lost or unplugged).`);
+    this.platform.log.warn(`${diffuserLabel} appears offline (Wi-Fi lost or unplugged).`);
   }
 
   private updateAccessoryInformation() {
@@ -1460,13 +1466,14 @@ export class PuraPlatformAccessory {
   }
 
   private shouldSuppressConflictingOffCommand(origin: 'setOn' | 'rotation'): boolean {
+    const diffuserLabel = this.getDiffuserLogLabel();
     if (!this.currentStateActive) {
       return false;
     }
     const recentNightlightInteraction = this.platform.getRecentNightlightInteraction(this.device.id);
     if (recentNightlightInteraction) {
       this.platform.log.warn(
-        `[Diffuser] Suppressing OFF command for ${this.accessory.displayName} ` +
+        `[Diffuser] Suppressing OFF command for ${diffuserLabel} ` +
         `(origin=${origin}, recentNightlightAgeMs=${recentNightlightInteraction.ageMs}).`,
       );
       return true;
@@ -1486,7 +1493,7 @@ export class PuraPlatformAccessory {
       return false;
     }
     this.platform.log.warn(
-      `[Diffuser] Suppressing conflicting OFF command for ${this.accessory.displayName} ` +
+      `[Diffuser] Suppressing conflicting OFF command for ${diffuserLabel} ` +
       `(origin=${origin}, sinceLastOnMs=${sinceLastOnMs}, pendingIntensity=${pendingIntensity ?? 'none'}).`,
     );
     return true;
@@ -1576,6 +1583,17 @@ export class PuraPlatformAccessory {
       `${nightlightLabel} brightness set to ` +
       `${Math.round(hkBrightnessPercent)}% (level ${sentLevel}/10).`,
     );
+  }
+
+  private getDiffuserLogLabel(): string {
+    const name = this.accessory.displayName.trim();
+    if (/diffuser/i.test(name)) {
+      return name;
+    }
+    if (/nightlight/i.test(name)) {
+      return name.replace(/nightlight/i, 'Diffuser Nightlight');
+    }
+    return `${name} Diffuser`;
   }
 
   private getNightlightLogLabel(): string {
@@ -1914,7 +1932,7 @@ export class PuraPlatformAccessory {
     if (incomingLooksFullyOff && ageMs >= acceptExternalOffAfterMs) {
       if (this.platform.isDebugEnabled()) {
         this.platform.log.debug(
-          `[Diffuser] Accepting external OFF snapshot for ${this.accessory.displayName}; ` +
+          `[Diffuser] Accepting external OFF snapshot for ${this.getDiffuserLogLabel()}; ` +
           `clearing pending intensity intent (ageMs=${ageMs}).`,
         );
       }
@@ -1925,7 +1943,7 @@ export class PuraPlatformAccessory {
 
     if (this.platform.isDebugEnabled()) {
       this.platform.log.debug(
-        `[Diffuser] Ignoring stale intensity snapshot for ${this.accessory.displayName}: ` +
+        `[Diffuser] Ignoring stale intensity snapshot for ${this.getDiffuserLogLabel()}: ` +
         `incoming=${incomingIntensity ?? 'unknown'} expected=${intentIntensity} ` +
         `bay=${intentBay ?? 'auto'} ageMs=${ageMs}`,
       );
