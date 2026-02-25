@@ -832,8 +832,18 @@ export class PuraPlatformAccessory {
     await this.enqueueNightlightWrite(async () => {
       this.platform.recordNightlightInteraction(this.device.id);
       const active = Boolean(value);
+      const currentActive = Boolean(this.device.nightlight?.active);
       const currentRawBrightness = this.normalizeNightlightLevel(this.device.nightlight?.brightness);
-      const brightnessPercent = this.nightlightLevelToPercent(currentRawBrightness ?? 10);
+      const characteristicBrightnessValue = Number(
+        this.nightlightService?.getCharacteristic(this.platform.Characteristic.Brightness).value,
+      );
+      const characteristicBrightnessPercent = Number.isFinite(characteristicBrightnessValue)
+        ? Math.max(0, Math.min(100, Math.round(characteristicBrightnessValue)))
+        : 0;
+      const storedBrightnessPercent = this.nightlightLevelToPercent(currentRawBrightness ?? 10);
+      const brightnessPercent = active && !currentActive
+        ? (characteristicBrightnessPercent > 0 ? characteristicBrightnessPercent : 100)
+        : storedBrightnessPercent;
       const sentLevel = this.percentToNightlightLevel(brightnessPercent);
       const controller = this.device.controller || 'default';
       const color = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
