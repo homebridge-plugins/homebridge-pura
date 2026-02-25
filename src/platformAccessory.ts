@@ -1872,6 +1872,25 @@ export class PuraPlatformAccessory {
       return device;
     }
 
+    const presentBays = [device.bay1, device.bay2].filter((bay): bay is PuraBay => Boolean(bay));
+    const incomingHasAnyActiveBay = presentBays.some((bay) => Boolean(bay.active));
+    const incomingHasAnyPositiveIntensity = presentBays.some(
+      (bay) => Number.isFinite(bay.intensity) && Number(bay.intensity) > 0,
+    );
+    const incomingLooksFullyOff = presentBays.length > 0 && !incomingHasAnyActiveBay && !incomingHasAnyPositiveIntensity;
+    const acceptExternalOffAfterMs = 5000;
+    if (incomingLooksFullyOff && ageMs >= acceptExternalOffAfterMs) {
+      if (this.platform.isDebugEnabled()) {
+        this.platform.log.debug(
+          `[Diffuser] Accepting external OFF snapshot for ${this.accessory.displayName}; ` +
+          `clearing pending intensity intent (ageMs=${ageMs}).`,
+        );
+      }
+      this.pendingIntensityIntent = undefined;
+      this.pendingPowerOnIntensityIntent = undefined;
+      return this.clampIntensityDuringHold(device);
+    }
+
     if (this.platform.isDebugEnabled()) {
       this.platform.log.debug(
         `[Diffuser] Ignoring stale intensity snapshot for ${this.accessory.displayName}: ` +
