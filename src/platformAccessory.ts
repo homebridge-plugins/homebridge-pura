@@ -508,6 +508,14 @@ export class PuraPlatformAccessory {
             this.platform.log.debug(`Successfully turned on ${this.accessory.displayName} with intensity ${intensity}`);
             this.applyCurrentState();
             this.platform.log.info(`${this.accessory.displayName} turned on.`);
+            // When Home turns the fan accessory on, it commonly sends RotationSpeed writes that we may suppress
+            // as "pending intent". Emit the intensity log here so the user still sees the chosen level.
+            if (this.useFanService) {
+              this.platform.log.info(
+                `${this.accessory.displayName} intensity set to ${intensity} ` +
+                `(${intensity === 30 ? 'subtle' : intensity === 50 ? 'medium' : 'strong'}).`,
+              );
+            }
             if ((this.platform.config as PuraConfig).forceNightlightOff && this.supportsNightlightControl()) {
               await this.ensureNightlightOff();
             }

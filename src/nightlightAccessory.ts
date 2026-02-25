@@ -24,8 +24,8 @@ export class PuraNightlightAccessory {
     reason: 'on' | 'brightness' | 'color';
   };
   private lastNightlightLog?: { at: number; active: boolean; level: number };
-  private pendingNightlightOnLog?: { at: number; brightnessPercent: number };
-  private pendingNightlightOnLogTimer?: ReturnType<typeof setTimeout>;
+  private pendingNightlightLog?: { at: number; kind: 'on' | 'brightness'; brightnessPercent: number };
+  private pendingNightlightLogTimer?: ReturnType<typeof setTimeout>;
 
   constructor(
     private readonly platform: PuraPlatform,
@@ -240,7 +240,11 @@ export class PuraNightlightAccessory {
         };
         this.recentNightlightHold = active ? { until: Date.now() + 20000, level: sentLevel } : undefined;
         if (currentActive !== active) {
-          this.handleNightlightToggleLog(active, brightnessPercent);
+          if (active) {
+            this.queueNightlightLog('on', brightnessPercent);
+          } else {
+            this.emitNightlightOffLog();
+          }
         }
         this.applyNightlightState();
         return;
@@ -266,9 +270,11 @@ export class PuraNightlightAccessory {
       };
       this.lastNightlightApiWrite = { at: Date.now(), active, level: sentLevel, color, reason: 'on' };
       if (currentActive !== active) {
-        this.handleNightlightToggleLog(active, brightnessPercent);
-      } else if (active) {
-        this.maybeUpdatePendingNightlightOnLog(brightnessPercent);
+        if (active) {
+          this.queueNightlightLog('on', brightnessPercent);
+        } else {
+          this.emitNightlightOffLog();
+        }
       }
       this.applyNightlightState();
     });
@@ -316,9 +322,11 @@ export class PuraNightlightAccessory {
         };
         this.recentNightlightHold = active ? { until: Date.now() + 20000, level } : undefined;
         if (currentActive !== active) {
-          this.handleNightlightToggleLog(active, apiPercent);
-        } else if (active) {
-          this.maybeUpdatePendingNightlightOnLog(apiPercent);
+          if (active) {
+            this.queueNightlightLog('on', apiPercent);
+          } else {
+            this.emitNightlightOffLog();
+          }
         }
         this.applyNightlightState();
         return;
@@ -343,10 +351,12 @@ export class PuraNightlightAccessory {
         color,
       };
       this.lastNightlightApiWrite = { at: Date.now(), active, level, color, reason: 'brightness' };
-      if (currentActive !== active) {
-        this.handleNightlightToggleLog(active, apiPercent);
-      } else if (active) {
-        this.maybeUpdatePendingNightlightOnLog(apiPercent);
+      if (!active) {
+        this.emitNightlightOffLog();
+      } else if (!currentActive) {
+        this.queueNightlightLog('on', apiPercent);
+      } else {
+        this.queueNightlightLog('brightness', apiPercent);
       }
       this.applyNightlightState();
     });
@@ -446,9 +456,8 @@ export class PuraNightlightAccessory {
     };
     this.lastNightlightApiWrite = { at: Date.now(), active, level, color: normalizedColor, reason: 'color' };
     if (!currentActive) {
-      this.handleNightlightToggleLog(active, this.nightlightLevelToPercent(level));
-    } else {
-      this.maybeUpdatePendingNightlightOnLog(this.nightlightLevelToPercent(level));
+      // A color write also implicitly turns the light on; treat this as a turn-on event.
+      this.queueNightlightLog('on', this.nightlightLevelToPercent(level));
     }
     this.applyNightlightState();
   }
@@ -524,89 +533,63 @@ export class PuraNightlightAccessory {
     };
   }
 
-  private handleNightlightToggleLog(active: boolean, brightnessPercent: number) {
-    if (!active) {
-      this.cancelPendingNightlightOnLog();
-      this.emitNightlightToggleLog(false, 0);
-      return;
-    }
-    this.queueNightlightOnLog(brightnessPercent);
+  private emitNightlightOffLog() {
+    this.cancelPendingNightlightLog();
+    this.emitNightlightLog('off', 0);
   }
 
-  private queueNightlightOnLog(brightnessPercent: number) {
+  private queueNightlightLog(kind: 'on' | 'brightness', brightnessPercent: number) {
     const now = Date.now();
-    const existing = this.pendingNightlightOnLog;
+    const existing = this.pendingNightlightLog;
     if (existing) {
       existing.at = now;
       existing.brightnessPercent = brightnessPercent;
+      if (kind === 'on') {
+        existing.kind = 'on';
+      }
     } else {
-      this.pendingNightlightOnLog = { at: now, brightnessPercent };
+      this.pendingNightlightLog = { at: now, kind, brightnessPercent };
     }
 
-    // If HomeKit follows up with Brightness=100, log immediately and cancel the timer.
-    if (brightnessPercent >= 100) {
-      this.flushPendingNightlightOnLog();
-      return;
-    }
     // Debounce so rapid HomeKit bursts (On -> Brightness, or multiple Brightness writes) log the final value.
     const debounceMs = 1200;
-    if (this.pendingNightlightOnLogTimer) {
-      clearTimeout(this.pendingNightlightOnLogTimer);
-      this.pendingNightlightOnLogTimer = undefined;
+    if (this.pendingNightlightLogTimer) {
+      clearTimeout(this.pendingNightlightLogTimer);
+      this.pendingNightlightLogTimer = undefined;
     }
-    this.pendingNightlightOnLogTimer = setTimeout(() => this.flushPendingNightlightOnLog(), debounceMs);
+    this.pendingNightlightLogTimer = setTimeout(() => this.flushPendingNightlightLog(), debounceMs);
   }
 
-  private maybeUpdatePendingNightlightOnLog(brightnessPercent: number) {
-    const pending = this.pendingNightlightOnLog;
-    if (!pending) {
-      return;
-    }
-    const ageMs = Date.now() - pending.at;
-    if (ageMs > 2000) {
-      return;
-    }
-    pending.at = Date.now();
-    pending.brightnessPercent = brightnessPercent;
-    if (brightnessPercent >= 100) {
-      this.flushPendingNightlightOnLog();
-      return;
-    }
-
-    // Keep extending the debounce window while HomeKit is still sending follow-up writes.
-    const debounceMs = 1200;
-    if (this.pendingNightlightOnLogTimer) {
-      clearTimeout(this.pendingNightlightOnLogTimer);
-      this.pendingNightlightOnLogTimer = undefined;
-    }
-    this.pendingNightlightOnLogTimer = setTimeout(() => this.flushPendingNightlightOnLog(), debounceMs);
-  }
-
-  private flushPendingNightlightOnLog() {
-    const pending = this.pendingNightlightOnLog;
-    this.pendingNightlightOnLog = undefined;
-    if (this.pendingNightlightOnLogTimer) {
-      clearTimeout(this.pendingNightlightOnLogTimer);
-      this.pendingNightlightOnLogTimer = undefined;
+  private flushPendingNightlightLog() {
+    const pending = this.pendingNightlightLog;
+    this.pendingNightlightLog = undefined;
+    if (this.pendingNightlightLogTimer) {
+      clearTimeout(this.pendingNightlightLogTimer);
+      this.pendingNightlightLogTimer = undefined;
     }
     if (!pending) {
       return;
     }
-    this.emitNightlightToggleLog(true, pending.brightnessPercent);
+    if (pending.kind === 'on') {
+      this.emitNightlightLog('on', pending.brightnessPercent);
+      return;
+    }
+    this.emitNightlightLog('brightness', pending.brightnessPercent);
   }
 
-  private cancelPendingNightlightOnLog() {
-    this.pendingNightlightOnLog = undefined;
-    if (this.pendingNightlightOnLogTimer) {
-      clearTimeout(this.pendingNightlightOnLogTimer);
-      this.pendingNightlightOnLogTimer = undefined;
+  private cancelPendingNightlightLog() {
+    this.pendingNightlightLog = undefined;
+    if (this.pendingNightlightLogTimer) {
+      clearTimeout(this.pendingNightlightLogTimer);
+      this.pendingNightlightLogTimer = undefined;
     }
   }
 
-  private emitNightlightToggleLog(active: boolean, brightnessPercent: number) {
+  private emitNightlightLog(kind: 'on' | 'off' | 'brightness', brightnessPercent: number) {
     const now = Date.now();
     const roundedPercent = Math.round(brightnessPercent);
     const last = this.lastNightlightLog;
+    const active = kind !== 'off';
     if (last && last.active === active && Math.round(last.level) === roundedPercent) {
       const age = now - last.at;
       if (age < 1500) {
@@ -617,9 +600,15 @@ export class PuraNightlightAccessory {
 
     const includesNightlight = /nightlight/i.test(this.accessory.displayName);
     const label = includesNightlight ? this.accessory.displayName : `${this.accessory.displayName} nightlight`;
-    if (active) {
+    if (kind === 'on') {
       this.platform.log.info(`${label} turned on (${roundedPercent}% brightness).`);
-    } else {
+      return;
+    }
+    if (kind === 'brightness') {
+      this.platform.log.info(`${label} brightness set to ${roundedPercent}%.`);
+      return;
+    }
+    {
       this.platform.log.info(`${label} turned off.`);
     }
   }
