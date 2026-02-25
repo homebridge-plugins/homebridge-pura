@@ -1504,13 +1504,6 @@ export class PuraPlatformAccessory {
       return false;
     }
     const recentNightlightInteraction = this.platform.getRecentNightlightInteraction(this.device.id);
-    if (recentNightlightInteraction) {
-      this.platform.log.warn(
-        `[Diffuser] Suppressing OFF command for ${diffuserLabel} ` +
-        `(origin=${origin}, recentNightlightAgeMs=${recentNightlightInteraction.ageMs}).`,
-      );
-      return true;
-    }
     if (this.lastSuccessfulOnWriteAt === undefined) {
       return false;
     }
@@ -1525,10 +1518,13 @@ export class PuraPlatformAccessory {
     if (pendingIntensity === undefined && pendingPowerOnIntensity === undefined) {
       return false;
     }
-    this.platform.log.warn(
-      `[Diffuser] Suppressing conflicting OFF command for ${diffuserLabel} ` +
-      `(origin=${origin}, sinceLastOnMs=${sinceLastOnMs}, pendingIntensity=${pendingIntensity ?? 'none'}).`,
-    );
+    if (this.platform.isDebugEnabled()) {
+      this.platform.log.debug(
+        `[Diffuser] Suppressing conflicting OFF command for ${diffuserLabel} ` +
+        `(origin=${origin}, sinceLastOnMs=${sinceLastOnMs}, pendingIntensity=${pendingIntensity ?? 'none'}, ` +
+        `recentNightlightAgeMs=${recentNightlightInteraction?.ageMs ?? 'none'}).`,
+      );
+    }
     return true;
   }
 
