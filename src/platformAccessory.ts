@@ -1834,13 +1834,14 @@ export class PuraPlatformAccessory {
     if (!device.nightlight) {
       return device;
     }
+    const intent = this.pendingNightlightIntent;
     const recentNightlightInteraction = this.platform.getRecentNightlightInteraction(this.device.id);
-    if (!recentNightlightInteraction && ageMs > 3500) {
+    const passiveIntentMaxAgeMs = intent.active ? 9000 : 3500;
+    if (!recentNightlightInteraction && ageMs > passiveIntentMaxAgeMs) {
       this.pendingNightlightIntent = undefined;
       return device;
     }
 
-    const intent = this.pendingNightlightIntent;
     const incomingLevel = this.normalizeNightlightLevel(device.nightlight.brightness);
     const incomingActive = Boolean(device.nightlight.active);
     const incomingColor = this.normalizeNightlightColor(device.nightlight.color);

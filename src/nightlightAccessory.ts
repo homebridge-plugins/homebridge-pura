@@ -500,8 +500,10 @@ export class PuraNightlightAccessory {
       : undefined;
     const recentNightlightInteraction = this.platform.getRecentNightlightInteraction(this.device.id);
     // Pending intent should only dominate for a short window unless we are still handling
-    // a direct nightlight interaction. Otherwise, trust cloud state to avoid sticky ON/OFF.
-    if (!recentNightlightInteraction && ageMs > 3500) {
+    // a direct nightlight interaction. Keep ON intents longer to prevent brief OFF flicker
+    // from delayed cloud snapshots, while expiring OFF intents quickly.
+    const passiveIntentMaxAgeMs = intent.active ? 9000 : 3500;
+    if (!recentNightlightInteraction && ageMs > passiveIntentMaxAgeMs) {
       this.pendingNightlightIntent = undefined;
       return device;
     }
