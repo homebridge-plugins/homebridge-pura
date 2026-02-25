@@ -46,7 +46,7 @@ Add the following platform to your `config.json`:
 - **username**: Your Pura email - *required*
 - **password**: Your Pura password - *required*
 - **forceNightlightOff**: Pura turns the nightlight on/off with the diffuser. Enable to prevent the light from staying on. (default: false)
-- **enableFanService (Enable Intensity Control)**: Replaces the on/off switch with a fan accessory, allowing intensity control (Subtle, Medium, Strong). For multi-bay diffusers, HomeKit intensity changes are applied across available bays to keep auto-alternate behavior consistent. (default: false)
+- **enableFanService (Enable Intensity Control)**: Changes the diffuser from an on/off switch to a fan accessory that controls intensity (Subtle, Medium, Strong). For multi-bay diffusers, HomeKit intensity changes are applied across available bays to keep auto-alternate behavior consistent. (default: false)
 - **enableNightlightAccessory**: Enables a separate nightlight accessory for compatible diffusers, including On/Brightness/Color. (default: false)
 
 ## Usage
