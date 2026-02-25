@@ -76,6 +76,7 @@ export class PuraNightlightAccessory {
   }
 
   updateDevice(device: PuraDevice) {
+    const previousNightlight = this.device.nightlight;
     const incomingDiffuserActive = this.isDiffuserActive(device);
     if (incomingDiffuserActive && !this.lastDiffuserActive) {
       this.lastDiffuserOnAt = Date.now();
@@ -93,6 +94,15 @@ export class PuraNightlightAccessory {
     this.device = stabilized;
     this.lastDiffuserActive = this.isDiffuserActive(stabilized);
     this.accessory.context.device = stabilized;
+    const previousNightlightActive = Boolean(previousNightlight?.active);
+    const nextNightlightActive = Boolean(stabilized.nightlight?.active);
+    if (previousNightlightActive !== nextNightlightActive) {
+      if (nextNightlightActive) {
+        this.queueNightlightLog('on', this.nightlightLevelToPercent(stabilized.nightlight?.brightness));
+      } else {
+        this.emitNightlightOffLog();
+      }
+    }
     this.applyNightlightState();
   }
 
