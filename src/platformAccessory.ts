@@ -1806,6 +1806,11 @@ export class PuraPlatformAccessory {
     if (!device.nightlight) {
       return device;
     }
+    const recentNightlightInteraction = this.platform.getRecentNightlightInteraction(this.device.id);
+    if (!recentNightlightInteraction && ageMs > 3500) {
+      this.pendingNightlightIntent = undefined;
+      return device;
+    }
 
     const intent = this.pendingNightlightIntent;
     const incomingLevel = this.normalizeNightlightLevel(device.nightlight.brightness);

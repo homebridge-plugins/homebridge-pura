@@ -499,6 +499,12 @@ export class PuraNightlightAccessory {
       ? Date.now() - this.lastDiffuserOnAt
       : undefined;
     const recentNightlightInteraction = this.platform.getRecentNightlightInteraction(this.device.id);
+    // Pending intent should only dominate for a short window unless we are still handling
+    // a direct nightlight interaction. Otherwise, trust cloud state to avoid sticky ON/OFF.
+    if (!recentNightlightInteraction && ageMs > 3500) {
+      this.pendingNightlightIntent = undefined;
+      return device;
+    }
     const inDiffuserStartupWindow = sinceDiffuserOnMs !== undefined
       && sinceDiffuserOnMs >= 0
       && sinceDiffuserOnMs <= 6000;
