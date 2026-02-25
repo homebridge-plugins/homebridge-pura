@@ -31,6 +31,8 @@ export class PuraPlatformAccessory {
     reason: 'on' | 'brightness' | 'hue' | 'saturation';
   };
   private lastNightlightLog?: { at: number; active: boolean; level: number };
+  private pendingNightlightOnLog?: { at: number; brightnessPercent: number };
+  private pendingNightlightOnLogTimer?: ReturnType<typeof setTimeout>;
   private pendingNightlightIntent?: {
     at: number;
     ttlMs: number;
@@ -1552,22 +1554,70 @@ export class PuraPlatformAccessory {
       return;
     }
     const now = Date.now();
-    const last = this.lastNightlightLog;
-    if (last && last.active === active) {
-      const age = now - last.at;
-      if (!active && age < 1500) {
-        return;
+    const roundedPercent = Math.round(brightnessPercent);
+
+    if (!active) {
+      this.pendingNightlightOnLog = undefined;
+      if (this.pendingNightlightOnLogTimer) {
+        clearTimeout(this.pendingNightlightOnLogTimer);
+        this.pendingNightlightOnLogTimer = undefined;
       }
-      if (active && brightnessPercent < 100 && age < 5000) {
+      this.emitNightlightToggleLog(false, 0, now);
+      return;
+    }
+
+    // active=true: coalesce intermediate brightness values into a single "turned on" message.
+    if (this.pendingNightlightOnLog) {
+      this.pendingNightlightOnLog.at = now;
+      this.pendingNightlightOnLog.brightnessPercent = roundedPercent;
+    } else {
+      this.pendingNightlightOnLog = { at: now, brightnessPercent: roundedPercent };
+    }
+
+    if (roundedPercent >= 100) {
+      const pending = this.pendingNightlightOnLog;
+      this.pendingNightlightOnLog = undefined;
+      if (this.pendingNightlightOnLogTimer) {
+        clearTimeout(this.pendingNightlightOnLogTimer);
+        this.pendingNightlightOnLogTimer = undefined;
+      }
+      if (pending) {
+        this.emitNightlightToggleLog(true, pending.brightnessPercent, now);
+      }
+      return;
+    }
+
+    // Debounce so rapid HomeKit bursts log the final brightness value.
+    const debounceMs = 1200;
+    if (this.pendingNightlightOnLogTimer) {
+      clearTimeout(this.pendingNightlightOnLogTimer);
+      this.pendingNightlightOnLogTimer = undefined;
+    }
+    this.pendingNightlightOnLogTimer = setTimeout(() => {
+      const pending = this.pendingNightlightOnLog;
+      this.pendingNightlightOnLog = undefined;
+      this.pendingNightlightOnLogTimer = undefined;
+      if (pending) {
+        this.emitNightlightToggleLog(true, pending.brightnessPercent, Date.now());
+      }
+    }, debounceMs);
+  }
+
+  private emitNightlightToggleLog(active: boolean, brightnessPercent: number, now = Date.now()) {
+    const roundedPercent = Math.round(brightnessPercent);
+    const last = this.lastNightlightLog;
+    if (last && last.active === active && Math.round(last.level) === roundedPercent) {
+      const age = now - last.at;
+      if (age < 1500) {
         return;
       }
     }
-    this.lastNightlightLog = { at: now, active, level: brightnessPercent };
+    this.lastNightlightLog = { at: now, active, level: roundedPercent };
 
     const includesNightlight = /nightlight/i.test(this.accessory.displayName);
     const label = includesNightlight ? this.accessory.displayName : `${this.accessory.displayName} nightlight`;
     if (active) {
-      this.platform.log.info(`${label} turned on (${Math.round(brightnessPercent)}% brightness).`);
+      this.platform.log.info(`${label} turned on (${roundedPercent}% brightness).`);
     } else {
       this.platform.log.info(`${label} turned off.`);
     }
