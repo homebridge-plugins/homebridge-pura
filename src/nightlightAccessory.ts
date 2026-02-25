@@ -23,6 +23,7 @@ export class PuraNightlightAccessory {
     color: string;
     reason: 'on' | 'brightness' | 'color';
   };
+  private lastNightlightLog?: { at: number; active: boolean; level: number };
 
   constructor(
     private readonly platform: PuraPlatform,
@@ -504,12 +505,25 @@ export class PuraNightlightAccessory {
   }
 
   private logNightlightToggle(active: boolean, brightnessPercent: number) {
+    const now = Date.now();
+    const last = this.lastNightlightLog;
+    if (last && last.active === active) {
+      const age = now - last.at;
+      if (!active && age < 1500) {
+        return;
+      }
+      if (active && brightnessPercent < 100 && age < 5000) {
+        return;
+      }
+    }
+    this.lastNightlightLog = { at: now, active, level: brightnessPercent };
+
+    const includesNightlight = /nightlight/i.test(this.accessory.displayName);
+    const label = includesNightlight ? this.accessory.displayName : `${this.accessory.displayName} nightlight`;
     if (active) {
-      this.platform.log.info(
-        `${this.accessory.displayName} nightlight turned on (${Math.round(brightnessPercent)}% brightness).`,
-      );
+      this.platform.log.info(`${label} turned on (${Math.round(brightnessPercent)}% brightness).`);
     } else {
-      this.platform.log.info(`${this.accessory.displayName} nightlight turned off.`);
+      this.platform.log.info(`${label} turned off.`);
     }
   }
 }
