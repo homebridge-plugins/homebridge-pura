@@ -480,6 +480,9 @@ export class PuraPlatformAccessory {
             this.updateFaultState();
             if (deviceUnavailable) {
               this.platform.log.warn(`${diffuserLabel} appears offline (Wi-Fi lost or unplugged).`);
+              throw new this.platform.api.hap.HapStatusError(
+                this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+              );
             } else {
               this.platform.log.warn(
                 `${diffuserLabel} was turned on, but no scent vials were detected. ` +
@@ -543,6 +546,9 @@ export class PuraPlatformAccessory {
             this.enforceOffVisualState();
             this.updateFaultState();
             this.platform.log.warn(`${diffuserLabel} appears offline (Wi-Fi lost or unplugged).`);
+            throw new this.platform.api.hap.HapStatusError(
+              this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+            );
             return;
           }
           if (this.shouldSuppressConflictingOffCommand('setOn')) {
@@ -568,6 +574,9 @@ export class PuraPlatformAccessory {
           }
         }
       } catch (error) {
+        if (this.isHapStatusError(error)) {
+          throw error;
+        }
         this.platform.log.error(`Error setting On state for ${diffuserLabel}:`, error);
         // Fail soft to avoid Home app "No Response" on transient API errors.
         this.applyCurrentState();
@@ -579,9 +588,10 @@ export class PuraPlatformAccessory {
     const diffuserLabel = this.getDiffuserLogLabel();
     if (this.isDeviceUnavailable()) {
       this.updateFaultState();
-      const cached = this.getCurrentStateValue();
-      this.platform.log.debug(`Get Characteristic Active for ${diffuserLabel} ->`, cached, '(cached; unavailable)');
-      return cached;
+      this.platform.log.debug(
+        `Get Characteristic Active for ${diffuserLabel} -> unavailable (service communication failure)`,
+      );
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
     const isActive = this.getCurrentStateValue();
     this.platform.log.debug(`Get Characteristic Active for ${diffuserLabel} ->`, isActive);
@@ -594,9 +604,7 @@ export class PuraPlatformAccessory {
     }
     if (this.isDeviceUnavailable()) {
       this.updateFaultState();
-      const currentValue = this.service.getCharacteristic(this.platform.Characteristic.RotationSpeed).value;
-      const cached = Number(currentValue);
-      return Number.isFinite(cached) ? cached : 0;
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
     if (!this.currentStateActive) {
       return 0;
@@ -633,6 +641,9 @@ export class PuraPlatformAccessory {
             this.enforceOffVisualState();
             this.updateFaultState();
             this.platform.log.warn(`${diffuserLabel} appears offline (Wi-Fi lost or unplugged).`);
+            throw new this.platform.api.hap.HapStatusError(
+              this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+            );
             return;
           }
           if (this.shouldSuppressConflictingOffCommand('rotation')) {
@@ -736,7 +747,9 @@ export class PuraPlatformAccessory {
             `${diffuserLabel} appears unavailable while adjusting intensity; preserving current state.`,
           );
           this.applyCurrentState();
-          return;
+          throw new this.platform.api.hap.HapStatusError(
+            this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+          );
         }
         if (this.hasNoScentVialsDetected()) {
           this.enforceOffVisualState();
@@ -813,11 +826,23 @@ export class PuraPlatformAccessory {
         );
         this.applyCurrentState();
       } catch (error) {
+        if (this.isHapStatusError(error)) {
+          throw error;
+        }
         this.platform.log.error(`Error setting RotationSpeed for ${diffuserLabel}:`, error);
         // Fail soft for slider writes to avoid Home app "No Response" for transient intensity update errors.
         this.applyCurrentState();
       }
     });
+  }
+
+  private isHapStatusError(error: unknown): boolean {
+    if (error instanceof this.platform.api.hap.HapStatusError) {
+      return true;
+    }
+    return typeof error === 'object'
+      && error !== null
+      && 'hapStatus' in error;
   }
 
   async setNightlightOn(value: CharacteristicValue) {
