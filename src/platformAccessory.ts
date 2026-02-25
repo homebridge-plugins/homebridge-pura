@@ -1066,6 +1066,14 @@ export class PuraPlatformAccessory {
     if (this.platform.isDebugEnabled()) {
       this.platform.log.debug('Device snapshot:', this.summarizeDevice(stabilizedDevice));
     }
+    const previousNightlightActive = Boolean(previousNightlight?.active);
+    const nextNightlightActive = Boolean(stabilizedDevice.nightlight?.active);
+    if (previousNightlightActive !== nextNightlightActive) {
+      const nextBrightness = nextNightlightActive
+        ? this.nightlightLevelToPercent(stabilizedDevice.nightlight?.brightness)
+        : 0;
+      this.logNightlightToggle(nextNightlightActive, nextBrightness);
+    }
     this.logNightlightProfileRoundTrip(previousNightlight, stabilizedDevice.nightlight);
     this.updateCurrentState();
     void this.maybeForceNightlightOff();
@@ -1720,7 +1728,7 @@ export class PuraPlatformAccessory {
         : undefined;
       const inDiffuserOnStabilizationWindow = sinceDiffuserOnMs !== undefined
         && sinceDiffuserOnMs >= 0
-        && sinceDiffuserOnMs <= 1500;
+        && sinceDiffuserOnMs <= 1000;
       // Some devices briefly report nightlight=on when a diffuser starts even when no HomeKit
       // nightlight command was sent. Hold the prior OFF state during the startup window.
       if (!forceNightlightOff
