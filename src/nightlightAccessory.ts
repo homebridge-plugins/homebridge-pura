@@ -26,6 +26,8 @@ export class PuraNightlightAccessory {
   private lastNightlightLog?: { at: number; active: boolean; level: number };
   private pendingNightlightLog?: { at: number; kind: 'on' | 'brightness'; brightnessPercent: number };
   private pendingNightlightLogTimer?: ReturnType<typeof setTimeout>;
+  private lastDiffuserActive = false;
+  private lastDiffuserOnAt?: number;
 
   constructor(
     private readonly platform: PuraPlatform,
@@ -69,12 +71,18 @@ export class PuraNightlightAccessory {
       .onSet(this.setNightlightSaturation.bind(this))
       .onGet(this.getNightlightSaturation.bind(this));
 
+    this.lastDiffuserActive = this.isDiffuserActive(this.device);
     this.applyNightlightState();
   }
 
   updateDevice(device: PuraDevice) {
+    const incomingDiffuserActive = this.isDiffuserActive(device);
+    if (incomingDiffuserActive && !this.lastDiffuserActive) {
+      this.lastDiffuserOnAt = Date.now();
+    }
     const stabilized = this.clampNightlightDuringHold(this.stabilizeNightlightDuringIntentWindow(device));
     this.device = stabilized;
+    this.lastDiffuserActive = this.isDiffuserActive(stabilized);
     this.accessory.context.device = stabilized;
     this.applyNightlightState();
   }
@@ -478,6 +486,25 @@ export class PuraNightlightAccessory {
     const incomingLevel = this.normalizeNightlightLevel(device.nightlight.brightness);
     const incomingActive = Boolean(device.nightlight.active);
     const incomingColor = this.normalizeNightlightColor(device.nightlight.color);
+    const sinceDiffuserOnMs = this.lastDiffuserOnAt !== undefined
+      ? Date.now() - this.lastDiffuserOnAt
+      : undefined;
+    const recentNightlightInteraction = this.platform.getRecentNightlightInteraction(this.device.id);
+    const inDiffuserStartupWindow = sinceDiffuserOnMs !== undefined
+      && sinceDiffuserOnMs >= 0
+      && sinceDiffuserOnMs <= 6000;
+    // Diffuser startup can legitimately flip the nightlight ON without a HomeKit nightlight command.
+    // If cloud reports ON shortly after startup, prefer cloud truth over stale local OFF intent.
+    if (!intent.active && incomingActive && inDiffuserStartupWindow && !recentNightlightInteraction) {
+      if (this.platform.isDebugEnabled()) {
+        this.platform.log.debug(
+          `[Nightlight] Accepting cloud ON snapshot for ${this.accessory.displayName} ` +
+          `(clearing stale OFF intent, sinceDiffuserOnMs=${sinceDiffuserOnMs}, ageMs=${ageMs}).`,
+        );
+      }
+      this.pendingNightlightIntent = undefined;
+      return device;
+    }
     const matchesIntent = incomingActive === intent.active
       && incomingLevel === intent.level
       && incomingColor === intent.color;
@@ -531,6 +558,20 @@ export class PuraNightlightAccessory {
         brightness: this.recentNightlightHold.level,
       },
     };
+  }
+
+  private isDiffuserActive(device: PuraDevice): boolean {
+    const bay1 = device.bay1;
+    const bay2 = device.bay2;
+    if (!bay1 && !bay2) {
+      return false;
+    }
+    if (bay1?.active || bay2?.active) {
+      return true;
+    }
+    const bay1HasIntensity = Number.isFinite(bay1?.intensity) && Number(bay1?.intensity) > 0;
+    const bay2HasIntensity = Number.isFinite(bay2?.intensity) && Number(bay2?.intensity) > 0;
+    return bay1HasIntensity || bay2HasIntensity;
   }
 
   private emitNightlightOffLog() {
