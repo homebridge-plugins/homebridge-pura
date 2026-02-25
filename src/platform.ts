@@ -51,6 +51,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   private lastIntentAt: Map<string, { state: boolean; at: number }> = new Map();
   private readonly lastNightlightInteractionAtByDevice = new Map<string, number>();
   private readonly sameDeviceNightlightOffGuardMs = 3500;
+  private readonly recentNightlightAutoOffAtByDevice = new Map<string, number>();
   private realtimeSocket: WebSocket | null = null;
   private realtimeReconnectTimer: NodeJS.Timeout | null = null;
   private realtimeFailures = 0;
@@ -844,6 +845,24 @@ export class PuraPlatform implements DynamicPlatformPlugin {
 
   recordNightlightInteraction(deviceId: string) {
     this.lastNightlightInteractionAtByDevice.set(deviceId, Date.now());
+  }
+
+  recordNightlightAutoOff(deviceId: string) {
+    this.recentNightlightAutoOffAtByDevice.set(deviceId, Date.now());
+  }
+
+  consumeRecentNightlightAutoOff(deviceId: string, maxAgeMs = 15000): boolean {
+    const markedAt = this.recentNightlightAutoOffAtByDevice.get(deviceId);
+    if (markedAt === undefined) {
+      return false;
+    }
+    const ageMs = Date.now() - markedAt;
+    if (ageMs < 0 || ageMs > maxAgeMs) {
+      this.recentNightlightAutoOffAtByDevice.delete(deviceId);
+      return false;
+    }
+    this.recentNightlightAutoOffAtByDevice.delete(deviceId);
+    return true;
   }
 
   /**

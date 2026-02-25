@@ -1651,8 +1651,7 @@ export class PuraPlatformAccessory {
   }
 
   private getNightlightOffLogMessage(label: string): string {
-    const autoOffEnabled = Boolean((this.platform.config as PuraConfig).forceNightlightOff);
-    if (autoOffEnabled) {
+    if (this.platform.consumeRecentNightlightAutoOff(this.device.id)) {
       return `${label} automatically turned off (auto-off enabled).`;
     }
     return `${label} turned off.`;
@@ -2305,7 +2304,10 @@ export class PuraPlatformAccessory {
       const controller = this.device.controller || 'default';
       const brightness = this.device.nightlight?.brightness ?? 1;
       const color = this.device.nightlight?.color ?? 'ffffff';
-      await this.puraApi.setNightlight(this.device.id, false, brightness, color, controller);
+      const success = await this.puraApi.setNightlight(this.device.id, false, brightness, color, controller);
+      if (success) {
+        this.platform.recordNightlightAutoOff(this.device.id);
+      }
     } catch (error) {
       this.platform.log.debug(`Failed to force nightlight off for ${this.accessory.displayName}:`, error);
     }

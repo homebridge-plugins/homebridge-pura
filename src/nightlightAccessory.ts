@@ -692,8 +692,7 @@ export class PuraNightlightAccessory {
   }
 
   private getNightlightOffLogMessage(label: string): string {
-    const autoOffEnabled = Boolean((this.platform.config as { forceNightlightOff?: boolean }).forceNightlightOff);
-    if (autoOffEnabled) {
+    if (this.platform.consumeRecentNightlightAutoOff(this.device.id)) {
       return `${label} automatically turned off (auto-off enabled).`;
     }
     return `${label} turned off.`;
