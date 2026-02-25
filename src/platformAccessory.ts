@@ -685,7 +685,31 @@ export class PuraPlatformAccessory {
           );
         }
         this.service.updateCharacteristic(this.platform.Characteristic.RotationSpeed, snappedSpeed);
+        const sinceLastOnMs = this.lastSuccessfulOnWriteAt !== undefined
+          ? Date.now() - this.lastSuccessfulOnWriteAt
+          : undefined;
         const pendingIntentIntensity = this.getPendingIntensityIntentValue();
+        const likelyStalePostOnDownshift = this.currentStateActive
+          && sinceLastOnMs !== undefined
+          && sinceLastOnMs >= 0
+          && sinceLastOnMs <= 1500
+          && pendingIntentIntensity !== undefined
+          && mappedIntensity > 0
+          && mappedIntensity < pendingIntentIntensity;
+        if (likelyStalePostOnDownshift) {
+          if (this.platform.isDebugEnabled()) {
+            this.platform.log.debug(
+              `[Diffuser] Ignoring likely stale post-ON RotationSpeed for ${diffuserLabel}: ` +
+              `incoming=${mappedIntensity} retained=${pendingIntentIntensity} sinceLastOnMs=${sinceLastOnMs}`,
+            );
+          }
+          this.service.updateCharacteristic(
+            this.platform.Characteristic.RotationSpeed,
+            this.mapIntensityToRotation(pendingIntentIntensity),
+          );
+          this.applyCurrentState();
+          return;
+        }
         if (pendingIntentIntensity === mappedIntensity) {
           this.applyCurrentState();
           if (this.platform.isDebugEnabled()) {
@@ -1087,7 +1111,8 @@ export class PuraPlatformAccessory {
     }
     const previousNightlightActive = Boolean(previousNightlight?.active);
     const nextNightlightActive = Boolean(stabilizedDevice.nightlight?.active);
-    if (previousNightlightActive !== nextNightlightActive) {
+    const hasDedicatedNightlightAccessory = Boolean((this.platform.config as PuraConfig).enableNightlightAccessory);
+    if (!hasDedicatedNightlightAccessory && previousNightlightActive !== nextNightlightActive) {
       const nextBrightness = nextNightlightActive
         ? this.nightlightLevelToPercent(stabilizedDevice.nightlight?.brightness)
         : 0;
