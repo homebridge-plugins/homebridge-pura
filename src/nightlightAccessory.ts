@@ -691,6 +691,14 @@ export class PuraNightlightAccessory {
     return `${name} Diffuser Nightlight`;
   }
 
+  private getNightlightOffLogMessage(label: string): string {
+    const autoOffEnabled = Boolean((this.platform.config as { forceNightlightOff?: boolean }).forceNightlightOff);
+    if (autoOffEnabled) {
+      return `${label} automatically turned off (auto-off enabled).`;
+    }
+    return `${label} turned off.`;
+  }
+
   private emitNightlightLog(kind: 'on' | 'off' | 'brightness', brightnessPercent: number) {
     const now = Date.now();
     const roundedPercent = Math.round(brightnessPercent);
@@ -714,7 +722,7 @@ export class PuraNightlightAccessory {
       return;
     }
     {
-      this.platform.log.info(`${label} turned off.`);
+      this.platform.log.info(this.getNightlightOffLogMessage(label));
     }
   }
 }

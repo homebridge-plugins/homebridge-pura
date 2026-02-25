@@ -908,7 +908,7 @@ export class PuraPlatformAccessory {
           `${nightlightLabel} turned on (${brightnessPercent}% brightness).`,
         );
       } else {
-        this.platform.log.info(`${nightlightLabel} turned off.`);
+        this.platform.log.info(this.getNightlightOffLogMessage(nightlightLabel));
       }
       this.applyNightlightState();
     });
@@ -1650,6 +1650,14 @@ export class PuraPlatformAccessory {
     return `${name} Diffuser Nightlight`;
   }
 
+  private getNightlightOffLogMessage(label: string): string {
+    const autoOffEnabled = Boolean((this.platform.config as PuraConfig).forceNightlightOff);
+    if (autoOffEnabled) {
+      return `${label} automatically turned off (auto-off enabled).`;
+    }
+    return `${label} turned off.`;
+  }
+
   private logNightlightToggle(active: boolean, brightnessPercent: number) {
     // Avoid double-logging when a dedicated nightlight accessory handles logs.
     if (this.enableNightlightAccessory && this.supportsNightlightControl()) {
@@ -1720,7 +1728,7 @@ export class PuraPlatformAccessory {
     if (active) {
       this.platform.log.info(`${label} turned on (${roundedPercent}% brightness).`);
     } else {
-      this.platform.log.info(`${label} turned off.`);
+      this.platform.log.info(this.getNightlightOffLogMessage(label));
     }
   }
 
