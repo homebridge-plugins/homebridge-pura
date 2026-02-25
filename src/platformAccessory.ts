@@ -421,30 +421,33 @@ export class PuraPlatformAccessory {
           if (this.useFanService && this.service.testCharacteristic(this.platform.Characteristic.RotationSpeed)) {
             // Home commonly sets RotationSpeed=100 when turning the accessory on via icon tap.
             // Capture that value early so we turn on at 100 without briefly showing the cached intensity.
-            const currentValue = this.service.getCharacteristic(this.platform.Characteristic.RotationSpeed).value;
-            const numericSpeed = Math.max(0, Math.min(100, Number(currentValue) || 0));
-            const mapped = this.mapRotationToIntensity(numericSpeed);
-            if (mapped > 0) {
+            const readMappedIntensity = () => {
+              const currentValue = this.service.getCharacteristic(this.platform.Characteristic.RotationSpeed).value;
+              const numericSpeed = Math.max(0, Math.min(100, Number(currentValue) || 0));
+              return this.mapRotationToIntensity(numericSpeed);
+            };
+
+            const firstMapped = readMappedIntensity();
+            if (firstMapped > 0) {
               this.pendingPowerOnIntensityIntent = {
                 at: Date.now(),
                 ttlMs: 12000,
-                intensity: mapped,
+                intensity: firstMapped,
               };
-              this.lastRequestedOnIntensity = mapped;
-            } else if (!this.pendingPowerOnIntensityIntent) {
-              // If Home sends the speed right after Active=1, give it a brief window to arrive.
-              await new Promise((resolve) => setTimeout(resolve, 250));
-              const afterValue = this.service.getCharacteristic(this.platform.Characteristic.RotationSpeed).value;
-              const afterSpeed = Math.max(0, Math.min(100, Number(afterValue) || 0));
-              const afterMapped = this.mapRotationToIntensity(afterSpeed);
-              if (afterMapped > 0) {
-                this.pendingPowerOnIntensityIntent = {
-                  at: Date.now(),
-                  ttlMs: 12000,
-                  intensity: afterMapped,
-                };
-                this.lastRequestedOnIntensity = afterMapped;
-              }
+              this.lastRequestedOnIntensity = firstMapped;
+            }
+
+            // Home may send RotationSpeed shortly after Active=1, and the characteristic value can lag slightly.
+            // Give it a brief settle window, then prefer the latest non-zero mapped intensity.
+            await new Promise((resolve) => setTimeout(resolve, 350));
+            const secondMapped = readMappedIntensity();
+            if (secondMapped > 0 && secondMapped !== this.pendingPowerOnIntensityIntent?.intensity) {
+              this.pendingPowerOnIntensityIntent = {
+                at: Date.now(),
+                ttlMs: 12000,
+                intensity: secondMapped,
+              };
+              this.lastRequestedOnIntensity = secondMapped;
             }
           }
           const preferredBay = this.accessory.context.lastBay;
@@ -1715,10 +1718,11 @@ export class PuraPlatformAccessory {
         : undefined;
       const inDiffuserOnStabilizationWindow = sinceDiffuserOnMs !== undefined
         && sinceDiffuserOnMs >= 0
-        && sinceDiffuserOnMs <= 8000;
+        && sinceDiffuserOnMs <= 1500;
       // Some devices briefly report nightlight=on when a diffuser starts even when no HomeKit
       // nightlight command was sent. Hold the prior OFF state during the startup window.
       if (!forceNightlightOff
+        && !this.enableNightlightAccessory
         && inDiffuserOnStabilizationWindow
         && !recentNightlightInteraction
         && !previousNightlightActive
