@@ -846,6 +846,14 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     this.lastNightlightInteractionAtByDevice.set(deviceId, Date.now());
   }
 
+  /**
+   * Schedule a near-term refresh. This is useful when we just performed a write and want to
+   * reconcile fields that may not be present in realtime partial updates (e.g., nightlight).
+   */
+  requestRefreshSoon(delayMs = 2000) {
+    this.triggerWebhookRefreshWithDelay(delayMs);
+  }
+
   getRecentNightlightInteraction(deviceId: string): { ageMs: number } | undefined {
     const recentAt = this.lastNightlightInteractionAtByDevice.get(deviceId);
     if (recentAt === undefined) {

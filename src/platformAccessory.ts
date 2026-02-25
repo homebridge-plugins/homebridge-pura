@@ -555,6 +555,8 @@ export class PuraPlatformAccessory {
             this.platform.log.debug(`Successfully turned off ${this.accessory.displayName}`);
             this.applyCurrentState();
             this.platform.log.info(`${this.accessory.displayName} turned off.`);
+            // Reconcile Pura state after power-off. Nightlight state is sometimes omitted from realtime payloads.
+            this.platform.requestRefreshSoon(2500);
           } else {
             this.platform.log.error(`Failed to turn off ${this.accessory.displayName}`);
             throw new Error('Failed to turn off device');
