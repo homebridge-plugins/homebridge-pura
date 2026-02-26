@@ -23,6 +23,7 @@ export class PuraNightlightAccessory {
     color: string;
     reason: 'on' | 'brightness' | 'color';
   };
+  private lastNightlightColorLogAt = 0;
   private lastNightlightLog?: { at: number; active: boolean; level: number };
   private pendingNightlightLog?: { at: number; kind: 'on' | 'brightness'; brightnessPercent: number };
   private pendingNightlightLogTimer?: ReturnType<typeof setTimeout>;
@@ -495,6 +496,7 @@ export class PuraNightlightAccessory {
       // A color write also implicitly turns the light on; treat this as a turn-on event.
       this.queueNightlightLog('on', this.nightlightLevelToPercent(level));
     }
+    this.emitNightlightColorChangedLog();
     this.applyNightlightState();
   }
 
@@ -723,5 +725,15 @@ export class PuraNightlightAccessory {
     {
       this.platform.log.info(this.getNightlightOffLogMessage(label));
     }
+  }
+
+  private emitNightlightColorChangedLog() {
+    const now = Date.now();
+    if (now - this.lastNightlightColorLogAt < 1200) {
+      return;
+    }
+    this.lastNightlightColorLogAt = now;
+    const label = this.getNightlightLogLabel();
+    this.platform.log.info(`${label} color was changed.`);
   }
 }

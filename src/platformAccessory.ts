@@ -30,6 +30,7 @@ export class PuraPlatformAccessory {
     color: string;
     reason: 'on' | 'brightness' | 'hue' | 'saturation';
   };
+  private lastNightlightColorLogAt = 0;
   private lastNightlightLog?: { at: number; active: boolean; level: number };
   private pendingNightlightOnLog?: { at: number; brightnessPercent: number };
   private pendingNightlightOnLogTimer?: ReturnType<typeof setTimeout>;
@@ -1801,6 +1802,16 @@ export class PuraPlatformAccessory {
     }
   }
 
+  private emitNightlightColorChangedLog() {
+    const now = Date.now();
+    if (now - this.lastNightlightColorLogAt < 1200) {
+      return;
+    }
+    this.lastNightlightColorLogAt = now;
+    const label = this.getNightlightLogLabel();
+    this.platform.log.info(`${label} color was changed.`);
+  }
+
   private async applyNightlightColor(
     color: string,
     action: 'hue' | 'saturation',
@@ -1849,10 +1860,7 @@ export class PuraPlatformAccessory {
       level: apiLevel,
       color: normalizedColor,
     };
-    this.platform.log.info(
-      `${this.accessory.displayName} nightlight color set to ${normalizedColor} ` +
-      `(h=${Math.round(hue)} s=${Math.round(saturation)} level=${apiLevel}, active=${active}).`,
-    );
+    this.emitNightlightColorChangedLog();
     this.applyNightlightState();
   }
 
