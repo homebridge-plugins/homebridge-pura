@@ -47,11 +47,11 @@ Add the following platform to your `config.json`:
 - **username**: Your Pura email - *required*
 - **password**: Your Pura password - *required*
 - **forceNightlightOff**: Pura turns the nightlight on/off with the diffuser. Enable to prevent the light from staying on. (default: false)
-- **enableFanService (Enable Intensity Control)**: Changes the diffuser from an on/off switch to a fan accessory that controls intensity (Subtle, Medium, Strong). For multi-bay diffusers, HomeKit intensity changes are applied across available bays to keep auto-alternate behavior consistent. (default: false)
+- **enableFanService (Enable Intensity Control)**: Replaces the on/off switch with a fan accessory to control intensity (Subtle, Medium, Strong). For multi-bay diffusers, HomeKit intensity changes are applied across available bays to keep auto-alternate behavior consistent. (default: false)
 - **enableNightlightAccessory**: Enables nightlight controls (On/Brightness/Color) for compatible diffusers. (default: false)
-- **nightlightMode**: Nightlight control layout when enabled:
-  - `separate` (default): creates a dedicated `Nightlight Control` accessory tile.
-  - `bound`: attaches the light service to the diffuser accessory (switch/fan tile).
+- **nightlightMode**: Nightlight tile layout when enabled:
+  - `separate` (default): creates a dedicated Nightlight tile (separate accessory).
+  - `bound`: uses a Single Tile (Apple multi-service accessory) by attaching the light service to the diffuser accessory (switch/fan tile).
   Changing modes may require updating HomeKit scenes or automations.
 
 ## Usage

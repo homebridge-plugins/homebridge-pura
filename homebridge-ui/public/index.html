@@ -112,6 +112,13 @@
       width: 50% !important;
     }
 
+    @media (max-width: 767.98px) {
+      .field-half,
+      .password-wrap {
+        width: 100% !important;
+      }
+    }
+
     .card {
       background-color: var(--card-bg-color, transparent) !important;
     }
@@ -210,7 +217,7 @@
           <input class="form-check-input" id="enableFanService" type="checkbox" role="switch" aria-describedby="fanServiceHelp" />
           <label class="form-check-label" for="enableFanService">Enable Intensity Control</label>
           <div id="fanServiceHelp" class="form-text">
-            Replaces the on/off switch with intensity control (Subtle, Medium, Strong). For multi-bay diffusers, HomeKit intensity changes are applied across available bays to keep auto-alternate behavior consistent. Changing this may require recreating HomeKit scenes or automations for all Pura diffusers in this plugin.
+            Replaces the on/off switch with a fan accessory to control intensity (Subtle, Medium, Strong). For multi-bay diffusers, HomeKit intensity changes are applied across available bays to keep auto-alternate behavior consistent. Changing this may require recreating HomeKit scenes or automations for all Pura diffusers in this plugin.
           </div>
         </div>
 
@@ -222,14 +229,14 @@
           </div>
         </div>
 
-        <div class="mb-4">
-          <label class="form-label" for="nightlightMode">Nightlight Control Mode</label>
+        <div class="mb-4 d-none" id="nightlightModeGroup">
+          <label class="form-label" for="nightlightMode">Nightlight Tile Mode</label>
           <select class="form-select field-half" id="nightlightMode" aria-describedby="nightlightModeHelp">
-            <option value="separate">Separate Accessory</option>
-            <option value="bound">Bound To Diffuser Accessory</option>
+            <option value="separate">Separate Tile (Separate Accessory)</option>
+            <option value="bound">Single Tile (Bound / Multi-service Accessory)</option>
           </select>
           <div id="nightlightModeHelp" class="form-text">
-            Separate creates a dedicated Nightlight accessory tile. Bound attaches light controls to the diffuser accessory. Switching modes may require updating HomeKit scenes or automations.
+            Separate creates a dedicated Nightlight tile. Bound uses a Single Tile (Apple multi-service accessory) by attaching light controls to the diffuser accessory. Switching modes may require updating HomeKit scenes or automations.
           </div>
         </div>
 
@@ -277,6 +284,7 @@
         forceNightlightOff: document.getElementById('forceNightlightOff'),
         enableFanService: document.getElementById('enableFanService'),
         enableNightlightAccessory: document.getElementById('enableNightlightAccessory'),
+        nightlightModeGroup: document.getElementById('nightlightModeGroup'),
         nightlightMode: document.getElementById('nightlightMode'),
         testBtn: document.getElementById('testBtn'),
         testHint: document.getElementById('testHint'),
@@ -441,6 +449,9 @@
 
       const updateNightlightModeControlState = () => {
         const enabled = !!els.enableNightlightAccessory.checked;
+        if (els.nightlightModeGroup) {
+          els.nightlightModeGroup.classList.toggle('d-none', !enabled);
+        }
         els.nightlightMode.disabled = !enabled;
       };
 

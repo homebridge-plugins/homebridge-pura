@@ -45,7 +45,7 @@
         "title": "Enable Intensity Control",
         "type": "boolean",
         "default": false,
-        "description": "Changes the diffuser from an on/off switch to a fan accessory that controls intensity (Subtle, Medium, Strong). For multi-bay diffusers, HomeKit intensity changes are applied across available bays to keep auto-alternate behavior consistent. Changing this may require recreating HomeKit scenes or automations for all Pura diffusers in this plugin."
+        "description": "Replaces the on/off switch with a fan accessory to control intensity (Subtle, Medium, Strong). For multi-bay diffusers, HomeKit intensity changes are applied across available bays to keep auto-alternate behavior consistent. Changing this may require recreating HomeKit scenes or automations for all Pura diffusers in this plugin."
       },
       "enableNightlightAccessory": {
         "title": "Enable Nightlight Controls",
@@ -54,24 +54,24 @@
         "description": "Enables nightlight controls (On, Brightness, and Color) for compatible diffusers."
       },
       "nightlightMode": {
-        "title": "Nightlight Control Mode",
+        "title": "Nightlight Tile Mode",
         "type": "string",
         "default": "separate",
         "oneOf": [
           {
-            "title": "Separate Accessory",
+            "title": "Separate Tile (Separate Accessory)",
             "enum": [
               "separate"
             ]
           },
           {
-            "title": "Bound To Diffuser Accessory",
+            "title": "Single Tile (Bound / Multi-service Accessory)",
             "enum": [
               "bound"
             ]
           }
         ],
-        "description": "Choose how nightlight controls appear when enabled. Separate creates a dedicated Nightlight accessory tile. Bound attaches the light service to the diffuser accessory. Switching modes may require updating HomeKit scenes or automations."
+        "description": "Choose how nightlight controls appear when enabled. Separate creates a dedicated Nightlight tile. Bound uses a Single Tile (Apple multi-service accessory) by attaching the light service to the diffuser accessory. Switching modes may require updating HomeKit scenes or automations."
       }
     }
   },
