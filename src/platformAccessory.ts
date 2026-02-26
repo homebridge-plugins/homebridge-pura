@@ -64,6 +64,7 @@ export class PuraPlatformAccessory {
     intensity: number;
   };
   private pendingPowerOnIntensityLogTimer?: ReturnType<typeof setTimeout>;
+  private lastDiffuserActivatedAt?: number;
   private lastSuccessfulOnWriteAt?: number;
   private lastSetOnCommandAt?: number;
   private lastRotationWriteAt?: number;
@@ -509,7 +510,9 @@ export class PuraPlatformAccessory {
           const success = alwaysOn && await this.setIntensityAcrossAvailableBays(targetBay, intensity, controller, true);
           if (success) {
             this.currentStateActive = true;
-            this.lastSuccessfulOnWriteAt = Date.now();
+            const activatedAt = Date.now();
+            this.lastSuccessfulOnWriteAt = activatedAt;
+            this.lastDiffuserActivatedAt = activatedAt;
             this.pendingPowerOnIntensityIntent = undefined;
             this.accessory.context.lastIntensity = intensity;
             this.accessory.context.lastBay = targetBay;
@@ -790,7 +793,9 @@ export class PuraPlatformAccessory {
             return;
           }
           this.currentStateActive = true;
-          this.lastSuccessfulOnWriteAt = Date.now();
+          const activatedAt = Date.now();
+          this.lastSuccessfulOnWriteAt = activatedAt;
+          this.lastDiffuserActivatedAt = activatedAt;
         }
         if (this.areAllAvailableBaysAtIntensity(mappedIntensity)) {
           this.applyCurrentState();
@@ -1166,6 +1171,9 @@ export class PuraPlatformAccessory {
     }
     this.logNightlightProfileRoundTrip(previousNightlight, stabilizedDevice.nightlight);
     this.updateCurrentState();
+    if (!previousDiffuserActive && this.currentStateActive) {
+      this.lastDiffuserActivatedAt = Date.now();
+    }
     if (previousDiffuserActive && !this.currentStateActive) {
       this.cancelPendingPowerOnIntensityLog();
     }
@@ -1513,12 +1521,23 @@ export class PuraPlatformAccessory {
     if (!this.currentStateActive || !this.device.nightlight?.active) {
       return;
     }
-    const now = Date.now();
-    if (now - this.lastNightlightOffAt < 30000) {
+    const activatedAt = this.lastDiffuserActivatedAt;
+    if (activatedAt === undefined) {
       return;
     }
-    this.lastNightlightOffAt = now;
-    await this.ensureNightlightOff();
+    const now = Date.now();
+    const sinceActivationMs = now - activatedAt;
+    const activationWindowMs = 15000;
+    if (sinceActivationMs < 0 || sinceActivationMs > activationWindowMs) {
+      return;
+    }
+    if (this.lastNightlightOffAt >= activatedAt) {
+      return;
+    }
+    const forcedOff = await this.ensureNightlightOff();
+    if (forcedOff) {
+      this.lastNightlightOffAt = Date.now();
+    }
   }
 
   private getCurrentStateValue(): CharacteristicValue {
@@ -2396,7 +2415,7 @@ export class PuraPlatformAccessory {
     this.lastNightlightCommand = undefined;
   }
 
-  private async ensureNightlightOff() {
+  private async ensureNightlightOff(): Promise<boolean> {
     try {
       await this.sleep(1500);
       const controller = this.device.controller || 'default';
@@ -2405,9 +2424,12 @@ export class PuraPlatformAccessory {
       const success = await this.puraApi.setNightlight(this.device.id, false, brightness, color, controller);
       if (success) {
         this.platform.recordNightlightAutoOff(this.device.id);
+        return true;
       }
+      return false;
     } catch (error) {
       this.platform.log.debug(`Failed to force nightlight off for ${this.accessory.displayName}:`, error);
+      return false;
     }
   }
 
