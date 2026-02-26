@@ -1760,6 +1760,7 @@ export class PuraPlatformAccessory {
     hkBrightnessPercent: number,
     sentLevel: number,
   ) {
+    const previousCommand = this.lastNightlightCommand;
     this.lastNightlightCommand = {
       at: Date.now(),
       action,
@@ -1772,6 +1773,14 @@ export class PuraPlatformAccessory {
     }
     if (!requestedOn || Math.round(hkBrightnessPercent) <= 0) {
       // For OFF transitions, emit the OFF log only (avoid duplicate "brightness set to 0%").
+      return;
+    }
+    const suppressBrightnessLogAfterOnMs = 3000;
+    const previousWasRecentOn = previousCommand
+      && previousCommand.action === 'on'
+      && previousCommand.requestedOn
+      && (Date.now() - previousCommand.at) <= suppressBrightnessLogAfterOnMs;
+    if (previousWasRecentOn) {
       return;
     }
     const nightlightLabel = this.getNightlightLogLabel();

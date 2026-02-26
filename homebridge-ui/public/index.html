@@ -295,11 +295,17 @@
       const setTestButtonDefault = () => {
         els.testBtn.className = 'btn test-theme-lock';
         els.testBtn.innerHTML = '<i class="fa-solid fa-circle-user me-2"></i>' + TEST_BUTTON_TEXT;
-        els.testBtn.disabled = !canAttemptCredentialTest();
+        const canTest = canAttemptCredentialTest();
+        els.testBtn.disabled = !canTest;
         if (els.testHint) {
           els.testHint.classList.remove('test-hint-success', 'test-hint-error');
-          els.testHint.textContent = TEST_HINT_DEFAULT;
-          els.testHint.classList.remove('d-none');
+          if (canTest) {
+            els.testHint.textContent = TEST_HINT_DEFAULT;
+            els.testHint.classList.remove('d-none');
+          } else {
+            els.testHint.textContent = '';
+            els.testHint.classList.add('d-none');
+          }
         }
       };
 
