@@ -1698,6 +1698,10 @@ export class PuraPlatformAccessory {
     if (action === 'on') {
       return;
     }
+    if (!requestedOn || Math.round(hkBrightnessPercent) <= 0) {
+      // For OFF transitions, emit the OFF log only (avoid duplicate "brightness set to 0%").
+      return;
+    }
     const nightlightLabel = this.getNightlightLogLabel();
     this.platform.log.info(`${nightlightLabel} brightness set to ${Math.round(hkBrightnessPercent)}%.`);
   }

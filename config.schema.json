@@ -59,19 +59,19 @@
         "default": "separate",
         "oneOf": [
           {
-            "title": "Separate Tile (Separate Accessory)",
+            "title": "Separate Tile",
             "enum": [
               "separate"
             ]
           },
           {
-            "title": "Single Tile (Bound / Multi-service Accessory)",
+            "title": "Single Tile",
             "enum": [
               "bound"
             ]
           }
         ],
-        "description": "Choose how nightlight controls appear when enabled. Separate creates a dedicated Nightlight tile. Bound uses a Single Tile (Apple multi-service accessory) by attaching the light service to the diffuser accessory. Switching modes may require updating HomeKit scenes or automations."
+        "description": "Separate Tile creates a dedicated Nightlight accessory, while Single Tile combines it with the diffuser; changing this may require updating scenes or automations."
       }
     }
   },

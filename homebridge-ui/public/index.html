@@ -230,13 +230,19 @@
         </div>
 
         <div class="mb-4 d-none" id="nightlightModeGroup">
-          <label class="form-label" for="nightlightMode">Nightlight Tile Mode</label>
-          <select class="form-select field-half" id="nightlightMode" aria-describedby="nightlightModeHelp">
-            <option value="separate">Separate Tile (Separate Accessory)</option>
-            <option value="bound">Single Tile (Bound / Multi-service Accessory)</option>
-          </select>
+          <label class="form-label">Nightlight Tile Mode</label>
+          <div class="field-half">
+            <div class="form-check ms-1">
+              <input class="form-check-input" id="nightlightModeSeparate" name="nightlightMode" type="radio" value="separate" />
+              <label class="form-check-label" for="nightlightModeSeparate">Separate Tile</label>
+            </div>
+            <div class="form-check ms-1">
+              <input class="form-check-input" id="nightlightModeBound" name="nightlightMode" type="radio" value="bound" />
+              <label class="form-check-label" for="nightlightModeBound">Single Tile</label>
+            </div>
+          </div>
           <div id="nightlightModeHelp" class="form-text">
-            Separate creates a dedicated Nightlight tile. Bound uses a Single Tile (Apple multi-service accessory) by attaching light controls to the diffuser accessory. Switching modes may require updating HomeKit scenes or automations.
+            Separate Tile creates a dedicated Nightlight accessory, while Single Tile combines it with the diffuser; changing this may require updating scenes or automations.
           </div>
         </div>
 
@@ -285,7 +291,8 @@
         enableFanService: document.getElementById('enableFanService'),
         enableNightlightAccessory: document.getElementById('enableNightlightAccessory'),
         nightlightModeGroup: document.getElementById('nightlightModeGroup'),
-        nightlightMode: document.getElementById('nightlightMode'),
+        nightlightModeSeparate: document.getElementById('nightlightModeSeparate'),
+        nightlightModeBound: document.getElementById('nightlightModeBound'),
         testBtn: document.getElementById('testBtn'),
         testHint: document.getElementById('testHint'),
         status: statusEl,
@@ -446,13 +453,21 @@
       };
 
       const normalizeNightlightMode = (value) => (value === 'bound' ? 'bound' : 'separate');
+      const getNightlightMode = () => (els.nightlightModeBound.checked ? 'bound' : 'separate');
+
+      const setNightlightMode = (value) => {
+        const mode = normalizeNightlightMode(value);
+        els.nightlightModeBound.checked = mode === 'bound';
+        els.nightlightModeSeparate.checked = mode !== 'bound';
+      };
 
       const updateNightlightModeControlState = () => {
         const enabled = !!els.enableNightlightAccessory.checked;
         if (els.nightlightModeGroup) {
           els.nightlightModeGroup.classList.toggle('d-none', !enabled);
         }
-        els.nightlightMode.disabled = !enabled;
+        els.nightlightModeSeparate.disabled = !enabled;
+        els.nightlightModeBound.disabled = !enabled;
       };
 
       const syncConfig = async () => {
@@ -464,7 +479,7 @@
           forceNightlightOff: !!els.forceNightlightOff.checked,
           enableFanService: !!els.enableFanService.checked,
           enableNightlightAccessory: !!els.enableNightlightAccessory.checked,
-          nightlightMode: normalizeNightlightMode(els.nightlightMode.value),
+          nightlightMode: getNightlightMode(),
         };
         await homebridge.updatePluginConfig([config]);
       };
@@ -497,13 +512,19 @@
         els.forceNightlightOff.checked = !!current.forceNightlightOff;
         els.enableFanService.checked = !!(current.enableFanService ?? current.useFanService);
         els.enableNightlightAccessory.checked = !!current.enableNightlightAccessory;
-        els.nightlightMode.value = normalizeNightlightMode(current.nightlightMode);
+        setNightlightMode(current.nightlightMode);
         updateNightlightModeControlState();
         initialCredentialKey = getCredentialKey();
 
         setUiStatus('');
 
-        for (const field of [els.name, els.forceNightlightOff, els.enableFanService, els.nightlightMode]) {
+        for (const field of [
+          els.name,
+          els.forceNightlightOff,
+          els.enableFanService,
+          els.nightlightModeSeparate,
+          els.nightlightModeBound,
+        ]) {
           field.addEventListener('change', async () => {
             await syncConfig();
             homebridge.toast.info('Config updated. Click Save to write config.json.');
