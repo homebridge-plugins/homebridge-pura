@@ -300,12 +300,17 @@ export class PuraPlatform implements DynamicPlatformPlugin {
 
     const uuids: string[] = [];
     uuids.push(await this.registerDiffuserAccessory(device));
-    if ((this.puraConfig.enableNightlightAccessory ?? false) && this.supportsNightlightAccessory(device)) {
+    if (this.shouldUseSeparateNightlightAccessory() && this.supportsNightlightAccessory(device)) {
       uuids.push(await this.registerNightlightAccessory(device));
     } else {
       this.unregisterNightlightAccessory(device.id);
     }
     return uuids;
+  }
+
+  private shouldUseSeparateNightlightAccessory(): boolean {
+    // Nightlight controls are locked to a single-tile (bound) accessory model.
+    return false;
   }
 
   private getDiffuserServiceMode(): 'switch' | 'fan' {
@@ -434,7 +439,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     for (const device of devices) {
       const diffuserUuid = this.api.hap.uuid.generate(this.getDiffuserUniqueId(device.id));
       discoveredUuids.add(diffuserUuid);
-      if ((this.puraConfig.enableNightlightAccessory ?? false) && this.supportsNightlightAccessory(device)) {
+      if (this.shouldUseSeparateNightlightAccessory() && this.supportsNightlightAccessory(device)) {
         const nightlightUuid = this.api.hap.uuid.generate(`${device.id}-nightlight`);
         discoveredUuids.add(nightlightUuid);
       }

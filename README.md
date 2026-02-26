@@ -8,7 +8,7 @@ By default this plugin exposes a single on/off switch per diffuser. It’s desig
 
 You can optionally enable:
 - Intensity Control: fan-style accessory with Subtle/Medium/Strong intensity levels.
-- Nightlight Control: A separate nightlight accessory tile. Supports on/off, Brightness (snapped to Pura's 10-step brightness levels), and color.
+- Nightlight Control: supports on/off, Brightness (snapped to Pura's 10-step brightness levels), and color for compatible diffusers.
 
 ## Supported Diffusers
 This plugin has been designed and tested for the following diffusers.
@@ -20,6 +20,11 @@ This plugin has been designed and tested for the following diffusers.
 1. Install this plugin using: `npm install -g @homebridge-plugins/homebridge-pura`
 2. Edit your `config.json` file (see sample config below)
 3. Run Homebridge
+
+## Requirements
+
+- Homebridge `^1.8.0` (Homebridge v2 beta is also supported)
+- Node.js `^18.20.4 || ^20.18.0 || ^22.10.0 || ^24.13.0`
 
 ## Configuration
 
@@ -45,9 +50,9 @@ Add the following platform to your `config.json`:
 
 - **username**: Your Pura email - *required*
 - **password**: Your Pura password - *required*
-- **forceNightlightOff**: Pura turns the nightlight on/off with the diffuser. Enable to prevent the light from staying on. (default: false)
-- **enableFanService (Enable Intensity Control)**: Changes the diffuser from an on/off switch to a fan accessory that controls intensity (Subtle, Medium, Strong). For multi-bay diffusers, HomeKit intensity changes are applied across available bays to keep auto-alternate behavior consistent. (default: false)
-- **enableNightlightAccessory**: Enables a separate nightlight accessory for compatible diffusers, including On/Brightness/Color. (default: false)
+- **forceNightlightOff**: Pura turns the nightlight on/off with the diffuser. If enabled, the plugin sends a nightlight-off command right after turning on a diffuser. (default: false)
+- **enableFanService (Enable Intensity Control)**: Replaces the on/off switch with a fan accessory to control intensity (Subtle, Medium, Strong). For multi-bay diffusers, HomeKit intensity changes are applied across available bays to keep auto-alternate behavior consistent. (default: false)
+- **enableNightlightAccessory**: Enables nightlight controls (On/Brightness/Color) for compatible diffusers. (default: false)
 
 ## Usage
 
@@ -62,8 +67,7 @@ For multi-bay diffusers, intensity changes from HomeKit are synced across availa
 
 Switching accessory types will require recreating HomeKit scenes and automations for all Pura diffusers in this plugin.
 
-If `enableNightlightAccessory` is set to `true`, each compatible diffuser also includes a separate `Nightlight Control` accessory tile.
-You can group it with the diffuser in the Home app if you prefer a combined view.
+If `enableNightlightAccessory` is set to `true`, compatible diffusers expose nightlight controls.
 
 ### Controls
 
@@ -81,14 +85,14 @@ The plugin will automatically:
 - Create one diffuser accessory per device:
   - Switch by default
   - Intensity control accessory when `enableFanService=true`
-- Optionally add a separate `Nightlight Control` accessory on compatible models when enabled
+- Optionally add nightlight controls on compatible models when enabled
 - Update device status via realtime updates with a 5-minute polling fallback (15s when realtime is down)
 - Handle authentication and token refresh (including periodic Cognito refresh polling)
 
 ## Recommended Usage
 
 - Use this plugin in lieu of Pura schedules or away mode.
-- Enable **Auto-alternative fragrances** in the Pura app to ensure equal scent distribution.
+- Enable **Auto-alternate fragrances** in the Pura app to ensure equal scent distribution.
 
 ## Troubleshooting
 
@@ -96,8 +100,9 @@ The plugin will automatically:
 
 If you encounter authentication errors:
 1. Verify your username and password are correct
-2. Check that your Pura account is active and can log in to the mobile app
-3. Ensure your internet connection is stable
+2. In Homebridge UI, click **Verify** before clicking **Save**
+3. Check that your Pura account is active and can log in to the mobile app
+4. Ensure your internet connection is stable
 
 ### Device Not Appearing
 

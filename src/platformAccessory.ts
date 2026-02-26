@@ -13,7 +13,7 @@ export class PuraPlatformAccessory {
   private nightlightService?: Service;
   private device: PuraDevice;
   private useFanService: boolean;
-  private enableNightlightAccessory: boolean;
+  private enableBoundNightlightService: boolean;
 
   private currentStateActive = false;
   private lastNightlightOffAt = 0;
@@ -71,6 +71,7 @@ export class PuraPlatformAccessory {
   private lastRotationWriteAt?: number;
   private lastRequestedOnIntensity?: number;
   private lastUnavailableCommandWarnAt = 0;
+  private lastNoScentVialsWarnAt = 0;
   private rotationWriteQueue: Promise<void> = Promise.resolve();
 
   constructor(
@@ -104,8 +105,8 @@ export class PuraPlatformAccessory {
       (this.platform.config as PuraConfig).enableFanService ??
       (this.platform.config as PuraConfig).useFanService,
     );
-    // Nightlight is exposed via a separate accessory when enabled.
-    this.enableNightlightAccessory = false;
+    // Nightlight controls can be exposed on this diffuser accessory when configured in bound mode.
+    this.enableBoundNightlightService = this.shouldUseBoundNightlightService();
     const fanService = this.accessory.getService(this.platform.Service.Fanv2);
     const switchService = this.accessory.getService(this.platform.Service.Switch);
     if (this.useFanService) {
@@ -147,7 +148,7 @@ export class PuraPlatformAccessory {
 
   private configureNightlightService() {
     const existing = this.accessory.getServiceById(this.platform.Service.Lightbulb, 'nightlight');
-    if (!this.enableNightlightAccessory || !this.supportsNightlightControl()) {
+    if (!this.enableBoundNightlightService || !this.supportsNightlightControl()) {
       if (existing) {
         this.accessory.removeService(existing);
       }
@@ -171,6 +172,19 @@ export class PuraPlatformAccessory {
     this.nightlightService.getCharacteristic(this.platform.Characteristic.Saturation)
       .onSet(this.setNightlightSaturation.bind(this))
       .onGet(this.getNightlightSaturation.bind(this));
+  }
+
+  private isNightlightControlEnabled(): boolean {
+    return Boolean((this.platform.config as PuraConfig).enableNightlightAccessory ?? false);
+  }
+
+  private hasSeparateNightlightAccessoryConfigured(): boolean {
+    // Nightlight controls are locked to single-tile (bound) mode.
+    return false;
+  }
+
+  private shouldUseBoundNightlightService(): boolean {
+    return this.isNightlightControlEnabled();
   }
 
   private updateCurrentState() {
@@ -493,10 +507,7 @@ export class PuraPlatformAccessory {
                 this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
               );
             } else {
-              this.platform.log.warn(
-                `${diffuserLabel} was turned on, but no scent vials were detected. ` +
-                'The accessory was turned off as a result.',
-              );
+              this.logNoScentVialsWarning();
             }
             return;
           }
@@ -767,10 +778,7 @@ export class PuraPlatformAccessory {
         if (this.hasNoScentVialsDetected()) {
           this.enforceOffVisualState();
           this.updateFaultState();
-          this.platform.log.warn(
-            `${diffuserLabel} was turned on, but no scent vials were detected. ` +
-            'The accessory was turned off as a result.',
-          );
+          this.logNoScentVialsWarning();
           return;
         }
         const preferredBay = this.accessory.context.lastBay;
@@ -1053,11 +1061,6 @@ export class PuraPlatformAccessory {
         this.logNightlightToggle(true, snappedPercent);
       }
       this.recordNightlightCommand('brightness', active, snappedPercent, apiLevel);
-      const nightlightLabel = this.getNightlightLogLabel();
-      this.platform.log.info(
-        `${nightlightLabel} brightness set to ${snappedPercent}% ` +
-        `(level ${apiLevel}, color ${color}, active=${active}).`,
-      );
       this.applyNightlightState();
       this.nightlightService?.updateCharacteristic(this.platform.Characteristic.Brightness, snappedPercent);
     });
@@ -1163,7 +1166,7 @@ export class PuraPlatformAccessory {
     }
     const previousNightlightActive = Boolean(previousNightlight?.active);
     const nextNightlightActive = Boolean(stabilizedDevice.nightlight?.active);
-    const hasDedicatedNightlightAccessory = Boolean((this.platform.config as PuraConfig).enableNightlightAccessory);
+    const hasDedicatedNightlightAccessory = this.hasSeparateNightlightAccessoryConfigured();
     if (!hasDedicatedNightlightAccessory && previousNightlightActive !== nextNightlightActive) {
       const nextBrightness = nextNightlightActive
         ? this.nightlightLevelToPercent(stabilizedDevice.nightlight?.brightness)
@@ -1314,6 +1317,20 @@ export class PuraPlatformAccessory {
     this.lastUnavailableCommandWarnAt = now;
     const diffuserLabel = this.getDiffuserLogLabel();
     this.platform.log.warn(`${diffuserLabel} appears offline (Wi-Fi lost or unplugged).`);
+  }
+
+  private logNoScentVialsWarning() {
+    const now = Date.now();
+    const warnThrottleMs = 5000;
+    if (now - this.lastNoScentVialsWarnAt < warnThrottleMs) {
+      return;
+    }
+    this.lastNoScentVialsWarnAt = now;
+    const diffuserLabel = this.getDiffuserLogLabel();
+    this.platform.log.warn(
+      `${diffuserLabel} was turned on, but no scent vials were detected. ` +
+      'The accessory was turned off as a result.',
+    );
   }
 
   private updateAccessoryInformation() {
@@ -1687,11 +1704,12 @@ export class PuraPlatformAccessory {
     if (action === 'on') {
       return;
     }
+    if (!requestedOn || Math.round(hkBrightnessPercent) <= 0) {
+      // For OFF transitions, emit the OFF log only (avoid duplicate "brightness set to 0%").
+      return;
+    }
     const nightlightLabel = this.getNightlightLogLabel();
-    this.platform.log.info(
-      `${nightlightLabel} brightness set to ` +
-      `${Math.round(hkBrightnessPercent)}% (level ${sentLevel}/10).`,
-    );
+    this.platform.log.info(`${nightlightLabel} brightness set to ${Math.round(hkBrightnessPercent)}%.`);
   }
 
   private getDiffuserLogLabel(): string {
@@ -1730,7 +1748,7 @@ export class PuraPlatformAccessory {
 
   private logNightlightToggle(active: boolean, brightnessPercent: number) {
     // Avoid double-logging when a dedicated nightlight accessory handles logs.
-    if (this.enableNightlightAccessory && this.supportsNightlightControl()) {
+    if (this.hasSeparateNightlightAccessoryConfigured() && this.supportsNightlightControl()) {
       return;
     }
     const now = Date.now();
@@ -1897,7 +1915,7 @@ export class PuraPlatformAccessory {
       // Some devices briefly report nightlight=on when a diffuser starts even when no HomeKit
       // nightlight command was sent. Hold the prior OFF state during the startup window.
       if (!forceNightlightOff
-        && !this.enableNightlightAccessory
+        && !this.hasSeparateNightlightAccessoryConfigured()
         && inDiffuserOnStabilizationWindow
         && !recentNightlightInteraction
         && !previousNightlightActive
