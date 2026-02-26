@@ -1019,9 +1019,7 @@ export class PuraPlatformAccessory {
       this.recordNightlightCommand('on', active, brightnessPercent, sentLevel);
       const nightlightLabel = this.getNightlightLogLabel();
       if (active) {
-        this.platform.log.info(
-          `${nightlightLabel} turned on (${brightnessPercent}% brightness).`,
-        );
+        this.platform.log.info(`${nightlightLabel} turned on.`);
       } else {
         this.platform.log.info(this.getNightlightOffLogMessage(nightlightLabel));
       }
@@ -1760,6 +1758,7 @@ export class PuraPlatformAccessory {
     hkBrightnessPercent: number,
     sentLevel: number,
   ) {
+    const previousCommand = this.lastNightlightCommand;
     this.lastNightlightCommand = {
       at: Date.now(),
       action,
@@ -1772,6 +1771,14 @@ export class PuraPlatformAccessory {
     }
     if (!requestedOn || Math.round(hkBrightnessPercent) <= 0) {
       // For OFF transitions, emit the OFF log only (avoid duplicate "brightness set to 0%").
+      return;
+    }
+    const suppressBrightnessLogAfterOnMs = 3000;
+    const previousWasRecentOn = previousCommand
+      && previousCommand.action === 'on'
+      && previousCommand.requestedOn
+      && (Date.now() - previousCommand.at) <= suppressBrightnessLogAfterOnMs;
+    if (previousWasRecentOn) {
       return;
     }
     const nightlightLabel = this.getNightlightLogLabel();
@@ -1880,7 +1887,7 @@ export class PuraPlatformAccessory {
 
     const label = this.getNightlightLogLabel();
     if (active) {
-      this.platform.log.info(`${label} turned on (${roundedPercent}% brightness).`);
+      this.platform.log.info(`${label} turned on.`);
     } else {
       this.platform.log.info(this.getNightlightOffLogMessage(label));
     }
