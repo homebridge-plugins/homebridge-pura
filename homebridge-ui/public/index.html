@@ -82,6 +82,20 @@
       border-color: var(--test-theme-color, var(--primary-color, var(--accent-color, var(--bs-primary, #0d6efd)))) !important;
     }
 
+    .nightlight-mode-options .form-check-input[type='radio'] {
+      accent-color: var(--test-theme-color, var(--primary-color, var(--accent-color, var(--bs-primary, #0d6efd))));
+    }
+
+    .nightlight-mode-options .form-check-input[type='radio']:checked {
+      background-color: var(--test-theme-color, var(--primary-color, var(--accent-color, var(--bs-primary, #0d6efd)))) !important;
+      border-color: var(--test-theme-color, var(--primary-color, var(--accent-color, var(--bs-primary, #0d6efd)))) !important;
+    }
+
+    .nightlight-mode-options .form-check-input[type='radio']:focus {
+      box-shadow: none !important;
+      border-color: var(--test-theme-color, var(--primary-color, var(--accent-color, var(--bs-primary, #0d6efd)))) !important;
+    }
+
     .password-wrap {
       position: relative;
       width: 50%;
@@ -231,12 +245,12 @@
 
         <div class="mb-4 d-none" id="nightlightModeGroup">
           <label class="form-label">Nightlight Tile Mode</label>
-          <div class="field-half">
-            <div class="form-check ms-1">
+          <div class="field-half nightlight-mode-options d-flex flex-row align-items-center gap-3 flex-wrap">
+            <div class="form-check form-check-inline mb-0 ms-1">
               <input class="form-check-input" id="nightlightModeSeparate" name="nightlightMode" type="radio" value="separate" />
               <label class="form-check-label" for="nightlightModeSeparate">Separate Tile</label>
             </div>
-            <div class="form-check ms-1">
+            <div class="form-check form-check-inline mb-0 ms-1">
               <input class="form-check-input" id="nightlightModeBound" name="nightlightMode" type="radio" value="bound" />
               <label class="form-check-label" for="nightlightModeBound">Single Tile</label>
             </div>

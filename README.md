@@ -8,7 +8,7 @@ By default this plugin exposes a single on/off switch per diffuser. It’s desig
 
 You can optionally enable:
 - Intensity Control: fan-style accessory with Subtle/Medium/Strong intensity levels.
-- Nightlight Control: supports on/off, Brightness (snapped to Pura's 10-step brightness levels), and color in either separate-accessory or bound-to-diffuser mode.
+- Nightlight Control: supports on/off, Brightness (snapped to Pura's 10-step brightness levels), and color in either Separate Tile or Single Tile mode.
 
 ## Supported Diffusers
 This plugin has been designed and tested for the following diffusers.
@@ -20,6 +20,11 @@ This plugin has been designed and tested for the following diffusers.
 1. Install this plugin using: `npm install -g @homebridge-plugins/homebridge-pura`
 2. Edit your `config.json` file (see sample config below)
 3. Run Homebridge
+
+## Requirements
+
+- Homebridge `^1.8.0` (Homebridge v2 beta is also supported)
+- Node.js `^18.20.4 || ^20.18.0 || ^22.10.0 || ^24.13.0`
 
 ## Configuration
 
@@ -46,13 +51,13 @@ Add the following platform to your `config.json`:
 
 - **username**: Your Pura email - *required*
 - **password**: Your Pura password - *required*
-- **forceNightlightOff**: Pura turns the nightlight on/off with the diffuser. Enable to prevent the light from staying on. (default: false)
+- **forceNightlightOff**: Pura turns the nightlight on/off with the diffuser. If enabled, the plugin sends a nightlight-off command right after turning on a diffuser. (default: false)
 - **enableFanService (Enable Intensity Control)**: Replaces the on/off switch with a fan accessory to control intensity (Subtle, Medium, Strong). For multi-bay diffusers, HomeKit intensity changes are applied across available bays to keep auto-alternate behavior consistent. (default: false)
 - **enableNightlightAccessory**: Enables nightlight controls (On/Brightness/Color) for compatible diffusers. (default: false)
 - **nightlightMode**: Nightlight tile layout when enabled:
-  - `separate` (default): creates a dedicated Nightlight tile (separate accessory).
-  - `bound`: uses a Single Tile (Apple multi-service accessory) by attaching the light service to the diffuser accessory (switch/fan tile).
-  Changing modes may require updating HomeKit scenes or automations.
+  - `separate` (default): Separate Tile creates a dedicated Nightlight accessory.
+  - `bound`: Single Tile combines nightlight controls with the diffuser accessory.
+  Changing modes may require updating scenes or automations.
 
 ## Usage
 
@@ -68,8 +73,8 @@ For multi-bay diffusers, intensity changes from HomeKit are synced across availa
 Switching accessory types will require recreating HomeKit scenes and automations for all Pura diffusers in this plugin.
 
 If `enableNightlightAccessory` is set to `true`, `nightlightMode` controls how nightlight appears:
-- `separate`: each compatible diffuser includes a separate `Nightlight Control` accessory tile.
-- `bound`: a light service is attached directly to the diffuser accessory.
+- `separate`: Separate Tile creates a dedicated `Nightlight Control` accessory.
+- `bound`: Single Tile combines nightlight controls with the diffuser accessory.
 
 ### Controls
 
@@ -88,15 +93,15 @@ The plugin will automatically:
   - Switch by default
   - Intensity control accessory when `enableFanService=true`
 - Optionally add nightlight control on compatible models when enabled:
-  - Separate `Nightlight Control` accessory (`nightlightMode=separate`)
-  - Bound light service on the diffuser accessory (`nightlightMode=bound`)
+  - Separate Tile: dedicated `Nightlight Control` accessory (`nightlightMode=separate`)
+  - Single Tile: nightlight controls combined with the diffuser accessory (`nightlightMode=bound`)
 - Update device status via realtime updates with a 5-minute polling fallback (15s when realtime is down)
 - Handle authentication and token refresh (including periodic Cognito refresh polling)
 
 ## Recommended Usage
 
 - Use this plugin in lieu of Pura schedules or away mode.
-- Enable **Auto-alternative fragrances** in the Pura app to ensure equal scent distribution.
+- Enable **Auto-alternate fragrances** in the Pura app to ensure equal scent distribution.
 
 ## Troubleshooting
 
@@ -104,8 +109,9 @@ The plugin will automatically:
 
 If you encounter authentication errors:
 1. Verify your username and password are correct
-2. Check that your Pura account is active and can log in to the mobile app
-3. Ensure your internet connection is stable
+2. In Homebridge UI, click **Verify** before clicking **Save**
+3. Check that your Pura account is active and can log in to the mobile app
+4. Ensure your internet connection is stable
 
 ### Device Not Appearing
 
