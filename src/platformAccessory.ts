@@ -59,6 +59,11 @@ export class PuraPlatformAccessory {
     ttlMs: number;
     intensity: number;
   };
+  private pendingPowerOnIntensityLog?: {
+    at: number;
+    intensity: number;
+  };
+  private pendingPowerOnIntensityLogTimer?: ReturnType<typeof setTimeout>;
   private lastSuccessfulOnWriteAt?: number;
   private lastSetOnCommandAt?: number;
   private lastRotationWriteAt?: number;
@@ -518,12 +523,9 @@ export class PuraPlatformAccessory {
             this.applyCurrentState();
             this.platform.log.info(`${diffuserLabel} turned on.`);
             // When Home turns the fan accessory on, it commonly sends RotationSpeed writes that we may suppress
-            // as "pending intent". Emit the intensity log here so the user still sees the chosen level.
+            // as "pending intent". Debounce this log so quick follow-up RotationSpeed writes emit one final value.
             if (this.useFanService) {
-              this.platform.log.info(
-                `${diffuserLabel} intensity set to ${intensity} ` +
-                `(${intensity === 30 ? 'subtle' : intensity === 50 ? 'medium' : 'strong'}).`,
-              );
+              this.queuePendingPowerOnIntensityLog(intensity);
             }
             if ((this.platform.config as PuraConfig).forceNightlightOff && this.supportsNightlightControl()) {
               await this.ensureNightlightOff();
@@ -535,6 +537,7 @@ export class PuraPlatformAccessory {
         } else {
           this.pendingIntensityIntent = undefined;
           this.pendingPowerOnIntensityIntent = undefined;
+          this.cancelPendingPowerOnIntensityLog();
           if (!this.currentStateActive) {
             this.applyCurrentState();
             if (this.platform.isDebugEnabled()) {
@@ -635,6 +638,7 @@ export class PuraPlatformAccessory {
           this.service.updateCharacteristic(this.platform.Characteristic.RotationSpeed, 0);
           this.pendingIntensityIntent = undefined;
           this.pendingPowerOnIntensityIntent = undefined;
+          this.cancelPendingPowerOnIntensityLog();
           if (!this.currentStateActive) {
             this.applyCurrentState();
             return;
@@ -825,9 +829,10 @@ export class PuraPlatformAccessory {
           bay: targetBay,
         };
         this.recentIntensityHold = { until: Date.now() + 15000, level: mappedIntensity };
+        this.cancelPendingPowerOnIntensityLog();
         this.platform.log.info(
           `${diffuserLabel} intensity set to ${mappedIntensity} ` +
-          `(${mappedIntensity === 30 ? 'subtle' : mappedIntensity === 50 ? 'medium' : 'strong'}).`,
+          `(${this.describeIntensityLevel(mappedIntensity)}).`,
         );
         this.applyCurrentState();
       } catch (error) {
@@ -1130,6 +1135,7 @@ export class PuraPlatformAccessory {
   }
 
   updateDevice(device: PuraDevice) {
+    const previousDiffuserActive = this.currentStateActive;
     const nightlightStabilizedDevice = this.clampNightlightDuringHold(
       this.stabilizeNightlightDuringIntentWindow(device),
     );
@@ -1160,6 +1166,9 @@ export class PuraPlatformAccessory {
     }
     this.logNightlightProfileRoundTrip(previousNightlight, stabilizedDevice.nightlight);
     this.updateCurrentState();
+    if (previousDiffuserActive && !this.currentStateActive) {
+      this.cancelPendingPowerOnIntensityLog();
+    }
     void this.maybeForceNightlightOff();
   }
 
@@ -1983,6 +1992,53 @@ export class PuraPlatformAccessory {
       return undefined;
     }
     return this.pendingPowerOnIntensityIntent.intensity;
+  }
+
+  private describeIntensityLevel(intensity: number): 'subtle' | 'medium' | 'strong' {
+    if (intensity <= 30) {
+      return 'subtle';
+    }
+    if (intensity <= 50) {
+      return 'medium';
+    }
+    return 'strong';
+  }
+
+  private queuePendingPowerOnIntensityLog(intensity: number) {
+    const normalizedIntensity = Math.max(1, Math.min(100, Math.round(Number(intensity) || 0)));
+    this.pendingPowerOnIntensityLog = {
+      at: Date.now(),
+      intensity: normalizedIntensity,
+    };
+    if (this.pendingPowerOnIntensityLogTimer) {
+      clearTimeout(this.pendingPowerOnIntensityLogTimer);
+      this.pendingPowerOnIntensityLogTimer = undefined;
+    }
+    const debounceMs = 3500;
+    this.pendingPowerOnIntensityLogTimer = setTimeout(() => {
+      const pending = this.pendingPowerOnIntensityLog;
+      this.pendingPowerOnIntensityLog = undefined;
+      if (this.pendingPowerOnIntensityLogTimer) {
+        clearTimeout(this.pendingPowerOnIntensityLogTimer);
+        this.pendingPowerOnIntensityLogTimer = undefined;
+      }
+      if (!pending) {
+        return;
+      }
+      const diffuserLabel = this.getDiffuserLogLabel();
+      this.platform.log.info(
+        `${diffuserLabel} intensity set to ${pending.intensity} ` +
+        `(${this.describeIntensityLevel(pending.intensity)}).`,
+      );
+    }, debounceMs);
+  }
+
+  private cancelPendingPowerOnIntensityLog() {
+    this.pendingPowerOnIntensityLog = undefined;
+    if (this.pendingPowerOnIntensityLogTimer) {
+      clearTimeout(this.pendingPowerOnIntensityLogTimer);
+      this.pendingPowerOnIntensityLogTimer = undefined;
+    }
   }
 
   private stabilizeIntensityDuringIntentWindow(device: PuraDevice): PuraDevice {
