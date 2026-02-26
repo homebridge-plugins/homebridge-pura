@@ -88,6 +88,8 @@ export class PuraPlatformAccessory {
   private pendingSecondaryBaySyncTimer?: ReturnType<typeof setTimeout>;
   private lastUnavailableCommandWarnAt = 0;
   private lastNoScentVialsWarnAt = 0;
+  private lastBayUpdateDebugKey?: string;
+  private lastBayVisualStateDebugKey?: string;
   private rotationWriteQueue: Promise<void> = Promise.resolve();
 
   constructor(
@@ -779,6 +781,17 @@ export class PuraPlatformAccessory {
     return isOn;
   }
 
+  private summarizeBayDebugState(): string {
+    const summarize = (bay: 1 | 2) => {
+      const payload = this.getBayPayload(bay);
+      return `bay${bay}{active=${Boolean(payload?.active)},intensity=${payload?.intensity ?? 'none'},activeAt=${payload?.activeAt ?? 'none'}}`;
+    };
+    const pendingBay = this.pendingIntensityIntent?.bay;
+    return `effective=${this.getEffectiveActiveBayNumber() ?? 'none'},currentStateActive=${this.currentStateActive},` +
+      `pendingBay=${pendingBay ?? 'none'},pendingIntensity=${this.pendingIntensityIntent?.intensity ?? 'none'},` +
+      `${summarize(1)},${summarize(2)}`;
+  }
+
   async setBayOn(bay: 1 | 2, value: CharacteristicValue) {
     await this.enqueueRotationWrite(async () => {
       const bayLabel = this.getBayLogLabel(bay);
@@ -788,6 +801,13 @@ export class PuraPlatformAccessory {
       this.lastSetOnCommandAt = Date.now();
       this.platform.log.debug(`Set Characteristic Active for ${bayLabel} ->`, value);
       this.platform.recordIntent(this.device.id, isOn);
+      if (this.platform.isDebugEnabled()) {
+        this.platform.log.debug(
+          `[BayControl] setBayOn request for ${bayLabel}: ` +
+          `requested=${isOn} raw=${value} effectiveActiveBay=${this.getEffectiveActiveBayNumber() ?? 'none'} ` +
+          `currentStateActive=${this.currentStateActive}`,
+        );
+      }
 
       try {
         if (isOn) {
@@ -818,6 +838,13 @@ export class PuraPlatformAccessory {
             1,
             Math.min(100, mappedFromService > 0 ? mappedFromService : (payloadIntensity ?? fallbackIntensity)),
           );
+          if (this.platform.isDebugEnabled()) {
+            this.platform.log.debug(
+              `[BayControl] ON intensity selection for ${bayLabel}: ` +
+              `mappedFromService=${mappedFromService || 'none'} payloadIntensity=${payloadIntensity ?? 'none'} ` +
+              `fallback=${fallbackIntensity} target=${targetIntensity}`,
+            );
+          }
 
           if (this.shouldResetAwayModeBeforeActivating()) {
             await this.puraApi.setAwayMode(this.device.id, false);
@@ -846,6 +873,12 @@ export class PuraPlatformAccessory {
             bay,
           };
           this.cancelPendingPowerOnIntensityLog();
+          if (this.platform.isDebugEnabled()) {
+            this.platform.log.debug(
+              `[BayControl] Applied ON for ${bayLabel}: targetIntensity=${targetIntensity}, ` +
+              `effectiveActiveBay=${this.getEffectiveActiveBayNumber() ?? 'none'}, ${this.summarizeBayDebugState()}`,
+            );
+          }
           this.platform.log.info(`${bayLabel} turned on.`);
           if (this.useFanService) {
             this.platform.log.info(
@@ -861,6 +894,12 @@ export class PuraPlatformAccessory {
 
         const activeBay = this.getEffectiveActiveBayNumber();
         if (!this.currentStateActive || activeBay !== bay) {
+          if (this.platform.isDebugEnabled()) {
+            this.platform.log.debug(
+              `[BayControl] Ignoring OFF for ${bayLabel}: ` +
+              `currentStateActive=${this.currentStateActive} effectiveActiveBay=${activeBay ?? 'none'}`,
+            );
+          }
           this.applyCurrentState();
           return;
         }
@@ -888,6 +927,11 @@ export class PuraPlatformAccessory {
         this.pendingPowerOnIntensityIntent = undefined;
         this.clearPendingSecondaryBayIntensitySync();
         this.cancelPendingPowerOnIntensityLog();
+        if (this.platform.isDebugEnabled()) {
+          this.platform.log.debug(
+            `[BayControl] Applied OFF for ${bayLabel}: ${this.summarizeBayDebugState()}`,
+          );
+        }
         this.platform.log.info(`${bayLabel} turned off.`);
         this.applyCurrentState();
         this.platform.requestRefreshSoon(2500);
@@ -928,10 +972,23 @@ export class PuraPlatformAccessory {
         const mappedIntensity = this.mapRotationToIntensity(speed);
         const snappedSpeed = mappedIntensity <= 0 ? 0 : this.mapIntensityToRotation(mappedIntensity);
         this.bayServices[bay]?.updateCharacteristic(this.platform.Characteristic.RotationSpeed, snappedSpeed);
+        if (this.platform.isDebugEnabled()) {
+          this.platform.log.debug(
+            `[BayControl] setBayRotationSpeed for ${bayLabel}: raw=${value} normalized=${speed} ` +
+            `mapped=${mappedIntensity} snapped=${snappedSpeed} ` +
+            `effectiveActiveBay=${this.getEffectiveActiveBayNumber() ?? 'none'} currentStateActive=${this.currentStateActive}`,
+          );
+        }
 
         if (speed <= 0) {
           const activeBay = this.getEffectiveActiveBayNumber();
           if (!this.currentStateActive || activeBay !== bay) {
+            if (this.platform.isDebugEnabled()) {
+              this.platform.log.debug(
+                `[BayControl] Ignoring RotationSpeed=0 OFF for ${bayLabel}: ` +
+                `currentStateActive=${this.currentStateActive} effectiveActiveBay=${activeBay ?? 'none'}`,
+              );
+            }
             this.applyCurrentState();
             return;
           }
@@ -975,6 +1032,12 @@ export class PuraPlatformAccessory {
         const controller = this.device.controller || 'default';
         const activeBay = this.getEffectiveActiveBayNumber();
         if (!this.currentStateActive || activeBay !== bay) {
+          if (this.platform.isDebugEnabled()) {
+            this.platform.log.debug(
+              `[BayControl] Re-arming ${bayLabel} before intensity write: ` +
+              `currentStateActive=${this.currentStateActive} effectiveActiveBay=${activeBay ?? 'none'}`,
+            );
+          }
           if (this.shouldResetAwayModeBeforeActivating()) {
             await this.puraApi.setAwayMode(this.device.id, false);
           }
@@ -1018,6 +1081,12 @@ export class PuraPlatformAccessory {
         };
         this.recentIntensityHold = { until: Date.now() + 15000, level: mappedIntensity };
         this.cancelPendingPowerOnIntensityLog();
+        if (this.platform.isDebugEnabled()) {
+          this.platform.log.debug(
+            `[BayControl] Applied intensity for ${bayLabel}: mapped=${mappedIntensity}, ` +
+            `effectiveActiveBay=${this.getEffectiveActiveBayNumber() ?? 'none'}, ${this.summarizeBayDebugState()}`,
+          );
+        }
         this.platform.log.info(
           `${bayLabel} intensity set to ${mappedIntensity} (${this.describeIntensityLevel(mappedIntensity)}).`,
         );
@@ -1789,6 +1858,13 @@ export class PuraPlatformAccessory {
     }
     this.logInferredOfflineTransition();
     this.logRecommendationHints(stabilizedDevice);
+    if (this.enableBayControl && this.platform.isDebugEnabled()) {
+      const key = this.summarizeBayDebugState();
+      if (key !== this.lastBayUpdateDebugKey) {
+        this.lastBayUpdateDebugKey = key;
+        this.platform.log.debug(`[BayControl] Device update for ${this.getDiffuserLogLabel()}: ${key}`);
+      }
+    }
     this.accessory.context.device = stabilizedDevice;
     this.updateAccessoryInformation();
     if (this.platform.isDebugEnabled()) {
@@ -2311,6 +2387,20 @@ export class PuraPlatformAccessory {
             ? this.mapIntensityToRotation(intensity)
             : 0;
           service.updateCharacteristic(this.platform.Characteristic.RotationSpeed, speed);
+        }
+      }
+      if (this.platform.isDebugEnabled()) {
+        const visualKey = `${activeBay ?? 'none'}:${this.getBayIntensityValue(1) ?? 'none'}:${this.getBayIntensityValue(2) ?? 'none'}`;
+        if (visualKey !== this.lastBayVisualStateDebugKey) {
+          this.lastBayVisualStateDebugKey = visualKey;
+          const bay1Intensity = this.getBayIntensityValue(1);
+          const bay2Intensity = this.getBayIntensityValue(2);
+          this.platform.log.debug(
+            `[BayControl] Applied HomeKit visual state for ${this.getDiffuserLogLabel()}: ` +
+            `activeBay=${activeBay ?? 'none'} ` +
+            `bay1Speed=${bay1Intensity !== undefined ? this.mapIntensityToRotation(bay1Intensity) : 0} ` +
+            `bay2Speed=${bay2Intensity !== undefined ? this.mapIntensityToRotation(bay2Intensity) : 0}`,
+          );
         }
       }
       return;
