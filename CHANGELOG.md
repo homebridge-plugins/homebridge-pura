@@ -1,5 +1,13 @@
 # Release Notes
 
+## 1.6.6 - 2026-02-26
+- Introduce **Intensity Control** mode that changes each diffuser from an on/off switch to a HomeKit fan accessory.
+- Map fan `RotationSpeed` to Pura intensity levels (`30` subtle, `50` medium, `100` strong), with multi-bay syncing.
+- Improve fan-mode startup behavior and logging so quick power-on + slider updates settle to the final intended intensity.
+- Improve unavailable/offline handling for diffuser controls so Home app behavior is more consistent during disconnects.
+- Improve nightlight synchronization and logging around diffuser transitions, including clearer auto-off messaging when enabled.
+- Refresh Homebridge UI option wording/documentation for the Intensity Control fan accessory mode.
+
 ## 1.6.6-alpha.0 - 2026-02-24
 - Infer diffuser on-state from recent `activeAt` timestamps even when intensity briefly reports `0`, preventing false-off in HomeKit during realtime dropouts.
 - Same nightlight improvements from 1.6.4 (snap levels, color, bounce mitigation, UI toggles).
