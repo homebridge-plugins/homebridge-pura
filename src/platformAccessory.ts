@@ -63,6 +63,7 @@ export class PuraPlatformAccessory {
   private lastSetOnCommandAt?: number;
   private lastRotationWriteAt?: number;
   private lastRequestedOnIntensity?: number;
+  private lastUnavailableCommandWarnAt = 0;
   private rotationWriteQueue: Promise<void> = Promise.resolve();
 
   constructor(
@@ -480,7 +481,7 @@ export class PuraPlatformAccessory {
             this.enforceOffVisualState();
             this.updateFaultState();
             if (deviceUnavailable) {
-              this.platform.log.warn(`${diffuserLabel} appears offline (Wi-Fi lost or unplugged).`);
+              this.logUnavailableCommandWarning();
               throw new this.platform.api.hap.HapStatusError(
                 this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
               );
@@ -546,7 +547,7 @@ export class PuraPlatformAccessory {
           if (this.isDeviceUnavailable()) {
             this.enforceOffVisualState();
             this.updateFaultState();
-            this.platform.log.warn(`${diffuserLabel} appears offline (Wi-Fi lost or unplugged).`);
+            this.logUnavailableCommandWarning();
             throw new this.platform.api.hap.HapStatusError(
               this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
             );
@@ -641,7 +642,7 @@ export class PuraPlatformAccessory {
           if (this.isDeviceUnavailable()) {
             this.enforceOffVisualState();
             this.updateFaultState();
-            this.platform.log.warn(`${diffuserLabel} appears offline (Wi-Fi lost or unplugged).`);
+            this.logUnavailableCommandWarning();
             throw new this.platform.api.hap.HapStatusError(
               this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
             );
@@ -744,9 +745,12 @@ export class PuraPlatformAccessory {
         this.accessory.context.lastIntensity = mappedIntensity;
         if (this.isDeviceUnavailable()) {
           this.updateFaultState();
-          this.platform.log.warn(
-            `${diffuserLabel} appears unavailable while adjusting intensity; preserving current state.`,
-          );
+          this.logUnavailableCommandWarning();
+          if (this.platform.isDebugEnabled()) {
+            this.platform.log.debug(
+              `${diffuserLabel} appears unavailable while adjusting intensity; preserving current state.`,
+            );
+          }
           this.applyCurrentState();
           throw new this.platform.api.hap.HapStatusError(
             this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
@@ -1279,6 +1283,18 @@ export class PuraPlatformAccessory {
       this.platform.log.info(`${diffuserLabel} is back online.`);
       return;
     }
+    this.lastUnavailableCommandWarnAt = Date.now();
+    this.platform.log.warn(`${diffuserLabel} appears offline (Wi-Fi lost or unplugged).`);
+  }
+
+  private logUnavailableCommandWarning() {
+    const now = Date.now();
+    const warnThrottleMs = 60000;
+    if (now - this.lastUnavailableCommandWarnAt < warnThrottleMs) {
+      return;
+    }
+    this.lastUnavailableCommandWarnAt = now;
+    const diffuserLabel = this.getDiffuserLogLabel();
     this.platform.log.warn(`${diffuserLabel} appears offline (Wi-Fi lost or unplugged).`);
   }
 
