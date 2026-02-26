@@ -203,7 +203,7 @@
         <p class="test-hint mb-4 mt-2" id="testHint">Credentials must be tested before saving.</p>
 
         <h5 class="card-title mt-2">Options</h5>
-        <p class="card-text mb-4">Fine-tune diffuser and nightlight behavior.</p>
+        <p class="card-text mb-4">Options to give you greater control in HomeKit.</p>
 
         <div class="form-check form-switch ms-1 mb-4">
           <input class="form-check-input" id="forceNightlightOff" type="checkbox" role="switch" aria-describedby="forceOff" />
@@ -284,11 +284,18 @@
 
       const getCredentialKey = () => `${els.username.value.trim()}\n${els.password.value}`;
       const hasCredentialInputs = () => els.username.value.trim().length > 0 && els.password.value.length > 0;
+      const credentialsChangedFromInitial = () => getCredentialKey() !== initialCredentialKey;
+      const hasFreshCredentialTest = () => credentialsVerified && testedCredentialKey === getCredentialKey();
+      const canAttemptCredentialTest = () => (
+        hasCredentialInputs()
+        && credentialsChangedFromInitial()
+        && !hasFreshCredentialTest()
+      );
 
       const setTestButtonDefault = () => {
         els.testBtn.className = 'btn test-theme-lock';
         els.testBtn.innerHTML = '<i class="fa-solid fa-circle-user me-2"></i>' + TEST_BUTTON_TEXT;
-        els.testBtn.disabled = !hasCredentialInputs();
+        els.testBtn.disabled = !canAttemptCredentialTest();
         if (els.testHint) {
           els.testHint.classList.remove('test-hint-success', 'test-hint-error');
           els.testHint.textContent = TEST_HINT_DEFAULT;
@@ -317,7 +324,7 @@
       const setTestButtonFailed = () => {
         els.testBtn.className = 'btn btn-outline-danger test-fail-lock';
         els.testBtn.innerHTML = '<i class="fa-solid fa-circle-xmark me-2" aria-hidden="true"></i>Failed';
-        els.testBtn.disabled = true;
+        els.testBtn.disabled = !canAttemptCredentialTest();
       };
 
       const setUiStatus = (message, level = 'muted') => {
@@ -405,9 +412,9 @@
 
       const updateSaveState = () => {
         applyThemeColorFromNativeSave();
-        const hasRequired = els.username.value.trim().length > 0 && els.password.value.length > 0;
-        const hasFreshTest = credentialsVerified && testedCredentialKey === getCredentialKey();
-        const credentialsUnchanged = initialCredentialKey === getCredentialKey();
+        const hasRequired = hasCredentialInputs();
+        const hasFreshTest = hasFreshCredentialTest();
+        const credentialsUnchanged = !credentialsChangedFromInitial();
         if (hasRequired && (credentialsUnchanged || hasFreshTest)) {
           homebridge.enableSaveButton();
           setNativeSaveTooltip('');
