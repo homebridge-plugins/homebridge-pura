@@ -166,7 +166,7 @@
             style="height:auto;"
           />
         </div>
-        <h5 class="card-title">Pura Sign In</h5>
+        <h5 class="card-title">Pura Authentication</h5>
         <p class="card-text mb-4">Please enter your Pura account credentials.</p>
 
         <div class="mb-3">
@@ -188,6 +188,12 @@
             </button>
           </div>
         </div>
+
+        <div class="d-flex gap-2 align-items-center">
+          <button class="btn btn-outline-primary" id="testBtn" type="button">Test Login</button>
+        </div>
+
+        <p class="test-hint mb-4 mt-2" id="testHint">Credentials must be tested before saving.</p>
 
         <h4 class="card-title">Options</h4>
         <p class="card-text mb-4">For those looking for more control.</p>
@@ -215,12 +221,6 @@
             Adds a separate Nightlight accessory tile (On, Brightness, and Color) for compatible diffusers. You can group it with the diffuser in the Home app if desired.
           </div>
         </div>
-
-        <div class="d-flex gap-2 align-items-center pt-4">
-          <button class="btn btn-outline-primary" id="testBtn" type="button">Test Login</button>
-        </div>
-
-        <p class="test-hint" id="testHint">Credentials must be tested before saving.</p>
 
         <div class="small" id="status"></div>
       </div>
