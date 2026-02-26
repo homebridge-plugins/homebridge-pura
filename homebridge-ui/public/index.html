@@ -66,6 +66,7 @@
 
     .form-text {
       color: var(--helper-text-color, #8f98a3) !important;
+      line-height: 1.1rem;
     }
 
     .form-label {
@@ -221,6 +222,14 @@
           </div>
         </div>
 
+        <div class="form-check form-switch ms-1 mb-4">
+          <input class="form-check-input" id="enableBayControl" type="checkbox" role="switch" aria-describedby="bayControlHelp" />
+          <label class="form-check-label" for="enableBayControl">Enable Per-Bay Controls</label>
+          <div id="bayControlHelp" class="form-text">
+            Exposes separate controls for each bay. If Intensity Control is enabled, each bay is exposed as a fan accessory; otherwise each bay is a switch. Only one bay can run at a time.
+          </div>
+        </div>
+
         <div class="form-check form-switch ms-1">
           <input class="form-check-input" id="enableNightlightAccessory" type="checkbox" role="switch" aria-describedby="nightlightAccessoryHelp" />
           <label class="form-check-label" for="enableNightlightAccessory">Enable Nightlight Controls</label>
@@ -272,6 +281,7 @@
         passwordToggle: document.getElementById('passwordToggle'),
         forceNightlightOff: document.getElementById('forceNightlightOff'),
         enableFanService: document.getElementById('enableFanService'),
+        enableBayControl: document.getElementById('enableBayControl'),
         enableNightlightAccessory: document.getElementById('enableNightlightAccessory'),
         testBtn: document.getElementById('testBtn'),
         testHint: document.getElementById('testHint'),
@@ -440,6 +450,7 @@
           password: '',
           forceNightlightOff: false,
           enableFanService: false,
+          enableBayControl: false,
           enableNightlightAccessory: false,
         };
       };
@@ -452,6 +463,7 @@
           password: els.password.value,
           forceNightlightOff: !!els.forceNightlightOff.checked,
           enableFanService: !!els.enableFanService.checked,
+          enableBayControl: !!els.enableBayControl.checked,
           enableNightlightAccessory: !!els.enableNightlightAccessory.checked,
         };
         await homebridge.updatePluginConfig([config]);
@@ -484,6 +496,7 @@
         els.password.value = current.password || '';
         els.forceNightlightOff.checked = !!current.forceNightlightOff;
         els.enableFanService.checked = !!(current.enableFanService ?? current.useFanService);
+        els.enableBayControl.checked = !!current.enableBayControl;
         els.enableNightlightAccessory.checked = !!current.enableNightlightAccessory;
         initialCredentialKey = getCredentialKey();
 
@@ -493,6 +506,7 @@
           els.name,
           els.forceNightlightOff,
           els.enableFanService,
+          els.enableBayControl,
         ]) {
           field.addEventListener('change', async () => {
             await syncConfig();
