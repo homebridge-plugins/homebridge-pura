@@ -71,6 +71,7 @@ export class PuraPlatformAccessory {
   private lastRotationWriteAt?: number;
   private lastRequestedOnIntensity?: number;
   private lastUnavailableCommandWarnAt = 0;
+  private lastNoScentVialsWarnAt = 0;
   private rotationWriteQueue: Promise<void> = Promise.resolve();
 
   constructor(
@@ -506,10 +507,7 @@ export class PuraPlatformAccessory {
                 this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
               );
             } else {
-              this.platform.log.warn(
-                `${diffuserLabel} was turned on, but no scent vials were detected. ` +
-                'The accessory was turned off as a result.',
-              );
+              this.logNoScentVialsWarning();
             }
             return;
           }
@@ -780,10 +778,7 @@ export class PuraPlatformAccessory {
         if (this.hasNoScentVialsDetected()) {
           this.enforceOffVisualState();
           this.updateFaultState();
-          this.platform.log.warn(
-            `${diffuserLabel} was turned on, but no scent vials were detected. ` +
-            'The accessory was turned off as a result.',
-          );
+          this.logNoScentVialsWarning();
           return;
         }
         const preferredBay = this.accessory.context.lastBay;
@@ -1322,6 +1317,20 @@ export class PuraPlatformAccessory {
     this.lastUnavailableCommandWarnAt = now;
     const diffuserLabel = this.getDiffuserLogLabel();
     this.platform.log.warn(`${diffuserLabel} appears offline (Wi-Fi lost or unplugged).`);
+  }
+
+  private logNoScentVialsWarning() {
+    const now = Date.now();
+    const warnThrottleMs = 5000;
+    if (now - this.lastNoScentVialsWarnAt < warnThrottleMs) {
+      return;
+    }
+    this.lastNoScentVialsWarnAt = now;
+    const diffuserLabel = this.getDiffuserLogLabel();
+    this.platform.log.warn(
+      `${diffuserLabel} was turned on, but no scent vials were detected. ` +
+      'The accessory was turned off as a result.',
+    );
   }
 
   private updateAccessoryInformation() {
