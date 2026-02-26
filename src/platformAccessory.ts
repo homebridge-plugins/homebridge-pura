@@ -1069,11 +1069,6 @@ export class PuraPlatformAccessory {
         this.logNightlightToggle(true, snappedPercent);
       }
       this.recordNightlightCommand('brightness', active, snappedPercent, apiLevel);
-      const nightlightLabel = this.getNightlightLogLabel();
-      this.platform.log.info(
-        `${nightlightLabel} brightness set to ${snappedPercent}% ` +
-        `(level ${apiLevel}, color ${color}, active=${active}).`,
-      );
       this.applyNightlightState();
       this.nightlightService?.updateCharacteristic(this.platform.Characteristic.Brightness, snappedPercent);
     });
@@ -1704,10 +1699,7 @@ export class PuraPlatformAccessory {
       return;
     }
     const nightlightLabel = this.getNightlightLogLabel();
-    this.platform.log.info(
-      `${nightlightLabel} brightness set to ` +
-      `${Math.round(hkBrightnessPercent)}% (level ${sentLevel}/10).`,
-    );
+    this.platform.log.info(`${nightlightLabel} brightness set to ${Math.round(hkBrightnessPercent)}%.`);
   }
 
   private getDiffuserLogLabel(): string {
