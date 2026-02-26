@@ -14,11 +14,13 @@ import { PuraConfig, PuraDevice, PuraBay } from './puraTypes.js';
  * One diffuser service per device, with optional Nightlight Control service.
  */
 export class PuraPlatformAccessory {
-  private service: Service;
+  private service!: Service;
+  private bayServices: Partial<Record<1 | 2, Service>> = {};
   private nightlightService?: Service;
   private autoAlternateService?: Service;
   private device: PuraDevice;
   private useFanService: boolean;
+  private enableBayControl: boolean;
   private enableBoundNightlightService: boolean;
 
   private currentStateActive = false;
@@ -119,40 +121,10 @@ export class PuraPlatformAccessory {
       (this.platform.config as PuraConfig).enableFanService ??
       (this.platform.config as PuraConfig).useFanService,
     );
+    this.enableBayControl = Boolean((this.platform.config as PuraConfig).enableBayControl);
     // Nightlight controls can be exposed on this diffuser accessory when configured in bound mode.
     this.enableBoundNightlightService = this.shouldUseBoundNightlightService();
-    const fanService = this.accessory.getService(this.platform.Service.Fanv2);
-    const switchService = this.accessory.getService(this.platform.Service.Switch);
-    if (this.useFanService) {
-      if (switchService) {
-        this.accessory.removeService(switchService);
-      }
-      this.service = fanService || this.accessory.addService(this.platform.Service.Fanv2);
-    } else {
-      if (fanService) {
-        this.accessory.removeService(fanService);
-      }
-      this.service = switchService || this.accessory.addService(this.platform.Service.Switch);
-    }
-
-    this.service.setCharacteristic(this.platform.Characteristic.Name, accessory.displayName);
-
-    const activeCharacteristic = this.useFanService
-      ? this.platform.Characteristic.Active
-      : this.platform.Characteristic.On;
-    this.service.getCharacteristic(activeCharacteristic)
-      .onSet(this.setOn.bind(this))
-      .onGet(this.getOn.bind(this));
-    if (this.useFanService) {
-      this.service.getCharacteristic(this.platform.Characteristic.RotationSpeed)
-        .setProps({
-          minValue: 0,
-          maxValue: 100,
-          minStep: 1,
-        })
-        .onSet(this.setRotationSpeed.bind(this))
-        .onGet(this.getRotationSpeed.bind(this));
-    }
+    this.configureDiffuserServices();
 
     this.configureNightlightService();
     this.configureAutoAlternateService();
@@ -297,14 +269,155 @@ export class PuraPlatformAccessory {
     );
   }
 
+  private getConfiguredBayNumbers(): Array<1 | 2> {
+    const bays: Array<1 | 2> = [];
+    if (this.device.bay1) {
+      bays.push(1);
+    }
+    if (this.device.bay2) {
+      bays.push(2);
+    }
+    return bays.length > 0 ? bays : [1];
+  }
+
+  private getBayServiceName(bay: 1 | 2): string {
+    return `${this.getDiffuserLogLabel()} Bay ${bay}`;
+  }
+
+  private removeServiceIfPresent(service?: Service) {
+    if (service) {
+      this.accessory.removeService(service);
+    }
+  }
+
+  private configureDiffuserServices() {
+    const defaultFanService = this.accessory.getService(this.platform.Service.Fanv2);
+    const defaultSwitchService = this.accessory.getService(this.platform.Service.Switch);
+    const bay1FanService = this.accessory.getServiceById(this.platform.Service.Fanv2, 'bay-1');
+    const bay2FanService = this.accessory.getServiceById(this.platform.Service.Fanv2, 'bay-2');
+    const bay1SwitchService = this.accessory.getServiceById(this.platform.Service.Switch, 'bay-1');
+    const bay2SwitchService = this.accessory.getServiceById(this.platform.Service.Switch, 'bay-2');
+
+    if (!this.enableBayControl) {
+      this.removeServiceIfPresent(bay1FanService);
+      this.removeServiceIfPresent(bay2FanService);
+      this.removeServiceIfPresent(bay1SwitchService);
+      this.removeServiceIfPresent(bay2SwitchService);
+      this.bayServices = {};
+
+      if (this.useFanService) {
+        this.removeServiceIfPresent(defaultSwitchService);
+        this.service = defaultFanService || this.accessory.addService(this.platform.Service.Fanv2);
+      } else {
+        this.removeServiceIfPresent(defaultFanService);
+        this.service = defaultSwitchService || this.accessory.addService(this.platform.Service.Switch);
+      }
+
+      this.service.setCharacteristic(this.platform.Characteristic.Name, this.accessory.displayName);
+      const activeCharacteristic = this.useFanService
+        ? this.platform.Characteristic.Active
+        : this.platform.Characteristic.On;
+      this.service.getCharacteristic(activeCharacteristic)
+        .onSet(this.setOn.bind(this))
+        .onGet(this.getOn.bind(this));
+      if (this.useFanService) {
+        this.service.getCharacteristic(this.platform.Characteristic.RotationSpeed)
+          .setProps({
+            minValue: 0,
+            maxValue: 100,
+            minStep: 1,
+          })
+          .onSet(this.setRotationSpeed.bind(this))
+          .onGet(this.getRotationSpeed.bind(this));
+      }
+      return;
+    }
+
+    // Bay mode: remove legacy single-control services and configure one service per bay.
+    this.removeServiceIfPresent(defaultFanService);
+    this.removeServiceIfPresent(defaultSwitchService);
+    const configuredBays = this.getConfiguredBayNumbers();
+
+    if (this.useFanService) {
+      this.removeServiceIfPresent(bay1SwitchService);
+      this.removeServiceIfPresent(bay2SwitchService);
+      for (const bay of configuredBays) {
+        const subtype = `bay-${bay}`;
+        const name = this.getBayServiceName(bay);
+        const existing = this.accessory.getServiceById(this.platform.Service.Fanv2, subtype);
+        const service = existing || this.accessory.addService(this.platform.Service.Fanv2, name, subtype);
+        service.setCharacteristic(this.platform.Characteristic.Name, name);
+        service.getCharacteristic(this.platform.Characteristic.Active)
+          .onSet((value) => this.setBayOn(bay, value))
+          .onGet(() => this.getBayOn(bay));
+        service.getCharacteristic(this.platform.Characteristic.RotationSpeed)
+          .setProps({
+            minValue: 0,
+            maxValue: 100,
+            minStep: 1,
+          })
+          .onSet((value) => this.setBayRotationSpeed(bay, value))
+          .onGet(() => this.getBayRotationSpeed(bay));
+        this.bayServices[bay] = service;
+      }
+      if (!configuredBays.includes(1)) {
+        this.removeServiceIfPresent(this.accessory.getServiceById(this.platform.Service.Fanv2, 'bay-1'));
+        delete this.bayServices[1];
+      }
+      if (!configuredBays.includes(2)) {
+        this.removeServiceIfPresent(this.accessory.getServiceById(this.platform.Service.Fanv2, 'bay-2'));
+        delete this.bayServices[2];
+      }
+    } else {
+      this.removeServiceIfPresent(bay1FanService);
+      this.removeServiceIfPresent(bay2FanService);
+      for (const bay of configuredBays) {
+        const subtype = `bay-${bay}`;
+        const name = this.getBayServiceName(bay);
+        const existing = this.accessory.getServiceById(this.platform.Service.Switch, subtype);
+        const service = existing || this.accessory.addService(this.platform.Service.Switch, name, subtype);
+        service.setCharacteristic(this.platform.Characteristic.Name, name);
+        service.getCharacteristic(this.platform.Characteristic.On)
+          .onSet((value) => this.setBayOn(bay, value))
+          .onGet(() => this.getBayOn(bay));
+        this.bayServices[bay] = service;
+      }
+      if (!configuredBays.includes(1)) {
+        this.removeServiceIfPresent(this.accessory.getServiceById(this.platform.Service.Switch, 'bay-1'));
+        delete this.bayServices[1];
+      }
+      if (!configuredBays.includes(2)) {
+        this.removeServiceIfPresent(this.accessory.getServiceById(this.platform.Service.Switch, 'bay-2'));
+        delete this.bayServices[2];
+      }
+    }
+
+    // Keep primary service reference for shared helper paths.
+    this.service = this.bayServices[1] ?? this.bayServices[2]!;
+  }
+
+  private getControlServices(): Service[] {
+    if (!this.enableBayControl) {
+      return [this.service];
+    }
+    return [this.bayServices[1], this.bayServices[2]].filter((service): service is Service => Boolean(service));
+  }
+
   private updateCurrentState() {
     const activeBay = this.getActiveBay();
     this.currentStateActive = Boolean(activeBay);
-    this.activeBayNumber = activeBay
-      ? (activeBay === this.device.bay1 ? 1 : 2)
-      : undefined;
+    const bay1 = this.fillBayIntensityFromCache(this.device.bay1);
+    const bay2 = this.fillBayIntensityFromCache(this.device.bay2);
+    if (bay1 && Number.isFinite(bay1.intensity) && bay1.intensity > 0) {
+      this.setStoredBayIntensity(1, bay1.intensity);
+    }
+    if (bay2 && Number.isFinite(bay2.intensity) && bay2.intensity > 0) {
+      this.setStoredBayIntensity(2, bay2.intensity);
+    }
+    this.activeBayNumber = activeBay ? this.getActiveBayNumber() : undefined;
     if (activeBay) {
-      this.accessory.context.lastBay = activeBay === this.device.bay1 ? 1 : 2;
+      const activeBayNumber = this.getActiveBayNumber();
+      this.accessory.context.lastBay = activeBayNumber ?? 1;
       if (Number.isFinite(activeBay.intensity) && activeBay.intensity > 0) {
         this.accessory.context.lastIntensity = activeBay.intensity;
       }
@@ -398,13 +511,15 @@ export class PuraPlatformAccessory {
   }
 
   private updateFaultState() {
-    if (!this.service.testCharacteristic(this.platform.Characteristic.StatusFault)) {
-      return;
-    }
     const nextFault = (this.hasNoScentVialsDetected() || this.isDeviceUnavailable())
       ? this.platform.Characteristic.StatusFault.GENERAL_FAULT
       : this.platform.Characteristic.StatusFault.NO_FAULT;
-    this.service.updateCharacteristic(this.platform.Characteristic.StatusFault, nextFault);
+    for (const service of this.getControlServices()) {
+      if (!service.testCharacteristic(this.platform.Characteristic.StatusFault)) {
+        continue;
+      }
+      service.updateCharacteristic(this.platform.Characteristic.StatusFault, nextFault);
+    }
   }
 
   private enforceOffVisualState() {
@@ -587,6 +702,349 @@ export class PuraPlatformAccessory {
       clearTimeout(this.pendingSecondaryBaySyncTimer);
       this.pendingSecondaryBaySyncTimer = undefined;
     }
+  }
+
+  private getActiveBayNumber(): 1 | 2 | undefined {
+    const bay1 = this.fillBayIntensityFromCache(this.device.bay1);
+    const bay2 = this.fillBayIntensityFromCache(this.device.bay2);
+    if (bay1?.active && !bay2?.active) {
+      return 1;
+    }
+    if (bay2?.active && !bay1?.active) {
+      return 2;
+    }
+    if (bay1?.active && bay2?.active) {
+      const bay1ActiveAt = bay1.activeAt ?? 0;
+      const bay2ActiveAt = bay2.activeAt ?? 0;
+      if (bay1ActiveAt !== bay2ActiveAt) {
+        return bay1ActiveAt > bay2ActiveAt ? 1 : 2;
+      }
+      return bay1.intensity >= bay2.intensity ? 1 : 2;
+    }
+    return undefined;
+  }
+
+  private getEffectiveActiveBayNumber(): 1 | 2 | undefined {
+    const activeBay = this.getActiveBayNumber();
+    if (activeBay) {
+      return activeBay;
+    }
+    if (!this.currentStateActive) {
+      return undefined;
+    }
+    const pendingBay = this.pendingIntensityIntent?.bay;
+    if (pendingBay === 1 || pendingBay === 2) {
+      return pendingBay;
+    }
+    const lastBay = this.accessory.context.lastBay;
+    return lastBay === 1 || lastBay === 2 ? lastBay : undefined;
+  }
+
+  private getBayPayload(bay: 1 | 2): PuraBay | undefined {
+    return bay === 1 ? this.device.bay1 : this.device.bay2;
+  }
+
+  private getStoredBayIntensity(bay: 1 | 2): number | undefined {
+    const key = bay === 1 ? 'lastIntensityBay1' : 'lastIntensityBay2';
+    const value = Number((this.accessory.context as Record<string, unknown>)[key]);
+    if (!Number.isFinite(value) || value <= 0) {
+      return undefined;
+    }
+    return Math.max(1, Math.min(100, Math.round(value)));
+  }
+
+  private setStoredBayIntensity(bay: 1 | 2, intensity: number) {
+    const key = bay === 1 ? 'lastIntensityBay1' : 'lastIntensityBay2';
+    (this.accessory.context as Record<string, unknown>)[key] = Math.max(1, Math.min(100, Math.round(intensity)));
+  }
+
+  private getBayIntensityValue(bay: 1 | 2): number | undefined {
+    const payload = this.getBayPayload(bay);
+    if (payload && Number.isFinite(payload.intensity) && payload.intensity > 0) {
+      return Math.max(1, Math.min(100, Math.round(payload.intensity)));
+    }
+    return this.getStoredBayIntensity(bay);
+  }
+
+  private getBayLogLabel(bay: 1 | 2): string {
+    return `${this.getDiffuserLogLabel()} Bay ${bay}`;
+  }
+
+  private getBayCharacteristicState(isOn: boolean): CharacteristicValue {
+    if (this.useFanService) {
+      return isOn
+        ? this.platform.Characteristic.Active.ACTIVE
+        : this.platform.Characteristic.Active.INACTIVE;
+    }
+    return isOn;
+  }
+
+  async setBayOn(bay: 1 | 2, value: CharacteristicValue) {
+    await this.enqueueRotationWrite(async () => {
+      const bayLabel = this.getBayLogLabel(bay);
+      const isOn = this.useFanService
+        ? value === this.platform.Characteristic.Active.ACTIVE
+        : Boolean(value);
+      this.lastSetOnCommandAt = Date.now();
+      this.platform.log.debug(`Set Characteristic Active for ${bayLabel} ->`, value);
+      this.platform.recordIntent(this.device.id, isOn);
+
+      try {
+        if (isOn) {
+          if (this.isDeviceUnavailable()) {
+            this.enforceOffVisualState();
+            this.updateFaultState();
+            this.logUnavailableCommandWarning();
+            throw new this.platform.api.hap.HapStatusError(
+              this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+            );
+          }
+          if (this.hasNoScentVialsDetected()) {
+            this.enforceOffVisualState();
+            this.updateFaultState();
+            this.logNoScentVialsWarning();
+            return;
+          }
+
+          const bayService = this.bayServices[bay];
+          const mappedFromService = this.useFanService && bayService
+            ? this.mapRotationToIntensity(Number(
+              bayService.getCharacteristic(this.platform.Characteristic.RotationSpeed).value,
+            ))
+            : 0;
+          const payloadIntensity = this.getBayIntensityValue(bay);
+          const fallbackIntensity = this.useFanService ? 100 : 60;
+          const targetIntensity = Math.max(
+            1,
+            Math.min(100, mappedFromService > 0 ? mappedFromService : (payloadIntensity ?? fallbackIntensity)),
+          );
+
+          if (this.shouldResetAwayModeBeforeActivating()) {
+            await this.puraApi.setAwayMode(this.device.id, false);
+          }
+          const controller = this.device.controller || 'default';
+          const alwaysOn = await this.puraApi.setAlwaysOn(this.device.id, bay);
+          const success = alwaysOn && await this.setIntensityAcrossAvailableBays(bay, targetIntensity, controller, false);
+          if (!success) {
+            this.platform.log.error(`Failed to turn on ${bayLabel}`);
+            this.applyCurrentState();
+            return;
+          }
+
+          this.currentStateActive = true;
+          const activatedAt = Date.now();
+          this.lastSuccessfulOnWriteAt = activatedAt;
+          this.lastDiffuserActivatedAt = activatedAt;
+          this.pendingPowerOnIntensityIntent = undefined;
+          this.accessory.context.lastIntensity = targetIntensity;
+          this.setStoredBayIntensity(bay, targetIntensity);
+          this.accessory.context.lastBay = bay;
+          this.pendingIntensityIntent = {
+            at: Date.now(),
+            ttlMs: 15000,
+            intensity: targetIntensity,
+            bay,
+          };
+          this.cancelPendingPowerOnIntensityLog();
+          this.platform.log.info(`${bayLabel} turned on.`);
+          if (this.useFanService) {
+            this.platform.log.info(
+              `${bayLabel} intensity set to ${targetIntensity} (${this.describeIntensityLevel(targetIntensity)}).`,
+            );
+          }
+          this.applyCurrentState();
+          if ((this.platform.config as PuraConfig).forceNightlightOff && this.supportsNightlightControl()) {
+            await this.ensureNightlightOff();
+          }
+          return;
+        }
+
+        const activeBay = this.getEffectiveActiveBayNumber();
+        if (!this.currentStateActive || activeBay !== bay) {
+          this.applyCurrentState();
+          return;
+        }
+        if (this.isDeviceUnavailable()) {
+          this.enforceOffVisualState();
+          this.updateFaultState();
+          this.logUnavailableCommandWarning();
+          throw new this.platform.api.hap.HapStatusError(
+            this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+          );
+        }
+
+        const success = await this.puraApi.stopAll(this.device.id);
+        if (!success) {
+          this.platform.log.error(`Failed to turn off ${bayLabel}`);
+          this.applyCurrentState();
+          return;
+        }
+
+        this.currentStateActive = false;
+        this.lastSuccessfulOnWriteAt = undefined;
+        this.pendingNightlightIntent = undefined;
+        this.recentNightlightHold = undefined;
+        this.pendingIntensityIntent = undefined;
+        this.pendingPowerOnIntensityIntent = undefined;
+        this.clearPendingSecondaryBayIntensitySync();
+        this.cancelPendingPowerOnIntensityLog();
+        this.platform.log.info(`${bayLabel} turned off.`);
+        this.applyCurrentState();
+        this.platform.requestRefreshSoon(2500);
+      } catch (error) {
+        if (this.isHapStatusError(error)) {
+          throw error;
+        }
+        this.platform.log.error(`Error setting On state for ${bayLabel}:`, error);
+        this.applyCurrentState();
+      }
+    });
+  }
+
+  async getBayOn(bay: 1 | 2): Promise<CharacteristicValue> {
+    const bayLabel = this.getBayLogLabel(bay);
+    if (this.isDeviceUnavailable()) {
+      this.updateFaultState();
+      this.platform.log.debug(
+        `Get Characteristic Active for ${bayLabel} -> unavailable (service communication failure)`,
+      );
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+    const isActive = this.getEffectiveActiveBayNumber() === bay;
+    const value = this.getBayCharacteristicState(isActive);
+    this.platform.log.debug(`Get Characteristic Active for ${bayLabel} ->`, value);
+    return value;
+  }
+
+  async setBayRotationSpeed(bay: 1 | 2, value: CharacteristicValue) {
+    await this.enqueueRotationWrite(async () => {
+      if (!this.useFanService) {
+        return;
+      }
+      const bayLabel = this.getBayLogLabel(bay);
+      try {
+        this.lastRotationWriteAt = Date.now();
+        const speed = Math.max(0, Math.min(100, Number(value) || 0));
+        const mappedIntensity = this.mapRotationToIntensity(speed);
+        const snappedSpeed = mappedIntensity <= 0 ? 0 : this.mapIntensityToRotation(mappedIntensity);
+        this.bayServices[bay]?.updateCharacteristic(this.platform.Characteristic.RotationSpeed, snappedSpeed);
+
+        if (speed <= 0) {
+          const activeBay = this.getEffectiveActiveBayNumber();
+          if (!this.currentStateActive || activeBay !== bay) {
+            this.applyCurrentState();
+            return;
+          }
+          const success = await this.puraApi.stopAll(this.device.id);
+          if (!success) {
+            this.platform.log.warn(
+              `Failed to turn off ${bayLabel} via RotationSpeed=0; preserving current state.`,
+            );
+            this.applyCurrentState();
+            return;
+          }
+          this.currentStateActive = false;
+          this.lastSuccessfulOnWriteAt = undefined;
+          this.pendingNightlightIntent = undefined;
+          this.recentNightlightHold = undefined;
+          this.pendingIntensityIntent = undefined;
+          this.pendingPowerOnIntensityIntent = undefined;
+          this.clearPendingSecondaryBayIntensitySync();
+          this.cancelPendingPowerOnIntensityLog();
+          this.platform.log.info(`${bayLabel} turned off.`);
+          this.applyCurrentState();
+          this.platform.requestRefreshSoon(2500);
+          return;
+        }
+
+        if (this.isDeviceUnavailable()) {
+          this.enforceOffVisualState();
+          this.updateFaultState();
+          this.logUnavailableCommandWarning();
+          throw new this.platform.api.hap.HapStatusError(
+            this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+          );
+        }
+        if (this.hasNoScentVialsDetected()) {
+          this.enforceOffVisualState();
+          this.updateFaultState();
+          this.logNoScentVialsWarning();
+          return;
+        }
+
+        const controller = this.device.controller || 'default';
+        const activeBay = this.getEffectiveActiveBayNumber();
+        if (!this.currentStateActive || activeBay !== bay) {
+          if (this.shouldResetAwayModeBeforeActivating()) {
+            await this.puraApi.setAwayMode(this.device.id, false);
+          }
+          const alwaysOn = await this.puraApi.setAlwaysOn(this.device.id, bay);
+          if (!alwaysOn) {
+            this.platform.log.warn(`${bayLabel} could not be re-armed while setting intensity.`);
+            this.applyCurrentState();
+            return;
+          }
+          this.currentStateActive = true;
+          const activatedAt = Date.now();
+          this.lastSuccessfulOnWriteAt = activatedAt;
+          this.lastDiffuserActivatedAt = activatedAt;
+        }
+
+        const previousPendingIntent = this.pendingIntensityIntent;
+        this.pendingIntensityIntent = {
+          at: Date.now(),
+          ttlMs: 15000,
+          intensity: mappedIntensity,
+          bay,
+        };
+        const success = await this.setIntensityAcrossAvailableBays(bay, mappedIntensity, controller, false);
+        if (!success) {
+          this.pendingIntensityIntent = previousPendingIntent;
+          this.platform.log.warn(
+            `${bayLabel} intensity write failed (raw=${value}, snapped=${snappedSpeed}). Keeping last known state.`,
+          );
+          this.applyCurrentState();
+          return;
+        }
+
+        this.accessory.context.lastBay = bay;
+        this.accessory.context.lastIntensity = mappedIntensity;
+        this.setStoredBayIntensity(bay, mappedIntensity);
+        this.pendingIntensityIntent = {
+          at: Date.now(),
+          ttlMs: 15000,
+          intensity: mappedIntensity,
+          bay,
+        };
+        this.recentIntensityHold = { until: Date.now() + 15000, level: mappedIntensity };
+        this.cancelPendingPowerOnIntensityLog();
+        this.platform.log.info(
+          `${bayLabel} intensity set to ${mappedIntensity} (${this.describeIntensityLevel(mappedIntensity)}).`,
+        );
+        this.applyCurrentState();
+      } catch (error) {
+        if (this.isHapStatusError(error)) {
+          throw error;
+        }
+        this.platform.log.error(`Error setting RotationSpeed for ${bayLabel}:`, error);
+        this.applyCurrentState();
+      }
+    });
+  }
+
+  async getBayRotationSpeed(bay: 1 | 2): Promise<CharacteristicValue> {
+    if (!this.useFanService) {
+      return 0;
+    }
+    if (this.isDeviceUnavailable()) {
+      this.updateFaultState();
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+    const intensity = this.getBayIntensityValue(bay);
+    if (typeof intensity !== 'number') {
+      return 0;
+    }
+    return this.mapIntensityToRotation(intensity);
   }
 
   async setOn(value: CharacteristicValue) {
@@ -1749,6 +2207,9 @@ export class PuraPlatformAccessory {
   }
 
   private getCurrentStateValue(): CharacteristicValue {
+    if (this.enableBayControl) {
+      return this.getBayCharacteristicState(this.currentStateActive);
+    }
     if (this.useFanService) {
       return this.currentStateActive
         ? this.platform.Characteristic.Active.ACTIVE
@@ -1758,6 +2219,20 @@ export class PuraPlatformAccessory {
   }
 
   private isHomeKitShowingActive(): boolean {
+    if (this.enableBayControl) {
+      return this.getControlServices().some((service) => {
+        const activeCharacteristic = this.useFanService
+          ? this.platform.Characteristic.Active
+          : this.platform.Characteristic.On;
+        const currentValue = service.getCharacteristic(activeCharacteristic).value;
+        if (this.useFanService) {
+          return currentValue === this.platform.Characteristic.Active.ACTIVE
+            || currentValue === 1
+            || currentValue === true;
+        }
+        return Boolean(currentValue);
+      });
+    }
     const activeCharacteristic = this.useFanService
       ? this.platform.Characteristic.Active
       : this.platform.Characteristic.On;
@@ -1817,6 +2292,29 @@ export class PuraPlatformAccessory {
   }
 
   private applyCurrentState() {
+    if (this.enableBayControl) {
+      const activeBay = this.getEffectiveActiveBayNumber();
+      for (const bay of this.getConfiguredBayNumbers()) {
+        const service = this.bayServices[bay];
+        if (!service) {
+          continue;
+        }
+        const isActive = activeBay === bay;
+        const value = this.getBayCharacteristicState(isActive);
+        const activeCharacteristic = this.useFanService
+          ? this.platform.Characteristic.Active
+          : this.platform.Characteristic.On;
+        service.updateCharacteristic(activeCharacteristic, value);
+        if (this.useFanService && service.testCharacteristic(this.platform.Characteristic.RotationSpeed)) {
+          const intensity = this.getBayIntensityValue(bay);
+          const speed = typeof intensity === 'number'
+            ? this.mapIntensityToRotation(intensity)
+            : 0;
+          service.updateCharacteristic(this.platform.Characteristic.RotationSpeed, speed);
+        }
+      }
+      return;
+    }
     const value = this.getCurrentStateValue();
     const activeCharacteristic = this.useFanService
       ? this.platform.Characteristic.Active
