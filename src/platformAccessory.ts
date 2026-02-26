@@ -471,9 +471,10 @@ export class PuraPlatformAccessory {
             ? this.accessory.context.lastIntensity
             : undefined;
           const defaultIntensity = this.useFanService ? 100 : 60;
-          const fallbackIntensity = this.useFanService
-            ? defaultIntensity
-            : Math.max(1, Math.min(100, candidateIntensity ?? preferredIntensity ?? defaultIntensity));
+          const fallbackIntensity = Math.max(
+            1,
+            Math.min(100, preferredIntensity ?? candidateIntensity ?? defaultIntensity),
+          );
           this.lastRequestedOnIntensity = fallbackIntensity;
           if (noScentVialsDetected || deviceUnavailable) {
             this.enforceOffVisualState();
