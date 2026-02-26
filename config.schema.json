@@ -51,7 +51,7 @@
         "title": "Enable Nightlight Controls",
         "type": "boolean",
         "default": false,
-        "description": "Enables nightlight controls for compatible diffusers (On, Brightness, and Color). Use Nightlight Control Mode below to choose separate or bound behavior."
+        "description": "Enables nightlight controls (On, Brightness, and Color) for compatible diffusers."
       },
       "nightlightMode": {
         "title": "Nightlight Control Mode",
@@ -71,7 +71,7 @@
             ]
           }
         ],
-        "description": "When Nightlight Controls are enabled: Separate creates a dedicated nightlight tile, while Bound attaches the light service to the diffuser accessory. Switching modes may require updating HomeKit scenes or automations that target the nightlight."
+        "description": "Choose how nightlight controls appear when enabled. Separate creates a dedicated Nightlight accessory tile. Bound attaches the light service to the diffuser accessory. Switching modes may require updating HomeKit scenes or automations."
       }
     }
   },
