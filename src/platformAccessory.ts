@@ -70,6 +70,13 @@ export class PuraPlatformAccessory {
   private lastSetOnCommandAt?: number;
   private lastRotationWriteAt?: number;
   private lastRequestedOnIntensity?: number;
+  private secondaryBaySyncQueue: Promise<void> = Promise.resolve();
+  private pendingSecondaryBaySync?: {
+    bays: Array<1 | 2>;
+    intensity: number;
+    controller: string;
+  };
+  private pendingSecondaryBaySyncTimer?: ReturnType<typeof setTimeout>;
   private lastUnavailableCommandWarnAt = 0;
   private lastNoScentVialsWarnAt = 0;
   private rotationWriteQueue: Promise<void> = Promise.resolve();
@@ -420,6 +427,62 @@ export class PuraPlatformAccessory {
     }
   }
 
+  private queueSecondaryBayIntensitySync(
+    bays: Array<1 | 2>,
+    intensity: number,
+    controller: string,
+  ): void {
+    if (bays.length === 0) {
+      return;
+    }
+    this.pendingSecondaryBaySync = {
+      bays: [...bays],
+      intensity,
+      controller,
+    };
+    if (this.pendingSecondaryBaySyncTimer) {
+      clearTimeout(this.pendingSecondaryBaySyncTimer);
+      this.pendingSecondaryBaySyncTimer = undefined;
+    }
+    const debounceMs = 750;
+    this.pendingSecondaryBaySyncTimer = setTimeout(() => {
+      const pending = this.pendingSecondaryBaySync;
+      this.pendingSecondaryBaySync = undefined;
+      if (this.pendingSecondaryBaySyncTimer) {
+        clearTimeout(this.pendingSecondaryBaySyncTimer);
+        this.pendingSecondaryBaySyncTimer = undefined;
+      }
+      if (!pending) {
+        return;
+      }
+      if (!this.currentStateActive) {
+        if (this.platform.isDebugEnabled()) {
+          this.platform.log.debug(
+            `[Diffuser] Skipping deferred secondary bay intensity sync for ${this.getDiffuserLogLabel()} while inactive.`,
+          );
+        }
+        return;
+      }
+      const run = async () => {
+        await this.syncSecondaryBayIntensities(pending.bays, pending.intensity, pending.controller);
+      };
+      const queued = this.secondaryBaySyncQueue.then(run, run);
+      this.secondaryBaySyncQueue = queued.then(
+        () => undefined,
+        () => undefined,
+      );
+      void queued;
+    }, debounceMs);
+  }
+
+  private clearPendingSecondaryBayIntensitySync() {
+    this.pendingSecondaryBaySync = undefined;
+    if (this.pendingSecondaryBaySyncTimer) {
+      clearTimeout(this.pendingSecondaryBaySyncTimer);
+      this.pendingSecondaryBaySyncTimer = undefined;
+    }
+  }
+
   async setOn(value: CharacteristicValue) {
     await this.enqueueRotationWrite(async () => {
       const diffuserLabel = this.getDiffuserLogLabel();
@@ -552,6 +615,7 @@ export class PuraPlatformAccessory {
         } else {
           this.pendingIntensityIntent = undefined;
           this.pendingPowerOnIntensityIntent = undefined;
+          this.clearPendingSecondaryBayIntensitySync();
           this.cancelPendingPowerOnIntensityLog();
           if (!this.currentStateActive) {
             this.applyCurrentState();
@@ -823,8 +887,8 @@ export class PuraPlatformAccessory {
           intensity: mappedIntensity,
           bay: targetBay,
         };
-        // For interactive slider changes, prioritize responsiveness by updating the active bay only.
-        // Secondary bay syncing on every step can introduce extra cloud latency and HomeKit timeouts.
+        // Keep the active bay write in the foreground for HomeKit responsiveness.
+        // Secondary bays are synced in a debounced background queue so auto-alternate does not revive stale intensity.
         const success = await this.setIntensityAcrossAvailableBays(targetBay, mappedIntensity, controller, false);
         if (!success) {
           this.pendingIntensityIntent = previousPendingIntent;
@@ -836,6 +900,8 @@ export class PuraPlatformAccessory {
           return;
         }
         this.accessory.context.lastBay = targetBay;
+        const secondaryBays = this.getAvailableBays().filter((bay) => bay !== targetBay);
+        this.queueSecondaryBayIntensitySync(secondaryBays, mappedIntensity, controller);
         this.pendingIntensityIntent = {
           at: Date.now(),
           ttlMs: 15000,
