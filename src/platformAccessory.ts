@@ -1019,9 +1019,7 @@ export class PuraPlatformAccessory {
       this.recordNightlightCommand('on', active, brightnessPercent, sentLevel);
       const nightlightLabel = this.getNightlightLogLabel();
       if (active) {
-        this.platform.log.info(
-          `${nightlightLabel} turned on (${brightnessPercent}% brightness).`,
-        );
+        this.platform.log.info(`${nightlightLabel} turned on.`);
       } else {
         this.platform.log.info(this.getNightlightOffLogMessage(nightlightLabel));
       }
@@ -1889,7 +1887,7 @@ export class PuraPlatformAccessory {
 
     const label = this.getNightlightLogLabel();
     if (active) {
-      this.platform.log.info(`${label} turned on (${roundedPercent}% brightness).`);
+      this.platform.log.info(`${label} turned on.`);
     } else {
       this.platform.log.info(this.getNightlightOffLogMessage(label));
     }
