@@ -82,20 +82,6 @@
       border-color: var(--test-theme-color, var(--primary-color, var(--accent-color, var(--bs-primary, #0d6efd)))) !important;
     }
 
-    .nightlight-mode-options .form-check-input[type='radio'] {
-      accent-color: var(--test-theme-color, var(--primary-color, var(--accent-color, var(--bs-primary, #0d6efd))));
-    }
-
-    .nightlight-mode-options .form-check-input[type='radio']:checked {
-      background-color: var(--test-theme-color, var(--primary-color, var(--accent-color, var(--bs-primary, #0d6efd)))) !important;
-      border-color: var(--test-theme-color, var(--primary-color, var(--accent-color, var(--bs-primary, #0d6efd)))) !important;
-    }
-
-    .nightlight-mode-options .form-check-input[type='radio']:focus {
-      box-shadow: none !important;
-      border-color: var(--test-theme-color, var(--primary-color, var(--accent-color, var(--bs-primary, #0d6efd)))) !important;
-    }
-
     .password-wrap {
       position: relative;
       width: 50%;
@@ -243,23 +229,6 @@
           </div>
         </div>
 
-        <div class="mb-4 d-none" id="nightlightModeGroup">
-          <label class="form-label">Nightlight Tile Mode</label>
-          <div class="field-half nightlight-mode-options d-flex flex-row align-items-center gap-3 flex-wrap">
-            <div class="form-check form-check-inline mb-0 ms-1">
-              <input class="form-check-input" id="nightlightModeSeparate" name="nightlightMode" type="radio" value="separate" />
-              <label class="form-check-label" for="nightlightModeSeparate">Separate Tile</label>
-            </div>
-            <div class="form-check form-check-inline mb-0 ms-1">
-              <input class="form-check-input" id="nightlightModeBound" name="nightlightMode" type="radio" value="bound" />
-              <label class="form-check-label" for="nightlightModeBound">Single Tile</label>
-            </div>
-          </div>
-          <div id="nightlightModeHelp" class="form-text">
-            Separate Tile creates a dedicated Nightlight accessory, while Single Tile combines it with the diffuser; changing this may require updating scenes or automations.
-          </div>
-        </div>
-
         <div class="small" id="status"></div>
       </div>
     </div>
@@ -304,9 +273,6 @@
         forceNightlightOff: document.getElementById('forceNightlightOff'),
         enableFanService: document.getElementById('enableFanService'),
         enableNightlightAccessory: document.getElementById('enableNightlightAccessory'),
-        nightlightModeGroup: document.getElementById('nightlightModeGroup'),
-        nightlightModeSeparate: document.getElementById('nightlightModeSeparate'),
-        nightlightModeBound: document.getElementById('nightlightModeBound'),
         testBtn: document.getElementById('testBtn'),
         testHint: document.getElementById('testHint'),
         status: statusEl,
@@ -462,26 +428,7 @@
           forceNightlightOff: false,
           enableFanService: false,
           enableNightlightAccessory: false,
-          nightlightMode: 'separate',
         };
-      };
-
-      const normalizeNightlightMode = (value) => (value === 'bound' ? 'bound' : 'separate');
-      const getNightlightMode = () => (els.nightlightModeBound.checked ? 'bound' : 'separate');
-
-      const setNightlightMode = (value) => {
-        const mode = normalizeNightlightMode(value);
-        els.nightlightModeBound.checked = mode === 'bound';
-        els.nightlightModeSeparate.checked = mode !== 'bound';
-      };
-
-      const updateNightlightModeControlState = () => {
-        const enabled = !!els.enableNightlightAccessory.checked;
-        if (els.nightlightModeGroup) {
-          els.nightlightModeGroup.classList.toggle('d-none', !enabled);
-        }
-        els.nightlightModeSeparate.disabled = !enabled;
-        els.nightlightModeBound.disabled = !enabled;
       };
 
       const syncConfig = async () => {
@@ -493,7 +440,6 @@
           forceNightlightOff: !!els.forceNightlightOff.checked,
           enableFanService: !!els.enableFanService.checked,
           enableNightlightAccessory: !!els.enableNightlightAccessory.checked,
-          nightlightMode: getNightlightMode(),
         };
         await homebridge.updatePluginConfig([config]);
       };
@@ -526,8 +472,6 @@
         els.forceNightlightOff.checked = !!current.forceNightlightOff;
         els.enableFanService.checked = !!(current.enableFanService ?? current.useFanService);
         els.enableNightlightAccessory.checked = !!current.enableNightlightAccessory;
-        setNightlightMode(current.nightlightMode);
-        updateNightlightModeControlState();
         initialCredentialKey = getCredentialKey();
 
         setUiStatus('');
@@ -536,8 +480,6 @@
           els.name,
           els.forceNightlightOff,
           els.enableFanService,
-          els.nightlightModeSeparate,
-          els.nightlightModeBound,
         ]) {
           field.addEventListener('change', async () => {
             await syncConfig();
@@ -546,7 +488,6 @@
         }
 
         els.enableNightlightAccessory.addEventListener('change', async () => {
-          updateNightlightModeControlState();
           await syncConfig();
           homebridge.toast.info('Config updated. Click Save to write config.json.');
         });

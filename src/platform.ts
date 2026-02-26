@@ -308,16 +308,9 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     return uuids;
   }
 
-  private isNightlightControlEnabled(): boolean {
-    return Boolean(this.puraConfig.enableNightlightAccessory ?? false);
-  }
-
-  private getNightlightMode(): 'separate' | 'bound' {
-    return this.puraConfig.nightlightMode === 'bound' ? 'bound' : 'separate';
-  }
-
   private shouldUseSeparateNightlightAccessory(): boolean {
-    return this.isNightlightControlEnabled() && this.getNightlightMode() === 'separate';
+    // Nightlight controls are locked to a single-tile (bound) accessory model.
+    return false;
   }
 
   private getDiffuserServiceMode(): 'switch' | 'fan' {

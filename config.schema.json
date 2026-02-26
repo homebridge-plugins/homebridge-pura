@@ -51,27 +51,7 @@
         "title": "Enable Nightlight Controls",
         "type": "boolean",
         "default": false,
-        "description": "Enables nightlight controls (On, Brightness, and Color) for compatible diffusers."
-      },
-      "nightlightMode": {
-        "title": "Nightlight Tile Mode",
-        "type": "string",
-        "default": "separate",
-        "oneOf": [
-          {
-            "title": "Separate Tile",
-            "enum": [
-              "separate"
-            ]
-          },
-          {
-            "title": "Single Tile",
-            "enum": [
-              "bound"
-            ]
-          }
-        ],
-        "description": "Separate Tile creates a dedicated Nightlight accessory, while Single Tile combines it with the diffuser; changing this may require updating scenes or automations."
+        "description": "Enables nightlight controls (On, Brightness, and Color) on the diffuser accessory (Single Tile) for compatible diffusers."
       }
     }
   },

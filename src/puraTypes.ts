@@ -11,7 +11,6 @@ export interface PuraConfig extends PlatformConfig {
   enableFanService?: boolean;
   useFanService?: boolean;
   enableNightlightAccessory?: boolean;
-  nightlightMode?: 'separate' | 'bound';
 }
 
 export interface PuraDevice {

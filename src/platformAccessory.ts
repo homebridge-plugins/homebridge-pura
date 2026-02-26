@@ -177,16 +177,13 @@ export class PuraPlatformAccessory {
     return Boolean((this.platform.config as PuraConfig).enableNightlightAccessory ?? false);
   }
 
-  private getNightlightMode(): 'separate' | 'bound' {
-    return (this.platform.config as PuraConfig).nightlightMode === 'bound' ? 'bound' : 'separate';
-  }
-
   private hasSeparateNightlightAccessoryConfigured(): boolean {
-    return this.isNightlightControlEnabled() && this.getNightlightMode() === 'separate';
+    // Nightlight controls are locked to single-tile (bound) mode.
+    return false;
   }
 
   private shouldUseBoundNightlightService(): boolean {
-    return this.isNightlightControlEnabled() && this.getNightlightMode() === 'bound';
+    return this.isNightlightControlEnabled();
   }
 
   private updateCurrentState() {
