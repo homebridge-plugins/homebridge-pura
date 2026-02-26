@@ -20,6 +20,7 @@ export class PuraPlatformAccessory {
   private inferredOfflineFromStaleState = false;
   private lastAwayModeEnabledState: boolean | null = null;
   private lastAutoAlternativeOffState: boolean | null = null;
+  private recentIntensityHold?: { until: number; level: number };
   private nightlightWriteQueue: Promise<void> = Promise.resolve();
   private pendingNightlightActive?: boolean;
   private lastNightlightApiWrite?: {
@@ -29,13 +30,18 @@ export class PuraPlatformAccessory {
     color: string;
     reason: 'on' | 'brightness' | 'hue' | 'saturation';
   };
-	  private pendingNightlightIntent?: {
-	    at: number;
-	    ttlMs: number;
-	    active: boolean;
-	    level: number;
-	    color: string;
-	  };
+  private lastNightlightColorLogAt = 0;
+  private lastNightlightLog?: { at: number; active: boolean; level: number };
+  private pendingNightlightOnLog?: { at: number; brightnessPercent: number };
+  private pendingNightlightOnLogTimer?: ReturnType<typeof setTimeout>;
+  private pendingNightlightIntent?: {
+    at: number;
+    ttlMs: number;
+    active: boolean;
+    level: number;
+    color: string;
+  };
+  private recentNightlightHold?: { until: number; level: number };
   private lastNightlightCommand?: {
     at: number;
     action: 'brightness' | 'on';
@@ -43,6 +49,29 @@ export class PuraPlatformAccessory {
     hkBrightnessPercent: number;
     sentLevel: number;
   };
+  private pendingIntensityIntent?: {
+    at: number;
+    ttlMs: number;
+    intensity: number;
+    bay?: 1 | 2;
+  };
+  private pendingPowerOnIntensityIntent?: {
+    at: number;
+    ttlMs: number;
+    intensity: number;
+  };
+  private pendingPowerOnIntensityLog?: {
+    at: number;
+    intensity: number;
+  };
+  private pendingPowerOnIntensityLogTimer?: ReturnType<typeof setTimeout>;
+  private lastDiffuserActivatedAt?: number;
+  private lastSuccessfulOnWriteAt?: number;
+  private lastSetOnCommandAt?: number;
+  private lastRotationWriteAt?: number;
+  private lastRequestedOnIntensity?: number;
+  private lastUnavailableCommandWarnAt = 0;
+  private rotationWriteQueue: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly platform: PuraPlatform,
@@ -71,8 +100,12 @@ export class PuraPlatformAccessory {
       }
     }
 
-    this.useFanService = Boolean((this.platform.config as PuraConfig).useFanService);
-    this.enableNightlightAccessory = Boolean((this.platform.config as PuraConfig).enableNightlightAccessory);
+    this.useFanService = Boolean(
+      (this.platform.config as PuraConfig).enableFanService ??
+      (this.platform.config as PuraConfig).useFanService,
+    );
+    // Nightlight is exposed via a separate accessory when enabled.
+    this.enableNightlightAccessory = false;
     const fanService = this.accessory.getService(this.platform.Service.Fanv2);
     const switchService = this.accessory.getService(this.platform.Service.Switch);
     if (this.useFanService) {
@@ -95,6 +128,16 @@ export class PuraPlatformAccessory {
     this.service.getCharacteristic(activeCharacteristic)
       .onSet(this.setOn.bind(this))
       .onGet(this.getOn.bind(this));
+    if (this.useFanService) {
+      this.service.getCharacteristic(this.platform.Characteristic.RotationSpeed)
+        .setProps({
+          minValue: 0,
+          maxValue: 100,
+          minStep: 1,
+        })
+        .onSet(this.setRotationSpeed.bind(this))
+        .onGet(this.getRotationSpeed.bind(this));
+    }
 
     this.configureNightlightService();
     this.updateCurrentState();
@@ -132,7 +175,7 @@ export class PuraPlatformAccessory {
 
   private updateCurrentState() {
     const activeBay = this.getActiveBay();
-    this.currentStateActive = Boolean(activeBay?.active);
+    this.currentStateActive = Boolean(activeBay);
     if (activeBay) {
       this.accessory.context.lastBay = activeBay === this.device.bay1 ? 1 : 2;
       if (Number.isFinite(activeBay.intensity) && activeBay.intensity > 0) {
@@ -142,6 +185,48 @@ export class PuraPlatformAccessory {
     this.applyCurrentState();
     this.applyNightlightState();
     this.updateFaultState();
+  }
+
+  private mapRotationToIntensity(speed: number): number {
+    const clamped = Math.max(0, Math.min(100, Number(speed) || 0));
+    if (clamped <= 0) {
+      return 0;
+    }
+    if (clamped <= 33) {
+      return 30;
+    }
+    if (clamped <= 66) {
+      return 50;
+    }
+    return 100;
+  }
+
+  private mapIntensityToRotation(intensity: number): number {
+    const clamped = Math.max(0, Math.min(100, Number(intensity) || 0));
+    if (clamped <= 40) {
+      return 30;
+    }
+    if (clamped <= 75) {
+      return 50;
+    }
+    return 100;
+  }
+
+  private getCurrentIntensityValue(): number | undefined {
+    const pendingIntentIntensity = this.getPendingIntensityIntentValue();
+    if (pendingIntentIntensity !== undefined) {
+      return pendingIntentIntensity;
+    }
+    const activeBay = this.getActiveBay();
+    const bayIntensity = activeBay?.intensity;
+    if (typeof bayIntensity === 'number' && Number.isFinite(bayIntensity) && bayIntensity > 0) {
+      return bayIntensity;
+    }
+    const cachedIntensity = Number(this.accessory.context.lastIntensity);
+    if (Number.isFinite(cachedIntensity) && cachedIntensity > 0) {
+      return cachedIntensity;
+    }
+    return undefined;
   }
 
   private hasNoScentVialsDetected(): boolean {
@@ -167,6 +252,24 @@ export class PuraPlatformAccessory {
     return this.isDeviceOffline() || this.isLikelyOfflineFromStaleStatus();
   }
 
+  private shouldResetAwayModeBeforeActivating(): boolean {
+    const raw = this.device.__raw as Record<string, unknown> | undefined;
+    const awayModeValue = raw?.awayMode ?? this.device.awayMode;
+    if (typeof awayModeValue === 'boolean') {
+      return awayModeValue;
+    }
+    if (awayModeValue && typeof awayModeValue === 'object') {
+      const awayModeRecord = awayModeValue as Record<string, unknown>;
+      const away = typeof awayModeRecord.away === 'boolean' ? awayModeRecord.away : undefined;
+      const enabled = typeof awayModeRecord.enabled === 'boolean' ? awayModeRecord.enabled : undefined;
+      if (away !== undefined || enabled !== undefined) {
+        return Boolean(away || enabled);
+      }
+    }
+    // If away-mode state is unknown, preserve existing behavior and clear it before activation.
+    return true;
+  }
+
   private updateFaultState() {
     if (!this.service.testCharacteristic(this.platform.Characteristic.StatusFault)) {
       return;
@@ -188,8 +291,8 @@ export class PuraPlatformAccessory {
   }
 
   private getActiveBay(): PuraBay | undefined {
-    const bay1 = this.device.bay1;
-    const bay2 = this.device.bay2;
+    const bay1 = this.fillBayIntensityFromCache(this.device.bay1);
+    const bay2 = this.fillBayIntensityFromCache(this.device.bay2);
     if (bay1?.active && !bay2?.active) {
       return bay1;
     }
@@ -204,108 +307,558 @@ export class PuraPlatformAccessory {
       }
       return bay1.intensity >= bay2.intensity ? bay1 : bay2;
     }
+    const bay1HasIntensity = Number.isFinite(bay1?.intensity) && Number(bay1?.intensity) > 0;
+    const bay2HasIntensity = Number.isFinite(bay2?.intensity) && Number(bay2?.intensity) > 0;
+    if (bay1HasIntensity && !bay2HasIntensity) {
+      return bay1;
+    }
+    if (bay2HasIntensity && !bay1HasIntensity) {
+      return bay2;
+    }
+    if (bay1HasIntensity && bay2HasIntensity) {
+      const bay1ActiveAt = bay1?.activeAt ?? 0;
+      const bay2ActiveAt = bay2?.activeAt ?? 0;
+      if (bay1ActiveAt !== bay2ActiveAt) {
+        return bay1ActiveAt > bay2ActiveAt ? bay1 : bay2;
+      }
+      return (bay1?.intensity ?? 0) >= (bay2?.intensity ?? 0) ? bay1 : bay2;
+    }
+    // Fallback: some payloads clear active/intensity but still include a recent activeAt.
+    const inferred = this.getActiveBayFromActiveAt(bay1, bay2);
+    if (inferred) {
+      return inferred;
+    }
     return undefined;
   }
 
-  async setOn(value: CharacteristicValue) {
-    const isOn = this.useFanService
-      ? value === this.platform.Characteristic.Active.ACTIVE
-      : Boolean(value);
-    this.platform.log.debug(`Set Characteristic Active for ${this.accessory.displayName} ->`, value);
-    this.platform.recordIntent(this.device.id, isOn);
+  private getAvailableBays(): Array<1 | 2> {
+    const bays: Array<1 | 2> = [];
+    if (this.device.bay1) {
+      bays.push(1);
+    }
+    if (this.device.bay2) {
+      bays.push(2);
+    }
+    return bays;
+  }
 
-    try {
-      if (isOn) {
+  private areAllAvailableBaysAtIntensity(intensity: number): boolean {
+    const bays = this.getAvailableBays();
+    if (bays.length === 0) {
+      return false;
+    }
+    return bays.every((bay) => {
+      const payload = bay === 1 ? this.device.bay1 : this.device.bay2;
+      return Number(payload?.intensity) === intensity;
+    });
+  }
+
+  private async setIntensityAcrossAvailableBays(
+    targetBay: 1 | 2,
+    intensity: number,
+    controller: string,
+    syncSecondary = true,
+  ): Promise<boolean> {
+    const availableBays = this.getAvailableBays();
+    if (availableBays.length === 0) {
+      return false;
+    }
+    const orderedBays = availableBays.includes(targetBay)
+      ? [targetBay, ...availableBays.filter((bay) => bay !== targetBay)]
+      : availableBays;
+    const [primaryBay, ...secondaryBays] = orderedBays;
+
+    const primarySuccess = await this.puraApi.setIntensity(this.device.id, primaryBay, intensity, controller);
+    if (!primarySuccess) {
+      return false;
+    }
+
+    if (syncSecondary && secondaryBays.length > 0) {
+      // Do not block the primary command path on secondary bay sync; this keeps HomeKit writes responsive.
+      void this.syncSecondaryBayIntensities(secondaryBays, intensity, controller);
+    }
+
+    return true;
+  }
+
+  private async syncSecondaryBayIntensities(
+    bays: Array<1 | 2>,
+    intensity: number,
+    controller: string,
+  ): Promise<void> {
+    const failedBays: Array<1 | 2> = [];
+    for (const bay of bays) {
+      const success = await this.puraApi.setIntensity(this.device.id, bay, intensity, controller);
+      if (!success) {
+        failedBays.push(bay);
+      }
+    }
+    if (failedBays.length > 0) {
+      this.platform.log.warn(
+        `${this.getDiffuserLogLabel()} intensity synced to active bay, but failed on bay(s): ${failedBays.join(', ')}.`,
+      );
+      return;
+    }
+    if (this.platform.isDebugEnabled()) {
+      this.platform.log.debug(
+        `${this.getDiffuserLogLabel()} intensity synced to secondary bay(s): ${bays.join(', ')}.`,
+      );
+    }
+  }
+
+  async setOn(value: CharacteristicValue) {
+    await this.enqueueRotationWrite(async () => {
+      const diffuserLabel = this.getDiffuserLogLabel();
+      const isOn = this.useFanService
+        ? value === this.platform.Characteristic.Active.ACTIVE
+        : Boolean(value);
+      this.lastSetOnCommandAt = Date.now();
+      this.platform.log.debug(`Set Characteristic Active for ${diffuserLabel} ->`, value);
+      this.platform.recordIntent(this.device.id, isOn);
+
+      try {
+        if (isOn) {
+          if (this.currentStateActive) {
+            this.applyCurrentState();
+            if (this.platform.isDebugEnabled()) {
+              this.platform.log.debug(
+                `[Diffuser] Ignoring redundant ON command for ${diffuserLabel} because it is already active.`,
+              );
+            }
+            return;
+          }
+          if (this.useFanService && this.service.testCharacteristic(this.platform.Characteristic.RotationSpeed)) {
+            // Home commonly sets RotationSpeed=100 when turning the accessory on via icon tap.
+            // Capture that value early so we turn on at 100 without briefly showing the cached intensity.
+            const readMappedIntensity = () => {
+              const currentValue = this.service.getCharacteristic(this.platform.Characteristic.RotationSpeed).value;
+              const numericSpeed = Math.max(0, Math.min(100, Number(currentValue) || 0));
+              return this.mapRotationToIntensity(numericSpeed);
+            };
+
+            const firstMapped = readMappedIntensity();
+            if (firstMapped > 0) {
+              this.pendingPowerOnIntensityIntent = {
+                at: Date.now(),
+                ttlMs: 12000,
+                intensity: firstMapped,
+              };
+              this.lastRequestedOnIntensity = firstMapped;
+            }
+
+            // Home may send RotationSpeed shortly after Active=1, and the characteristic value can lag slightly.
+            // Give it a brief settle window, then prefer the latest non-zero mapped intensity.
+            await new Promise((resolve) => setTimeout(resolve, 350));
+            const secondMapped = readMappedIntensity();
+            if (secondMapped > 0 && secondMapped !== this.pendingPowerOnIntensityIntent?.intensity) {
+              this.pendingPowerOnIntensityIntent = {
+                at: Date.now(),
+                ttlMs: 12000,
+                intensity: secondMapped,
+              };
+              this.lastRequestedOnIntensity = secondMapped;
+            }
+          }
+          const preferredBay = this.accessory.context.lastBay;
+          const normalizedPreferred = preferredBay === 1 || preferredBay === 2 ? preferredBay : undefined;
+          const targetBay = normalizedPreferred && (normalizedPreferred === 1 ? this.device.bay1 : this.device.bay2)
+            ? normalizedPreferred
+            : (this.device.bay1 ? 1 : this.device.bay2 ? 2 : 1);
+          const bay = targetBay === 1 ? this.device.bay1 : this.device.bay2;
+          const noScentVialsDetected = this.hasNoScentVialsDetected();
+          const deviceUnavailable = this.isDeviceUnavailable();
+          if (!bay && this.platform.isDebugEnabled()) {
+            this.platform.log.warn(
+              `No bay payload available for ${diffuserLabel}; using fallback bay ${targetBay}.`,
+            );
+          }
+          const candidateIntensity = bay && Number.isFinite(bay.intensity) && bay.intensity > 0
+            ? bay.intensity
+            : undefined;
+          const preferredIntensity = Number.isFinite(this.accessory.context.lastIntensity) && this.accessory.context.lastIntensity > 0
+            ? this.accessory.context.lastIntensity
+            : undefined;
+          const defaultIntensity = this.useFanService ? 100 : 60;
+          const fallbackIntensity = Math.max(
+            1,
+            Math.min(100, preferredIntensity ?? candidateIntensity ?? defaultIntensity),
+          );
+          this.lastRequestedOnIntensity = fallbackIntensity;
+          if (noScentVialsDetected || deviceUnavailable) {
+            this.enforceOffVisualState();
+            this.updateFaultState();
+            if (deviceUnavailable) {
+              this.logUnavailableCommandWarning();
+              throw new this.platform.api.hap.HapStatusError(
+                this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+              );
+            } else {
+              this.platform.log.warn(
+                `${diffuserLabel} was turned on, but no scent vials were detected. ` +
+                'The accessory was turned off as a result.',
+              );
+            }
+            return;
+          }
+
+          if (this.shouldResetAwayModeBeforeActivating()) {
+            await this.puraApi.setAwayMode(this.device.id, false);
+          }
+          const alwaysOn = await this.puraApi.setAlwaysOn(this.device.id, targetBay);
+          const requestedPowerOnIntensity = this.getPendingPowerOnIntensityIntentValue();
+          const intensity = Math.max(1, Math.min(100, requestedPowerOnIntensity ?? fallbackIntensity));
+          const controller = this.device.controller || 'default';
+          const success = alwaysOn && await this.setIntensityAcrossAvailableBays(targetBay, intensity, controller, true);
+          if (success) {
+            this.currentStateActive = true;
+            const activatedAt = Date.now();
+            this.lastSuccessfulOnWriteAt = activatedAt;
+            this.lastDiffuserActivatedAt = activatedAt;
+            this.pendingPowerOnIntensityIntent = undefined;
+            this.accessory.context.lastIntensity = intensity;
+            this.accessory.context.lastBay = targetBay;
+            this.pendingIntensityIntent = {
+              at: Date.now(),
+              ttlMs: 15000,
+              intensity,
+              bay: targetBay,
+            };
+            this.platform.log.debug(`Successfully turned on ${diffuserLabel} with intensity ${intensity}`);
+            this.applyCurrentState();
+            this.platform.log.info(`${diffuserLabel} turned on.`);
+            // When Home turns the fan accessory on, it commonly sends RotationSpeed writes that we may suppress
+            // as "pending intent". Debounce this log so quick follow-up RotationSpeed writes emit one final value.
+            if (this.useFanService) {
+              this.queuePendingPowerOnIntensityLog(intensity);
+            }
+            if ((this.platform.config as PuraConfig).forceNightlightOff && this.supportsNightlightControl()) {
+              await this.ensureNightlightOff();
+            }
+          } else {
+            this.platform.log.error(`Failed to turn on ${diffuserLabel}`);
+            throw new Error('Failed to turn on device');
+          }
+        } else {
+          this.pendingIntensityIntent = undefined;
+          this.pendingPowerOnIntensityIntent = undefined;
+          this.cancelPendingPowerOnIntensityLog();
+          if (!this.currentStateActive) {
+            this.applyCurrentState();
+            if (this.platform.isDebugEnabled()) {
+              this.platform.log.debug(
+                `[Diffuser] Ignoring redundant OFF command for ${diffuserLabel} because it is already inactive.`,
+              );
+            }
+            return;
+          }
+          if (this.isDeviceUnavailable()) {
+            this.enforceOffVisualState();
+            this.updateFaultState();
+            this.logUnavailableCommandWarning();
+            throw new this.platform.api.hap.HapStatusError(
+              this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+            );
+            return;
+          }
+          if (this.shouldSuppressConflictingOffCommand('setOn')) {
+            this.applyCurrentState();
+            return;
+          }
+          const success = await this.puraApi.stopAll(this.device.id);
+          if (success) {
+            this.currentStateActive = false;
+            this.lastSuccessfulOnWriteAt = undefined;
+            // Diffuser OFF often changes nightlight state in cloud. Clear local nightlight intent/hold so
+            // OFF snapshots are not treated as stale and logs can reflect the transition.
+            this.pendingNightlightIntent = undefined;
+            this.recentNightlightHold = undefined;
+            this.platform.log.debug(`Successfully turned off ${diffuserLabel}`);
+            this.applyCurrentState();
+            this.platform.log.info(`${diffuserLabel} turned off.`);
+            // Reconcile Pura state after power-off. Nightlight state is sometimes omitted from realtime payloads.
+            this.platform.requestRefreshSoon(2500);
+          } else {
+            this.platform.log.error(`Failed to turn off ${diffuserLabel}`);
+            throw new Error('Failed to turn off device');
+          }
+        }
+      } catch (error) {
+        if (this.isHapStatusError(error)) {
+          throw error;
+        }
+        this.platform.log.error(`Error setting On state for ${diffuserLabel}:`, error);
+        // Fail soft to avoid Home app "No Response" on transient API errors.
+        this.applyCurrentState();
+      }
+    });
+  }
+
+  async getOn(): Promise<CharacteristicValue> {
+    const diffuserLabel = this.getDiffuserLogLabel();
+    if (this.isDeviceUnavailable()) {
+      this.updateFaultState();
+      this.platform.log.debug(
+        `Get Characteristic Active for ${diffuserLabel} -> unavailable (service communication failure)`,
+      );
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+    const isActive = this.getCurrentStateValue();
+    this.platform.log.debug(`Get Characteristic Active for ${diffuserLabel} ->`, isActive);
+    return isActive;
+  }
+
+  async getRotationSpeed(): Promise<CharacteristicValue> {
+    if (!this.useFanService) {
+      return 0;
+    }
+    if (this.isDeviceUnavailable()) {
+      this.updateFaultState();
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+    if (!this.currentStateActive) {
+      return 0;
+    }
+    const intensity = this.getCurrentIntensityValue();
+    if (typeof intensity !== 'number') {
+      const currentValue = this.service.getCharacteristic(this.platform.Characteristic.RotationSpeed).value;
+      const numericCurrentValue = Number(currentValue);
+      return Number.isFinite(numericCurrentValue) ? numericCurrentValue : 0;
+    }
+    return this.mapIntensityToRotation(intensity);
+  }
+
+  async setRotationSpeed(value: CharacteristicValue) {
+    await this.enqueueRotationWrite(async () => {
+      const diffuserLabel = this.getDiffuserLogLabel();
+      try {
+        if (!this.useFanService) {
+          return;
+        }
+        this.lastRotationWriteAt = Date.now();
+        const speed = Math.max(0, Math.min(100, Number(value) || 0));
+        const mappedIntensity = this.mapRotationToIntensity(speed);
+        const snappedSpeed = mappedIntensity <= 0 ? 0 : this.mapIntensityToRotation(mappedIntensity);
+        if (speed <= 0) {
+          this.service.updateCharacteristic(this.platform.Characteristic.RotationSpeed, 0);
+          this.pendingIntensityIntent = undefined;
+          this.pendingPowerOnIntensityIntent = undefined;
+          this.cancelPendingPowerOnIntensityLog();
+          if (!this.currentStateActive) {
+            this.applyCurrentState();
+            return;
+          }
+          if (this.isDeviceUnavailable()) {
+            this.enforceOffVisualState();
+            this.updateFaultState();
+            this.logUnavailableCommandWarning();
+            throw new this.platform.api.hap.HapStatusError(
+              this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+            );
+            return;
+          }
+          if (this.shouldSuppressConflictingOffCommand('rotation')) {
+            this.applyCurrentState();
+            return;
+          }
+          this.platform.recordIntent(this.device.id, false);
+          const success = await this.puraApi.stopAll(this.device.id);
+          if (success) {
+            this.currentStateActive = false;
+            this.lastSuccessfulOnWriteAt = undefined;
+            this.pendingNightlightIntent = undefined;
+            this.recentNightlightHold = undefined;
+            this.platform.log.debug(`Successfully turned off ${diffuserLabel} via RotationSpeed=0`);
+            this.platform.log.info(`${diffuserLabel} turned off.`);
+          } else {
+            this.platform.log.warn(
+              `Failed to turn off ${diffuserLabel} via RotationSpeed=0; preserving current state.`,
+            );
+          }
+          this.applyCurrentState();
+          return;
+        }
+        if (mappedIntensity > 0) {
+          this.pendingPowerOnIntensityIntent = {
+            at: Date.now(),
+            ttlMs: 20000,
+            intensity: mappedIntensity,
+          };
+        }
+        const onCommandAgeMs = this.lastSetOnCommandAt ? Date.now() - this.lastSetOnCommandAt : undefined;
+        const isLikelyHomeImplicitOnSpeed = !this.currentStateActive
+          && speed === 100
+          && onCommandAgeMs !== undefined
+          && onCommandAgeMs >= 0
+          && onCommandAgeMs <= 1500;
+        if (isLikelyHomeImplicitOnSpeed) {
+          if (this.platform.isDebugEnabled()) {
+            this.platform.log.debug(
+              `[Diffuser] Deferring implicit power-on RotationSpeed=100 for ${diffuserLabel} ` +
+              `(ageMs=${onCommandAgeMs}). Pending power-on intensity=${mappedIntensity}.`,
+            );
+          }
+          return;
+        }
+        if (this.platform.isDebugEnabled()) {
+          this.platform.log.debug(
+            `[Diffuser] Set RotationSpeed for ${diffuserLabel}: ` +
+            `raw=${value} normalized=${speed} snapped=${snappedSpeed} mappedIntensity=${mappedIntensity}`,
+          );
+        }
+        this.service.updateCharacteristic(this.platform.Characteristic.RotationSpeed, snappedSpeed);
+        const sinceLastOnMs = this.lastSuccessfulOnWriteAt !== undefined
+          ? Date.now() - this.lastSuccessfulOnWriteAt
+          : undefined;
+        const pendingIntentIntensity = this.getPendingIntensityIntentValue();
+        const likelyStalePostOnDownshift = this.currentStateActive
+          && sinceLastOnMs !== undefined
+          && sinceLastOnMs >= 0
+          && sinceLastOnMs <= 1500
+          && pendingIntentIntensity !== undefined
+          && mappedIntensity > 0
+          && mappedIntensity < pendingIntentIntensity;
+        if (likelyStalePostOnDownshift) {
+          if (this.platform.isDebugEnabled()) {
+            this.platform.log.debug(
+              `[Diffuser] Ignoring likely stale post-ON RotationSpeed for ${diffuserLabel}: ` +
+              `incoming=${mappedIntensity} retained=${pendingIntentIntensity} sinceLastOnMs=${sinceLastOnMs}`,
+            );
+          }
+          this.service.updateCharacteristic(
+            this.platform.Characteristic.RotationSpeed,
+            this.mapIntensityToRotation(pendingIntentIntensity),
+          );
+          this.applyCurrentState();
+          return;
+        }
+        if (pendingIntentIntensity === mappedIntensity) {
+          this.applyCurrentState();
+          if (this.platform.isDebugEnabled()) {
+            this.platform.log.debug(
+              `[Diffuser] Skipping duplicate intensity write for ${diffuserLabel}: ${mappedIntensity} (pending intent)`,
+            );
+          }
+          return;
+        }
+        const allowWhileInactive = this.shouldAllowRotationWriteWhileInactive(onCommandAgeMs);
+        if (!allowWhileInactive) {
+          if (this.platform.isDebugEnabled()) {
+            this.platform.log.debug(
+              `[Diffuser] Ignoring RotationSpeed write for ${diffuserLabel} while inactive ` +
+              `(raw=${value}, snapped=${snappedSpeed}, onAgeMs=${onCommandAgeMs ?? 'n/a'}).`,
+            );
+          }
+          return;
+        }
+        this.accessory.context.lastIntensity = mappedIntensity;
+        if (this.isDeviceUnavailable()) {
+          this.updateFaultState();
+          this.logUnavailableCommandWarning();
+          if (this.platform.isDebugEnabled()) {
+            this.platform.log.debug(
+              `${diffuserLabel} appears unavailable while adjusting intensity; preserving current state.`,
+            );
+          }
+          this.applyCurrentState();
+          throw new this.platform.api.hap.HapStatusError(
+            this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+          );
+        }
+        if (this.hasNoScentVialsDetected()) {
+          this.enforceOffVisualState();
+          this.updateFaultState();
+          this.platform.log.warn(
+            `${diffuserLabel} was turned on, but no scent vials were detected. ` +
+            'The accessory was turned off as a result.',
+          );
+          return;
+        }
         const preferredBay = this.accessory.context.lastBay;
         const normalizedPreferred = preferredBay === 1 || preferredBay === 2 ? preferredBay : undefined;
         const targetBay = normalizedPreferred && (normalizedPreferred === 1 ? this.device.bay1 : this.device.bay2)
           ? normalizedPreferred
           : (this.device.bay1 ? 1 : this.device.bay2 ? 2 : 1);
-        const bay = targetBay === 1 ? this.device.bay1 : this.device.bay2;
-        const noScentVialsDetected = this.hasNoScentVialsDetected();
-        const deviceUnavailable = this.isDeviceUnavailable();
-        if (!bay && this.platform.isDebugEnabled()) {
-          this.platform.log.warn(
-            `No bay payload available for ${this.accessory.displayName}; using fallback bay ${targetBay}.`,
-          );
-        }
-        const candidateIntensity = bay && Number.isFinite(bay.intensity) && bay.intensity > 0
-          ? bay.intensity
-          : undefined;
-        const preferredIntensity = Number.isFinite(this.accessory.context.lastIntensity) && this.accessory.context.lastIntensity > 0
-          ? this.accessory.context.lastIntensity
-          : undefined;
-        const intensity = Math.max(1, Math.min(100, preferredIntensity ?? candidateIntensity ?? 60));
-        if (noScentVialsDetected || deviceUnavailable) {
-          this.enforceOffVisualState();
-          this.updateFaultState();
-          if (deviceUnavailable) {
-            this.platform.log.warn(`${this.accessory.displayName} appears offline (Wi-Fi lost or unplugged).`);
-            // Surface an actionable HomeKit error when the device is unreachable.
-            throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-          } else {
+        if (!this.currentStateActive) {
+          // Stale cloud snapshots can temporarily mark the diffuser inactive even while HomeKit is actively controlling it.
+          // Re-assert Always On before applying intensity to avoid dropped writes and slider bounce.
+          this.platform.recordIntent(this.device.id, true);
+          if (this.shouldResetAwayModeBeforeActivating()) {
+            await this.puraApi.setAwayMode(this.device.id, false);
+          }
+          const alwaysOn = await this.puraApi.setAlwaysOn(this.device.id, targetBay);
+          if (!alwaysOn) {
             this.platform.log.warn(
-              `${this.accessory.displayName} was turned on, but no scent vials were detected. ` +
-              'The accessory was turned off as a result.',
+              `${diffuserLabel} could not be re-armed while setting intensity; preserving current state.`,
+            );
+            this.applyCurrentState();
+            return;
+          }
+          this.currentStateActive = true;
+          const activatedAt = Date.now();
+          this.lastSuccessfulOnWriteAt = activatedAt;
+          this.lastDiffuserActivatedAt = activatedAt;
+        }
+        if (this.areAllAvailableBaysAtIntensity(mappedIntensity)) {
+          this.applyCurrentState();
+          if (this.platform.isDebugEnabled()) {
+            this.platform.log.debug(
+              `[Diffuser] Skipping duplicate intensity write for ${diffuserLabel}: ${mappedIntensity} (already active)`,
             );
           }
           return;
         }
-
-        await this.puraApi.stopAll(this.device.id);
-        await this.puraApi.setAwayMode(this.device.id, false);
-        const alwaysOn = await this.puraApi.setAlwaysOn(this.device.id, targetBay);
         const controller = this.device.controller || 'default';
-        const success = alwaysOn && await this.puraApi.setIntensity(this.device.id, targetBay, intensity, controller);
-        if (success) {
-          this.currentStateActive = true;
-          this.accessory.context.lastIntensity = intensity;
-          this.accessory.context.lastBay = targetBay;
-          this.platform.log.debug(`Successfully turned on ${this.accessory.displayName} with intensity ${intensity}`);
+        const previousPendingIntent = this.pendingIntensityIntent;
+        this.pendingIntensityIntent = {
+          at: Date.now(),
+          ttlMs: 15000,
+          intensity: mappedIntensity,
+          bay: targetBay,
+        };
+        // For interactive slider changes, prioritize responsiveness by updating the active bay only.
+        // Secondary bay syncing on every step can introduce extra cloud latency and HomeKit timeouts.
+        const success = await this.setIntensityAcrossAvailableBays(targetBay, mappedIntensity, controller, false);
+        if (!success) {
+          this.pendingIntensityIntent = previousPendingIntent;
+          this.platform.log.warn(
+            `${diffuserLabel} intensity write failed (raw=${value}, snapped=${snappedSpeed}, targetBay=${targetBay}). ` +
+            'Keeping last known state to avoid HomeKit no-response.',
+          );
           this.applyCurrentState();
-          this.platform.log.info(`${this.accessory.displayName} turned on.`);
-          if ((this.platform.config as PuraConfig).forceNightlightOff && this.supportsNightlightControl()) {
-            await this.ensureNightlightOff();
-          }
-        } else {
-          this.platform.log.error(`Failed to turn on ${this.accessory.displayName}`);
-          throw new Error('Failed to turn on device');
-        }
-      } else {
-        if (this.isDeviceUnavailable()) {
-          this.enforceOffVisualState();
-          this.updateFaultState();
-          this.platform.log.warn(`${this.accessory.displayName} appears offline (Wi-Fi lost or unplugged).`);
           return;
         }
-        const success = await this.puraApi.stopAll(this.device.id);
-        if (success) {
-          this.currentStateActive = false;
-          this.platform.log.debug(`Successfully turned off ${this.accessory.displayName}`);
-          this.applyCurrentState();
-          this.platform.log.info(`${this.accessory.displayName} turned off.`);
-        } else {
-          this.platform.log.error(`Failed to turn off ${this.accessory.displayName}`);
-          throw new Error('Failed to turn off device');
+        this.accessory.context.lastBay = targetBay;
+        this.pendingIntensityIntent = {
+          at: Date.now(),
+          ttlMs: 15000,
+          intensity: mappedIntensity,
+          bay: targetBay,
+        };
+        this.recentIntensityHold = { until: Date.now() + 15000, level: mappedIntensity };
+        this.cancelPendingPowerOnIntensityLog();
+        this.platform.log.info(
+          `${diffuserLabel} intensity set to ${mappedIntensity} ` +
+          `(${this.describeIntensityLevel(mappedIntensity)}).`,
+        );
+        this.applyCurrentState();
+      } catch (error) {
+        if (this.isHapStatusError(error)) {
+          throw error;
         }
+        this.platform.log.error(`Error setting RotationSpeed for ${diffuserLabel}:`, error);
+        // Fail soft for slider writes to avoid Home app "No Response" for transient intensity update errors.
+        this.applyCurrentState();
       }
-    } catch (error) {
-      if (error instanceof this.platform.api.hap.HapStatusError) {
-        throw error;
-      }
-      this.platform.log.error(`Error setting On state for ${this.accessory.displayName}:`, error);
-      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-    }
+    });
   }
 
-  async getOn(): Promise<CharacteristicValue> {
-    if (this.isDeviceUnavailable()) {
-      this.updateFaultState();
-      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+  private isHapStatusError(error: unknown): boolean {
+    if (error instanceof this.platform.api.hap.HapStatusError) {
+      return true;
     }
-    const isActive = this.getCurrentStateValue();
-    this.platform.log.debug(`Get Characteristic Active for ${this.accessory.displayName} ->`, isActive);
-    return isActive;
+    return typeof error === 'object'
+      && error !== null
+      && 'hapStatus' in error;
   }
 
   async setNightlightOn(value: CharacteristicValue) {
@@ -318,9 +871,20 @@ export class PuraPlatformAccessory {
     }
 
     await this.enqueueNightlightWrite(async () => {
+      this.platform.recordNightlightInteraction(this.device.id);
       const active = Boolean(value);
+      const currentActive = Boolean(this.device.nightlight?.active);
       const currentRawBrightness = this.normalizeNightlightLevel(this.device.nightlight?.brightness);
-      const brightnessPercent = this.nightlightLevelToPercent(currentRawBrightness ?? 10);
+      const characteristicBrightnessValue = Number(
+        this.nightlightService?.getCharacteristic(this.platform.Characteristic.Brightness).value,
+      );
+      const characteristicBrightnessPercent = Number.isFinite(characteristicBrightnessValue)
+        ? Math.max(0, Math.min(100, Math.round(characteristicBrightnessValue)))
+        : 0;
+      const storedBrightnessPercent = this.nightlightLevelToPercent(currentRawBrightness ?? 10);
+      const brightnessPercent = active && !currentActive
+        ? (characteristicBrightnessPercent > 0 ? characteristicBrightnessPercent : 100)
+        : storedBrightnessPercent;
       const sentLevel = this.percentToNightlightLevel(brightnessPercent);
       const controller = this.device.controller || 'default';
       const color = this.normalizeNightlightColor(this.device.nightlight?.color ?? 'ffffff');
@@ -338,11 +902,12 @@ export class PuraPlatformAccessory {
         };
         this.pendingNightlightIntent = {
           at: Date.now(),
-          ttlMs: active ? 5000 : 15000,
+          ttlMs: active ? 20000 : 15000,
           active,
           level: sentLevel,
           color,
         };
+        this.logNightlightToggle(active, brightnessPercent);
         this.applyNightlightState();
         return;
       }
@@ -362,6 +927,7 @@ export class PuraPlatformAccessory {
         brightness: sentLevel,
         color,
       };
+      this.recentNightlightHold = active ? { until: Date.now() + 20000, level: sentLevel } : undefined;
       this.lastNightlightApiWrite = {
         at: Date.now(),
         active,
@@ -371,12 +937,20 @@ export class PuraPlatformAccessory {
       };
       this.pendingNightlightIntent = {
         at: Date.now(),
-        ttlMs: active ? 5000 : 15000,
+        ttlMs: active ? 20000 : 15000,
         active,
         level: sentLevel,
         color,
       };
       this.recordNightlightCommand('on', active, brightnessPercent, sentLevel);
+      const nightlightLabel = this.getNightlightLogLabel();
+      if (active) {
+        this.platform.log.info(
+          `${nightlightLabel} turned on (${brightnessPercent}% brightness).`,
+        );
+      } else {
+        this.platform.log.info(this.getNightlightOffLogMessage(nightlightLabel));
+      }
       this.applyNightlightState();
     });
   }
@@ -401,6 +975,7 @@ export class PuraPlatformAccessory {
     }
 
     await this.enqueueNightlightWrite(async () => {
+      this.platform.recordNightlightInteraction(this.device.id);
       const brightnessPercent = Math.max(0, Math.min(100, Number(value) || 0));
       const turningOff = brightnessPercent <= 0;
       const apiLevel = turningOff
@@ -427,11 +1002,16 @@ export class PuraPlatformAccessory {
         );
         this.pendingNightlightIntent = {
           at: Date.now(),
-          ttlMs: active ? 5000 : 15000,
+          ttlMs: active ? 20000 : 15000,
           active,
           level: apiLevel,
           color,
         };
+        if (!active) {
+          this.logNightlightToggle(false, 0);
+        } else if (!currentActive) {
+          this.logNightlightToggle(true, snappedPercent);
+        }
         this.applyNightlightState();
         this.nightlightService?.updateCharacteristic(this.platform.Characteristic.Brightness, snappedPercent);
         return;
@@ -452,6 +1032,7 @@ export class PuraPlatformAccessory {
         brightness: apiLevel,
         color,
       };
+      this.recentNightlightHold = active ? { until: Date.now() + 20000, level: apiLevel } : undefined;
       this.lastNightlightApiWrite = {
         at: Date.now(),
         active,
@@ -461,12 +1042,22 @@ export class PuraPlatformAccessory {
       };
       this.pendingNightlightIntent = {
         at: Date.now(),
-        ttlMs: active ? 5000 : 15000,
+        ttlMs: active ? 20000 : 15000,
         active,
         level: apiLevel,
         color,
       };
+      if (!active) {
+        this.logNightlightToggle(false, 0);
+      } else if (!currentActive) {
+        this.logNightlightToggle(true, snappedPercent);
+      }
       this.recordNightlightCommand('brightness', active, snappedPercent, apiLevel);
+      const nightlightLabel = this.getNightlightLogLabel();
+      this.platform.log.info(
+        `${nightlightLabel} brightness set to ${snappedPercent}% ` +
+        `(level ${apiLevel}, color ${color}, active=${active}).`,
+      );
       this.applyNightlightState();
       this.nightlightService?.updateCharacteristic(this.platform.Characteristic.Brightness, snappedPercent);
     });
@@ -497,6 +1088,7 @@ export class PuraPlatformAccessory {
     }
 
     await this.enqueueNightlightWrite(async () => {
+      this.platform.recordNightlightInteraction(this.device.id);
       // In HomeKit, setting color implies turning the light on.
       this.pendingNightlightActive = true;
       const hue = Math.max(0, Math.min(360, Number(value) || 0));
@@ -527,6 +1119,7 @@ export class PuraPlatformAccessory {
     }
 
     await this.enqueueNightlightWrite(async () => {
+      this.platform.recordNightlightInteraction(this.device.id);
       // In HomeKit, setting color implies turning the light on.
       this.pendingNightlightActive = true;
       const saturation = Math.max(0, Math.min(100, Number(value) || 0));
@@ -548,7 +1141,11 @@ export class PuraPlatformAccessory {
   }
 
   updateDevice(device: PuraDevice) {
-    const stabilizedDevice = this.stabilizeNightlightDuringIntentWindow(device);
+    const previousDiffuserActive = this.currentStateActive;
+    const nightlightStabilizedDevice = this.clampNightlightDuringHold(
+      this.stabilizeNightlightDuringIntentWindow(device),
+    );
+    const stabilizedDevice = this.stabilizeIntensityDuringIntentWindow(nightlightStabilizedDevice);
     const previousNightlight = this.device.nightlight;
     const previousOnline = this.normalizeOnlineState(this.device.online);
     const nextOnline = this.normalizeOnlineState(stabilizedDevice.online);
@@ -564,12 +1161,28 @@ export class PuraPlatformAccessory {
     if (this.platform.isDebugEnabled()) {
       this.platform.log.debug('Device snapshot:', this.summarizeDevice(stabilizedDevice));
     }
+    const previousNightlightActive = Boolean(previousNightlight?.active);
+    const nextNightlightActive = Boolean(stabilizedDevice.nightlight?.active);
+    const hasDedicatedNightlightAccessory = Boolean((this.platform.config as PuraConfig).enableNightlightAccessory);
+    if (!hasDedicatedNightlightAccessory && previousNightlightActive !== nextNightlightActive) {
+      const nextBrightness = nextNightlightActive
+        ? this.nightlightLevelToPercent(stabilizedDevice.nightlight?.brightness)
+        : 0;
+      this.logNightlightToggle(nextNightlightActive, nextBrightness);
+    }
     this.logNightlightProfileRoundTrip(previousNightlight, stabilizedDevice.nightlight);
     this.updateCurrentState();
+    if (!previousDiffuserActive && this.currentStateActive) {
+      this.lastDiffuserActivatedAt = Date.now();
+    }
+    if (previousDiffuserActive && !this.currentStateActive) {
+      this.cancelPendingPowerOnIntensityLog();
+    }
     void this.maybeForceNightlightOff();
   }
 
   private logInferredOfflineTransition() {
+    const diffuserLabel = this.getDiffuserLogLabel();
     const inferredOffline = this.isLikelyOfflineFromStaleStatus();
     if (inferredOffline === this.inferredOfflineFromStaleState) {
       return;
@@ -577,14 +1190,15 @@ export class PuraPlatformAccessory {
     this.inferredOfflineFromStaleState = inferredOffline;
     if (inferredOffline) {
       this.platform.log.warn(
-        `${this.accessory.displayName} appears offline (cloud status may be stale; reported online without bay payload).`,
+        `${diffuserLabel} appears offline (cloud status may be stale; reported online without bay payload).`,
       );
     } else {
-      this.platform.log.info(`${this.accessory.displayName} cloud status appears current again.`);
+      this.platform.log.info(`${diffuserLabel} cloud status appears current again.`);
     }
   }
 
   private logRecommendationHints(device: PuraDevice) {
+    const diffuserLabel = this.getDiffuserLogLabel();
     const awayModeEnabled = this.isAwayModeEnabled(device);
     if (awayModeEnabled !== this.lastAwayModeEnabledState) {
       const isInitialLog = this.lastAwayModeEnabledState === null;
@@ -592,9 +1206,9 @@ export class PuraPlatformAccessory {
       if (awayModeEnabled) {
         this.platform.log.warn(
           isInitialLog
-            ? `Away mode is currently enabled on ${this.accessory.displayName}. ` +
+            ? `Away mode is currently enabled on ${diffuserLabel}. ` +
               'For best results, please disable it in the Pura app.'
-            : `Away mode was enabled on ${this.accessory.displayName}. ` +
+            : `Away mode was enabled on ${diffuserLabel}. ` +
               'For best results, please disable it in the Pura app.',
         );
       }
@@ -607,9 +1221,9 @@ export class PuraPlatformAccessory {
       if (autoAlternativeLikelyOff) {
         this.platform.log.warn(
           isInitialLog
-            ? `Auto-alternate fragrances is currently disabled on ${this.accessory.displayName}. ` +
+            ? `Auto-alternate fragrances is currently disabled on ${diffuserLabel}. ` +
               'For best results, please enable it in the Pura app.'
-            : `Auto-alternate fragrances was disabled on ${this.accessory.displayName}. ` +
+            : `Auto-alternate fragrances was disabled on ${diffuserLabel}. ` +
               'For best results, please re-enable it in the Pura app.',
         );
       }
@@ -679,14 +1293,27 @@ export class PuraPlatformAccessory {
   }
 
   private logOnlineStateTransition(previousOnline?: boolean, nextOnline?: boolean) {
+    const diffuserLabel = this.getDiffuserLogLabel();
     if (previousOnline === undefined || nextOnline === undefined || previousOnline === nextOnline) {
       return;
     }
     if (nextOnline) {
-      this.platform.log.info(`${this.accessory.displayName} is back online.`);
+      this.platform.log.info(`${diffuserLabel} is back online.`);
       return;
     }
-    this.platform.log.warn(`${this.accessory.displayName} appears offline (Wi-Fi lost or unplugged).`);
+    this.lastUnavailableCommandWarnAt = Date.now();
+    this.platform.log.warn(`${diffuserLabel} appears offline (Wi-Fi lost or unplugged).`);
+  }
+
+  private logUnavailableCommandWarning() {
+    const now = Date.now();
+    const warnThrottleMs = 60000;
+    if (now - this.lastUnavailableCommandWarnAt < warnThrottleMs) {
+      return;
+    }
+    this.lastUnavailableCommandWarnAt = now;
+    const diffuserLabel = this.getDiffuserLogLabel();
+    this.platform.log.warn(`${diffuserLabel} appears offline (Wi-Fi lost or unplugged).`);
   }
 
   private updateAccessoryInformation() {
@@ -895,12 +1522,23 @@ export class PuraPlatformAccessory {
     if (!this.currentStateActive || !this.device.nightlight?.active) {
       return;
     }
-    const now = Date.now();
-    if (now - this.lastNightlightOffAt < 30000) {
+    const activatedAt = this.lastDiffuserActivatedAt;
+    if (activatedAt === undefined) {
       return;
     }
-    this.lastNightlightOffAt = now;
-    await this.ensureNightlightOff();
+    const now = Date.now();
+    const sinceActivationMs = now - activatedAt;
+    const activationWindowMs = 15000;
+    if (sinceActivationMs < 0 || sinceActivationMs > activationWindowMs) {
+      return;
+    }
+    if (this.lastNightlightOffAt >= activatedAt) {
+      return;
+    }
+    const forcedOff = await this.ensureNightlightOff();
+    if (forcedOff) {
+      this.lastNightlightOffAt = Date.now();
+    }
   }
 
   private getCurrentStateValue(): CharacteristicValue {
@@ -912,12 +1550,85 @@ export class PuraPlatformAccessory {
     return this.currentStateActive;
   }
 
+  private isHomeKitShowingActive(): boolean {
+    const activeCharacteristic = this.useFanService
+      ? this.platform.Characteristic.Active
+      : this.platform.Characteristic.On;
+    const currentValue = this.service.getCharacteristic(activeCharacteristic).value;
+    if (this.useFanService) {
+      return currentValue === this.platform.Characteristic.Active.ACTIVE
+        || currentValue === 1
+        || currentValue === true;
+    }
+    return Boolean(currentValue);
+  }
+
+  private shouldAllowRotationWriteWhileInactive(onCommandAgeMs?: number): boolean {
+    if (this.currentStateActive) {
+      return true;
+    }
+    if (this.isHomeKitShowingActive()) {
+      return true;
+    }
+    if (this.getPendingPowerOnIntensityIntentValue() !== undefined) {
+      return true;
+    }
+    if (this.getPendingIntensityIntentValue() !== undefined) {
+      return true;
+    }
+    return onCommandAgeMs !== undefined && onCommandAgeMs >= 0 && onCommandAgeMs <= 15000;
+  }
+
+  private shouldSuppressConflictingOffCommand(origin: 'setOn' | 'rotation'): boolean {
+    const diffuserLabel = this.getDiffuserLogLabel();
+    if (!this.currentStateActive) {
+      return false;
+    }
+    const recentNightlightInteraction = this.platform.getRecentNightlightInteraction(this.device.id);
+    if (this.lastSuccessfulOnWriteAt === undefined) {
+      return false;
+    }
+    const now = Date.now();
+    const sinceLastOnMs = now - this.lastSuccessfulOnWriteAt;
+    // Guard against controller bounce where a stale OFF arrives immediately after a successful ON.
+    if (sinceLastOnMs < 0 || sinceLastOnMs > 5000) {
+      return false;
+    }
+    const pendingIntensity = this.getPendingIntensityIntentValue();
+    const pendingPowerOnIntensity = this.getPendingPowerOnIntensityIntentValue();
+    if (pendingIntensity === undefined && pendingPowerOnIntensity === undefined) {
+      return false;
+    }
+    if (this.platform.isDebugEnabled()) {
+      this.platform.log.debug(
+        `[Diffuser] Suppressing conflicting OFF command for ${diffuserLabel} ` +
+        `(origin=${origin}, sinceLastOnMs=${sinceLastOnMs}, pendingIntensity=${pendingIntensity ?? 'none'}, ` +
+        `recentNightlightAgeMs=${recentNightlightInteraction?.ageMs ?? 'none'}).`,
+      );
+    }
+    return true;
+  }
+
   private applyCurrentState() {
     const value = this.getCurrentStateValue();
     const activeCharacteristic = this.useFanService
       ? this.platform.Characteristic.Active
       : this.platform.Characteristic.On;
     this.service.updateCharacteristic(activeCharacteristic, value);
+    if (this.useFanService && this.service.testCharacteristic(this.platform.Characteristic.RotationSpeed)) {
+      let speed = 0;
+      if (this.currentStateActive) {
+        const intensity = this.getCurrentIntensityValue();
+        if (typeof intensity === 'number') {
+          speed = this.mapIntensityToRotation(intensity);
+        } else {
+          const currentValue = this.service.getCharacteristic(this.platform.Characteristic.RotationSpeed).value;
+          const numericCurrentValue = Number(currentValue);
+          speed = Number.isFinite(numericCurrentValue) ? numericCurrentValue : 0;
+        }
+      }
+      this.service.updateCharacteristic(this.platform.Characteristic.RotationSpeed, speed);
+    }
   }
 
   private applyNightlightState() {
@@ -973,6 +1684,132 @@ export class PuraPlatformAccessory {
       hkBrightnessPercent,
       sentLevel,
     };
+    if (action === 'on') {
+      return;
+    }
+    const nightlightLabel = this.getNightlightLogLabel();
+    this.platform.log.info(
+      `${nightlightLabel} brightness set to ` +
+      `${Math.round(hkBrightnessPercent)}% (level ${sentLevel}/10).`,
+    );
+  }
+
+  private getDiffuserLogLabel(): string {
+    const name = this.accessory.displayName.trim();
+    if (/diffuser/i.test(name)) {
+      return name;
+    }
+    if (/nightlight/i.test(name)) {
+      return name.replace(/nightlight/i, 'Diffuser Nightlight');
+    }
+    return `${name} Diffuser`;
+  }
+
+  private getNightlightLogLabel(): string {
+    const name = this.accessory.displayName.trim();
+    const hasNightlight = /nightlight/i.test(name);
+    const hasDiffuser = /diffuser/i.test(name);
+    if (hasNightlight && hasDiffuser) {
+      return name;
+    }
+    if (hasNightlight) {
+      return name.replace(/nightlight/i, 'Diffuser Nightlight');
+    }
+    if (hasDiffuser) {
+      return `${name} Nightlight`;
+    }
+    return `${name} Diffuser Nightlight`;
+  }
+
+  private getNightlightOffLogMessage(label: string): string {
+    if (this.platform.consumeRecentNightlightAutoOff(this.device.id)) {
+      return `${label} automatically turned off (auto-off enabled).`;
+    }
+    return `${label} turned off.`;
+  }
+
+  private logNightlightToggle(active: boolean, brightnessPercent: number) {
+    // Avoid double-logging when a dedicated nightlight accessory handles logs.
+    if (this.enableNightlightAccessory && this.supportsNightlightControl()) {
+      return;
+    }
+    const now = Date.now();
+    const roundedPercent = Math.round(brightnessPercent);
+
+    if (!active) {
+      this.pendingNightlightOnLog = undefined;
+      if (this.pendingNightlightOnLogTimer) {
+        clearTimeout(this.pendingNightlightOnLogTimer);
+        this.pendingNightlightOnLogTimer = undefined;
+      }
+      this.emitNightlightToggleLog(false, 0, now);
+      return;
+    }
+
+    // active=true: coalesce intermediate brightness values into a single "turned on" message.
+    if (this.pendingNightlightOnLog) {
+      this.pendingNightlightOnLog.at = now;
+      this.pendingNightlightOnLog.brightnessPercent = roundedPercent;
+    } else {
+      this.pendingNightlightOnLog = { at: now, brightnessPercent: roundedPercent };
+    }
+
+    if (roundedPercent >= 100) {
+      const pending = this.pendingNightlightOnLog;
+      this.pendingNightlightOnLog = undefined;
+      if (this.pendingNightlightOnLogTimer) {
+        clearTimeout(this.pendingNightlightOnLogTimer);
+        this.pendingNightlightOnLogTimer = undefined;
+      }
+      if (pending) {
+        this.emitNightlightToggleLog(true, pending.brightnessPercent, now);
+      }
+      return;
+    }
+
+    // Debounce so rapid HomeKit bursts log the final brightness value.
+    const debounceMs = 1200;
+    if (this.pendingNightlightOnLogTimer) {
+      clearTimeout(this.pendingNightlightOnLogTimer);
+      this.pendingNightlightOnLogTimer = undefined;
+    }
+    this.pendingNightlightOnLogTimer = setTimeout(() => {
+      const pending = this.pendingNightlightOnLog;
+      this.pendingNightlightOnLog = undefined;
+      this.pendingNightlightOnLogTimer = undefined;
+      if (pending) {
+        this.emitNightlightToggleLog(true, pending.brightnessPercent, Date.now());
+      }
+    }, debounceMs);
+  }
+
+  private emitNightlightToggleLog(active: boolean, brightnessPercent: number, now = Date.now()) {
+    const roundedPercent = Math.round(brightnessPercent);
+    const last = this.lastNightlightLog;
+    if (last && last.active === active && Math.round(last.level) === roundedPercent) {
+      const age = now - last.at;
+      if (age < 1500) {
+        return;
+      }
+    }
+    this.lastNightlightLog = { at: now, active, level: roundedPercent };
+
+    const label = this.getNightlightLogLabel();
+    if (active) {
+      this.platform.log.info(`${label} turned on (${roundedPercent}% brightness).`);
+    } else {
+      this.platform.log.info(this.getNightlightOffLogMessage(label));
+    }
+  }
+
+  private emitNightlightColorChangedLog() {
+    const now = Date.now();
+    if (now - this.lastNightlightColorLogAt < 1200) {
+      return;
+    }
+    this.lastNightlightColorLogAt = now;
+    const label = this.getNightlightLogLabel();
+    this.platform.log.info(`${label} color was changed.`);
   }
 
   private async applyNightlightColor(
@@ -1018,11 +1855,12 @@ export class PuraPlatformAccessory {
     };
     this.pendingNightlightIntent = {
       at: Date.now(),
-      ttlMs: active ? 5000 : 15000,
+      ttlMs: active ? 20000 : 15000,
       active,
       level: apiLevel,
       color: normalizedColor,
     };
+    this.emitNightlightColorChangedLog();
     this.applyNightlightState();
   }
 
@@ -1035,7 +1873,51 @@ export class PuraPlatformAccessory {
     await run;
   }
 
+  private async enqueueRotationWrite(task: () => Promise<void>): Promise<void> {
+    const run = this.rotationWriteQueue.then(task, task);
+    this.rotationWriteQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    await run;
+  }
+
   private stabilizeNightlightDuringIntentWindow(device: PuraDevice): PuraDevice {
+    if (!this.pendingNightlightIntent && device.nightlight) {
+      const forceNightlightOff = Boolean((this.platform.config as PuraConfig).forceNightlightOff);
+      const recentNightlightInteraction = this.platform.getRecentNightlightInteraction(this.device.id);
+      const previousNightlightActive = Boolean(this.device.nightlight?.active);
+      const incomingNightlightActive = Boolean(device.nightlight.active);
+      const sinceDiffuserOnMs = this.lastSuccessfulOnWriteAt !== undefined
+        ? Date.now() - this.lastSuccessfulOnWriteAt
+        : undefined;
+      const inDiffuserOnStabilizationWindow = sinceDiffuserOnMs !== undefined
+        && sinceDiffuserOnMs >= 0
+        && sinceDiffuserOnMs <= 1000;
+      // Some devices briefly report nightlight=on when a diffuser starts even when no HomeKit
+      // nightlight command was sent. Hold the prior OFF state during the startup window.
+      if (!forceNightlightOff
+        && !this.enableNightlightAccessory
+        && inDiffuserOnStabilizationWindow
+        && !recentNightlightInteraction
+        && !previousNightlightActive
+        && incomingNightlightActive) {
+        if (this.platform.isDebugEnabled()) {
+          this.platform.log.debug(
+            `[Nightlight] Suppressing transient ON snapshot for ${this.accessory.displayName} ` +
+            `(sinceDiffuserOnMs=${sinceDiffuserOnMs}).`,
+          );
+        }
+        return {
+          ...device,
+          nightlight: {
+            ...device.nightlight,
+            active: false,
+          },
+        };
+      }
+    }
+
     if (!this.pendingNightlightIntent) {
       return device;
     }
@@ -1047,8 +1929,14 @@ export class PuraPlatformAccessory {
     if (!device.nightlight) {
       return device;
     }
-
     const intent = this.pendingNightlightIntent;
+    const recentNightlightInteraction = this.platform.getRecentNightlightInteraction(this.device.id);
+    const passiveIntentMaxAgeMs = intent.active ? 9000 : 3500;
+    if (!recentNightlightInteraction && ageMs > passiveIntentMaxAgeMs) {
+      this.pendingNightlightIntent = undefined;
+      return device;
+    }
+
     const incomingLevel = this.normalizeNightlightLevel(device.nightlight.brightness);
     const incomingActive = Boolean(device.nightlight.active);
     const incomingColor = this.normalizeNightlightColor(device.nightlight.color);
@@ -1075,6 +1963,337 @@ export class PuraPlatformAccessory {
         brightness: intent.level,
         color: intent.color,
       },
+    };
+  }
+
+  private clampNightlightDuringHold(device: PuraDevice): PuraDevice {
+    if (!this.recentNightlightHold) {
+      return device;
+    }
+    const now = Date.now();
+    if (now > this.recentNightlightHold.until) {
+      this.recentNightlightHold = undefined;
+      return device;
+    }
+    if (!device.nightlight || device.nightlight.active !== true) {
+      return device;
+    }
+    const incomingLevel = this.normalizeNightlightLevel(device.nightlight.brightness) ?? 1;
+    if (incomingLevel >= this.recentNightlightHold.level) {
+      return device;
+    }
+    if (this.platform.isDebugEnabled()) {
+      this.platform.log.debug(
+        `[Nightlight] Clamping brightness for ${this.accessory.displayName} during hold: ` +
+        `incoming=${incomingLevel} intentHold=${this.recentNightlightHold.level}`,
+      );
+    }
+    return {
+      ...device,
+      nightlight: {
+        ...device.nightlight,
+        brightness: this.recentNightlightHold.level,
+      },
+    };
+  }
+
+  private getPendingIntensityIntentValue(): number | undefined {
+    if (!this.pendingIntensityIntent) {
+      return undefined;
+    }
+    const ageMs = Date.now() - this.pendingIntensityIntent.at;
+    if (ageMs > this.pendingIntensityIntent.ttlMs) {
+      this.pendingIntensityIntent = undefined;
+      return undefined;
+    }
+    return this.pendingIntensityIntent.intensity;
+  }
+
+  private getPendingPowerOnIntensityIntentValue(): number | undefined {
+    if (!this.pendingPowerOnIntensityIntent) {
+      return undefined;
+    }
+    const ageMs = Date.now() - this.pendingPowerOnIntensityIntent.at;
+    if (ageMs > this.pendingPowerOnIntensityIntent.ttlMs) {
+      this.pendingPowerOnIntensityIntent = undefined;
+      return undefined;
+    }
+    return this.pendingPowerOnIntensityIntent.intensity;
+  }
+
+  private describeIntensityLevel(intensity: number): 'subtle' | 'medium' | 'strong' {
+    if (intensity <= 30) {
+      return 'subtle';
+    }
+    if (intensity <= 50) {
+      return 'medium';
+    }
+    return 'strong';
+  }
+
+  private queuePendingPowerOnIntensityLog(intensity: number) {
+    const normalizedIntensity = Math.max(1, Math.min(100, Math.round(Number(intensity) || 0)));
+    this.pendingPowerOnIntensityLog = {
+      at: Date.now(),
+      intensity: normalizedIntensity,
+    };
+    if (this.pendingPowerOnIntensityLogTimer) {
+      clearTimeout(this.pendingPowerOnIntensityLogTimer);
+      this.pendingPowerOnIntensityLogTimer = undefined;
+    }
+    const debounceMs = 3500;
+    this.pendingPowerOnIntensityLogTimer = setTimeout(() => {
+      const pending = this.pendingPowerOnIntensityLog;
+      this.pendingPowerOnIntensityLog = undefined;
+      if (this.pendingPowerOnIntensityLogTimer) {
+        clearTimeout(this.pendingPowerOnIntensityLogTimer);
+        this.pendingPowerOnIntensityLogTimer = undefined;
+      }
+      if (!pending) {
+        return;
+      }
+      const diffuserLabel = this.getDiffuserLogLabel();
+      this.platform.log.info(
+        `${diffuserLabel} intensity set to ${pending.intensity} ` +
+        `(${this.describeIntensityLevel(pending.intensity)}).`,
+      );
+    }, debounceMs);
+  }
+
+  private cancelPendingPowerOnIntensityLog() {
+    this.pendingPowerOnIntensityLog = undefined;
+    if (this.pendingPowerOnIntensityLogTimer) {
+      clearTimeout(this.pendingPowerOnIntensityLogTimer);
+      this.pendingPowerOnIntensityLogTimer = undefined;
+    }
+  }
+
+  private stabilizeIntensityDuringIntentWindow(device: PuraDevice): PuraDevice {
+    const intentIntensity = this.getPendingIntensityIntentValue();
+    if (intentIntensity === undefined || !this.pendingIntensityIntent) {
+      return this.clampIntensityDuringHold(device);
+    }
+    if (!device.bay1 && !device.bay2) {
+      return this.clampIntensityDuringHold(device);
+    }
+
+    const intentBay = this.pendingIntensityIntent.bay;
+    const ageMs = Date.now() - this.pendingIntensityIntent.at;
+    const incomingBay = intentBay === 1
+      ? device.bay1
+      : intentBay === 2
+        ? device.bay2
+        : this.getActiveBayFromDevice(device);
+    const incomingIntensity = incomingBay?.intensity;
+    const incomingMatchesIntentIntensity = Number.isFinite(incomingIntensity) && Number(incomingIntensity) === intentIntensity;
+    if (intentBay === 1 || intentBay === 2) {
+      const targetBay = intentBay === 1 ? device.bay1 : device.bay2;
+      const otherBay = intentBay === 1 ? device.bay2 : device.bay1;
+      const targetActive = Boolean(targetBay?.active);
+      const otherActive = Boolean(otherBay?.active);
+      if (incomingMatchesIntentIntensity && targetActive && !otherActive) {
+        return device;
+      }
+    } else if (incomingMatchesIntentIntensity) {
+      return device;
+    }
+
+    const presentBays = [device.bay1, device.bay2].filter((bay): bay is PuraBay => Boolean(bay));
+    const incomingHasAnyActiveBay = presentBays.some((bay) => Boolean(bay.active));
+    const incomingHasAnyPositiveIntensity = presentBays.some(
+      (bay) => Number.isFinite(bay.intensity) && Number(bay.intensity) > 0,
+    );
+    const incomingLooksFullyOff = presentBays.length > 0 && !incomingHasAnyActiveBay && !incomingHasAnyPositiveIntensity;
+    const acceptExternalOffAfterMs = 5000;
+    if (incomingLooksFullyOff && ageMs >= acceptExternalOffAfterMs) {
+      if (this.platform.isDebugEnabled()) {
+        this.platform.log.debug(
+          `[Diffuser] Accepting external OFF snapshot for ${this.getDiffuserLogLabel()}; ` +
+          `clearing pending intensity intent (ageMs=${ageMs}).`,
+        );
+      }
+      this.pendingIntensityIntent = undefined;
+      this.pendingPowerOnIntensityIntent = undefined;
+      return this.clampIntensityDuringHold(device);
+    }
+
+    if (this.platform.isDebugEnabled()) {
+      this.platform.log.debug(
+        `[Diffuser] Ignoring stale intensity snapshot for ${this.getDiffuserLogLabel()}: ` +
+        `incoming=${incomingIntensity ?? 'unknown'} expected=${intentIntensity} ` +
+        `bay=${intentBay ?? 'auto'} ageMs=${ageMs}`,
+      );
+    }
+
+    if (intentBay === 1 && device.bay1) {
+      return this.clampIntensityDuringHold({
+        ...device,
+        bay1: { ...device.bay1, intensity: intentIntensity, active: true },
+        bay2: device.bay2 ? { ...device.bay2, active: false } : device.bay2,
+      });
+    }
+    if (intentBay === 2 && device.bay2) {
+      return this.clampIntensityDuringHold({
+        ...device,
+        bay1: device.bay1 ? { ...device.bay1, active: false } : device.bay1,
+        bay2: { ...device.bay2, intensity: intentIntensity, active: true },
+      });
+    }
+    if (device.bay1) {
+      return this.clampIntensityDuringHold({ ...device, bay1: { ...device.bay1, intensity: intentIntensity } });
+    }
+    if (device.bay2) {
+      return this.clampIntensityDuringHold({ ...device, bay2: { ...device.bay2, intensity: intentIntensity } });
+    }
+    return this.clampIntensityDuringHold(device);
+  }
+
+  private getActiveBayFromDevice(device: PuraDevice): PuraBay | undefined {
+    const bay1 = this.fillBayIntensityFromCache(device.bay1);
+    const bay2 = this.fillBayIntensityFromCache(device.bay2);
+    if (bay1?.active && !bay2?.active) {
+      return bay1;
+    }
+    if (bay2?.active && !bay1?.active) {
+      return bay2;
+    }
+    if (bay1?.active && bay2?.active) {
+      const bay1ActiveAt = bay1.activeAt ?? 0;
+      const bay2ActiveAt = bay2.activeAt ?? 0;
+      if (bay1ActiveAt !== bay2ActiveAt) {
+        return bay1ActiveAt > bay2ActiveAt ? bay1 : bay2;
+      }
+      return bay1.intensity >= bay2.intensity ? bay1 : bay2;
+    }
+    const bay1HasIntensity = Number.isFinite(bay1?.intensity) && Number(bay1?.intensity) > 0;
+    const bay2HasIntensity = Number.isFinite(bay2?.intensity) && Number(bay2?.intensity) > 0;
+    if (bay1HasIntensity && !bay2HasIntensity) {
+      return bay1;
+    }
+    if (bay2HasIntensity && !bay1HasIntensity) {
+      return bay2;
+    }
+    if (bay1HasIntensity && bay2HasIntensity) {
+      const bay1ActiveAt = bay1?.activeAt ?? 0;
+      const bay2ActiveAt = bay2?.activeAt ?? 0;
+      if (bay1ActiveAt !== bay2ActiveAt) {
+        return bay1ActiveAt > bay2ActiveAt ? bay1 : bay2;
+      }
+      return (bay1?.intensity ?? 0) >= (bay2?.intensity ?? 0) ? bay1 : bay2;
+    }
+    const inferred = this.getActiveBayFromActiveAt(bay1, bay2);
+    if (inferred) {
+      return inferred;
+    }
+    return undefined;
+  }
+
+  private getActiveBayFromActiveAt(bay1?: PuraBay, bay2?: PuraBay): PuraBay | undefined {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const windowSec = 6 * 60 * 60; // treat as active if activeAt is within the last 6 hours
+    const chooseIntensity = (): number => {
+      const cached = Number(this.accessory.context.lastIntensity);
+      if (Number.isFinite(cached) && cached > 0) {
+        return cached;
+      }
+      return 30;
+    };
+
+    const bay1Recent = bay1?.activeAt && Math.abs(nowSec - bay1.activeAt) < windowSec;
+    const bay2Recent = bay2?.activeAt && Math.abs(nowSec - bay2.activeAt) < windowSec;
+
+    if (bay1Recent && !bay2Recent) {
+      return { ...bay1, active: true, intensity: bay1?.intensity && bay1.intensity > 0 ? bay1.intensity : chooseIntensity() };
+    }
+    if (bay2Recent && !bay1Recent) {
+      return { ...bay2, active: true, intensity: bay2?.intensity && bay2.intensity > 0 ? bay2.intensity : chooseIntensity() };
+    }
+    if (bay1Recent && bay2Recent) {
+      const bay1ActiveAt = bay1?.activeAt ?? 0;
+      const bay2ActiveAt = bay2?.activeAt ?? 0;
+      if (bay1ActiveAt !== bay2ActiveAt) {
+        return bay1ActiveAt > bay2ActiveAt
+          ? { ...bay1, active: true, intensity: bay1?.intensity && bay1.intensity > 0 ? bay1.intensity : chooseIntensity() }
+          : { ...bay2, active: true, intensity: bay2?.intensity && bay2.intensity > 0 ? bay2.intensity : chooseIntensity() };
+      }
+      // If timestamps equal, prefer higher intensity (or fallback).
+      const bay1Intensity = bay1?.intensity && bay1.intensity > 0 ? bay1.intensity : chooseIntensity();
+      const bay2Intensity = bay2?.intensity && bay2.intensity > 0 ? bay2.intensity : chooseIntensity();
+      return bay1Intensity >= bay2Intensity
+        ? { ...bay1, active: true, intensity: bay1Intensity }
+        : { ...bay2, active: true, intensity: bay2Intensity };
+    }
+
+    return undefined;
+  }
+
+  private fillBayIntensityFromCache(bay?: PuraBay): PuraBay | undefined {
+    if (!bay) {
+      return bay;
+    }
+    if (bay.active && (!Number.isFinite(bay.intensity) || bay.intensity <= 0)) {
+      const cached = Number(this.accessory.context.lastIntensity);
+      const fallback = Number.isFinite(cached) && cached > 0 ? cached : 30;
+      return { ...bay, intensity: fallback };
+    }
+    return bay;
+  }
+
+  private clampIntensityDuringHold(device: PuraDevice): PuraDevice {
+    if (!this.recentIntensityHold) {
+      return this.clampRecentOnDrop(device);
+    }
+    const now = Date.now();
+    if (now > this.recentIntensityHold.until) {
+      this.recentIntensityHold = undefined;
+      return this.clampRecentOnDrop(device);
+    }
+    const hold = this.recentIntensityHold.level;
+    const clampBay = (bay?: PuraBay) => {
+      if (!bay || !bay.active) {
+        return bay;
+      }
+      if (!Number.isFinite(bay.intensity) || bay.intensity < hold) {
+        return { ...bay, intensity: hold };
+      }
+      return bay;
+    };
+    return this.clampRecentOnDrop({
+      ...device,
+      bay1: clampBay(device.bay1),
+      bay2: clampBay(device.bay2),
+    });
+  }
+
+  private clampRecentOnDrop(device: PuraDevice): PuraDevice {
+    if (!this.lastRequestedOnIntensity || this.lastRequestedOnIntensity <= 0) {
+      return device;
+    }
+    const recentIntentAt = Math.max(
+      this.lastSetOnCommandAt ?? 0,
+      this.lastRotationWriteAt ?? 0,
+    );
+    if (recentIntentAt === 0) {
+      return device;
+    }
+    const ageMs = Date.now() - recentIntentAt;
+    if (ageMs > 20000) {
+      return device;
+    }
+    const minLevel = this.lastRequestedOnIntensity;
+    const clampBay = (bay?: PuraBay) => {
+      if (!bay || !bay.active) {
+        return bay;
+      }
+      if (!Number.isFinite(bay.intensity) || bay.intensity < minLevel) {
+        return { ...bay, intensity: minLevel };
+      }
+      return bay;
+    };
+    return {
+      ...device,
+      bay1: clampBay(device.bay1),
+      bay2: clampBay(device.bay2),
     };
   }
 
@@ -1204,15 +2423,21 @@ export class PuraPlatformAccessory {
     this.lastNightlightCommand = undefined;
   }
 
-  private async ensureNightlightOff() {
+  private async ensureNightlightOff(): Promise<boolean> {
     try {
       await this.sleep(1500);
       const controller = this.device.controller || 'default';
       const brightness = this.device.nightlight?.brightness ?? 1;
       const color = this.device.nightlight?.color ?? 'ffffff';
-      await this.puraApi.setNightlight(this.device.id, false, brightness, color, controller);
+      const success = await this.puraApi.setNightlight(this.device.id, false, brightness, color, controller);
+      if (success) {
+        this.platform.recordNightlightAutoOff(this.device.id);
+        return true;
+      }
+      return false;
     } catch (error) {
       this.platform.log.debug(`Failed to force nightlight off for ${this.accessory.displayName}:`, error);
+      return false;
     }
   }
 

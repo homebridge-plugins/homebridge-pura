@@ -22,8 +22,10 @@ export class PuraApi {
   private userPool: CognitoUserPool;
   private cognitoUser: CognitoUser | null = null;
   private session: CognitoUserSession | null = null;
+  private refreshInFlight: Promise<PuraAuthTokens> | null = null;
   private readonly log: Logging;
   private readonly baseUrl: string;
+  private lastDevicesFetchDegraded = false;
 
   constructor(log: Logging) {
     this.log = log;
@@ -44,6 +46,7 @@ export class PuraApi {
     });
     this.cognitoUser = null;
     this.session = null;
+    this.refreshInFlight = null;
   }
 
   /**
@@ -108,6 +111,16 @@ export class PuraApi {
     });
   }
 
+  private async refreshTokenWithLock(): Promise<PuraAuthTokens> {
+    if (this.refreshInFlight) {
+      return this.refreshInFlight;
+    }
+    this.refreshInFlight = this.refreshToken().finally(() => {
+      this.refreshInFlight = null;
+    });
+    return this.refreshInFlight;
+  }
+
   /**
    * Get authorization header for API requests
    */
@@ -136,9 +149,10 @@ export class PuraApi {
     method: string,
     endpoint: string,
     data?: unknown,
-    options?: { suppressHttpErrorLog?: boolean; suppressTransportErrorLog?: boolean },
+    options?: { suppressHttpErrorLog?: boolean; suppressTransportErrorLog?: boolean; timeoutMs?: number },
   ): Promise<unknown> {
     const url = new URL(endpoint, this.baseUrl).toString();
+    const timeoutMs = Math.max(1000, options?.timeoutMs ?? 5000);
 
     const isGet = method.toLowerCase() === 'get';
     const buildOptions = (authorization: string): RequestInit => {
@@ -156,9 +170,17 @@ export class PuraApi {
     };
 
     const doRequest = async (authorization: string) => {
-      const response = await fetch(url, buildOptions(authorization));
-      const responseText = await response.text();
-      return { response, responseText };
+      const controller = new AbortController();
+      const timeout = setTimeout(() => {
+        controller.abort();
+      }, timeoutMs);
+      try {
+        const response = await fetch(url, { ...buildOptions(authorization), signal: controller.signal });
+        const responseText = await response.text();
+        return { response, responseText };
+      } finally {
+        clearTimeout(timeout);
+      }
     };
 
     try {
@@ -168,7 +190,7 @@ export class PuraApi {
       // If unauthorized, try refresh then retry once.
       if (response.status === 401) {
         try {
-          await this.refreshToken();
+          await this.refreshTokenWithLock();
           ({ response, responseText } = await doRequest(this.getAuthHeader()));
         } catch (refreshError) {
           this.log.debug('Token refresh failed during request retry:', refreshError);
@@ -206,6 +228,7 @@ export class PuraApi {
    * Get all devices
    */
   async getDevices(): Promise<PuraDevice[]> {
+    this.lastDevicesFetchDegraded = false;
     const endpoints = ['v2/users/devices', 'users/devices', 'devices'];
     let lastError: unknown;
 
@@ -214,6 +237,7 @@ export class PuraApi {
       try {
         const response = await this.makeRequest('GET', endpoint, undefined, {
           suppressTransportErrorLog: true,
+          timeoutMs: 7000,
         }) as Record<string, unknown>;
         return this.extractDevices(response);
       } catch (error) {
@@ -225,6 +249,7 @@ export class PuraApi {
           try {
             const retryResponse = await this.makeRequest('GET', endpoint, undefined, {
               suppressTransportErrorLog: true,
+              timeoutMs: 7000,
             }) as Record<string, unknown>;
             return this.extractDevices(retryResponse);
           } catch (retryError) {
@@ -243,6 +268,7 @@ export class PuraApi {
           try {
             const retryResponse = await this.makeRequest('GET', endpoint, undefined, {
               suppressTransportErrorLog: true,
+              timeoutMs: 7000,
             }) as Record<string, unknown>;
             return this.extractDevices(retryResponse);
           } catch (retryError) {
@@ -260,16 +286,22 @@ export class PuraApi {
     }
 
     if (this.isTransientNetworkError(lastError)) {
+      this.lastDevicesFetchDegraded = true;
       this.log.warn('Pura devices endpoint timed out. Returning no device updates this cycle.');
       return [];
     }
 
     if (this.isThingTypeError(lastError)) {
+      this.lastDevicesFetchDegraded = true;
       this.log.warn('Pura API rejected one or more device thing types. Returning no devices this cycle.');
       return [];
     }
 
     throw (lastError instanceof Error ? lastError : new Error('Failed to get devices'));
+  }
+
+  wasLastDevicesFetchDegraded(): boolean {
+    return this.lastDevicesFetchDegraded;
   }
 
   private extractDevices(response: Record<string, unknown>): PuraDevice[] {
@@ -309,7 +341,9 @@ export class PuraApi {
       || message.includes('eai_again')
       || message.includes('fetch failed')
       || message.includes('network timeout')
-      || message.includes('socket hang up');
+      || message.includes('socket hang up')
+      || message.includes('aborted')
+      || message.includes('aborterror');
   }
 
   private async delay(ms: number): Promise<void> {
@@ -497,24 +531,43 @@ export class PuraApi {
     const diffusionMode = typeof parent.diffusionMode === 'string' ? parent.diffusionMode : undefined;
     const standardMode = diffusionMode === 'standard';
     const online = this.resolveOnlineState(parent) !== false;
-    const activeAtWindowSeconds = standardMode && online ? 60 * 60 : 300;
+    // Standard-mode devices can update activeAt less frequently than bay active/intensity fields.
+    // Use a wider window to reduce false OFF transitions between cloud updates.
+    const activeAtWindowSeconds = standardMode
+      ? (online ? 900 : 300)
+      : (online ? 300 : 120);
     const activeAtRecent = activeAt !== undefined &&
       Math.abs(nowSeconds - activeAt) < activeAtWindowSeconds;
-    const explicitActive = record.active ?? record.enabled ?? record.on ?? record.isOn;
+    const explicitActiveValues = [
+      this.normalizeBooleanish(record.active),
+      this.normalizeBooleanish(record.enabled),
+      this.normalizeBooleanish(record.on),
+      this.normalizeBooleanish(record.isOn),
+    ];
+    const explicitActive = explicitActiveValues.find((state): state is boolean => state !== undefined);
+    const hasExplicitActiveSignal = explicitActive !== undefined;
     const intensityFromRecord = this.normalizeBayIntensity(record.intensity ?? record.level ?? record.strength);
     const intensityFromDefaults = this.normalizeBayIntensity(
       (parent.deviceDefaults as Record<string, unknown> | undefined)?.[`bay${bayNumber}Intensity`],
     );
+    const intensityFromParentState = this.normalizeParentStateIntensity(parent, bayNumber);
     const oscillationActive = this.normalizeOscillationActive(parent.oscillation, bayNumber);
     const intensityFromOscillation = this.normalizeOscillationIntensity(parent.oscillation, bayNumber);
-    const inferredActive = oscillationActive ||
+    const intensityEvidence = (
       (intensityFromRecord !== null && Number.isFinite(intensityFromRecord) && intensityFromRecord > 0) ||
       (intensityFromOscillation !== null && Number.isFinite(intensityFromOscillation) && intensityFromOscillation > 0) ||
-      (standardMode && activeAtRecent);
-    const active = explicitActive === true ? true : inferredActive;
-    const normalizedIntensity = intensityFromRecord ??
-      (active ? (intensityFromOscillation ?? intensityFromDefaults) : null) ??
-      0;
+      (intensityFromParentState !== null && Number.isFinite(intensityFromParentState) && intensityFromParentState > 0)
+    );
+    const inferredActive = oscillationActive ||
+      (standardMode && !hasExplicitActiveSignal && activeAtRecent) ||
+      (activeAtRecent && intensityEvidence);
+    const active = explicitActive ?? inferredActive;
+    // Preserve reported intensity even when the active flag is stale/missing. The accessory layer
+    // can use this as secondary evidence for current diffusion state.
+    const reportedIntensity = intensityFromRecord ?? intensityFromOscillation ?? 0;
+    const normalizedIntensity = active
+      ? (intensityFromRecord ?? intensityFromOscillation ?? intensityFromParentState ?? intensityFromDefaults ?? 0)
+      : reportedIntensity;
     return {
       id: typeof record.id === 'number' ? record.id : bayNumber,
       name: typeof record.name === 'string' ? record.name : undefined,
@@ -548,14 +601,23 @@ export class PuraApi {
         return 30;
       }
       if (normalized === 'medium') {
-        return 60;
+        return 50;
       }
       if (normalized === 'strong') {
         return 100;
       }
       const asNumber = Number(normalized);
       if (Number.isFinite(asNumber)) {
-        return asNumber <= 10 ? asNumber * 10 : asNumber;
+        if (asNumber <= 0) {
+          return 0;
+        }
+        if (asNumber <= 33) {
+          return 30;
+        }
+        if (asNumber <= 66) {
+          return 50;
+        }
+        return 100;
       }
       return null;
     }
@@ -563,7 +625,64 @@ export class PuraApi {
     if (!Number.isFinite(asNumber)) {
       return null;
     }
-    return asNumber <= 10 ? asNumber * 10 : asNumber;
+    if (asNumber <= 0) {
+      return 0;
+    }
+    if (asNumber <= 33) {
+      return 30;
+    }
+    if (asNumber <= 66) {
+      return 50;
+    }
+    return 100;
+  }
+
+  private normalizeBooleanish(value: unknown): boolean | undefined {
+    if (typeof value === 'boolean') {
+      return value;
+    }
+    if (typeof value === 'number') {
+      if (value === 1) {
+        return true;
+      }
+      if (value === 0) {
+        return false;
+      }
+      return undefined;
+    }
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (['true', '1', 'on', 'yes', 'active', 'enabled'].includes(normalized)) {
+        return true;
+      }
+      if (['false', '0', 'off', 'no', 'inactive', 'disabled'].includes(normalized)) {
+        return false;
+      }
+    }
+    return undefined;
+  }
+
+  private normalizeParentStateIntensity(parent: Record<string, unknown>, bayNumber: number): number | null {
+    const states = Array.isArray(parent.states) ? parent.states : [];
+    const match = states.find((state) => {
+      if (!state || typeof state !== 'object') {
+        return false;
+      }
+      const stateRecord = state as Record<string, unknown>;
+      return stateRecord.bay === bayNumber;
+    }) as Record<string, unknown> | undefined;
+    if (match) {
+      return this.normalizeBayIntensity(match.intensity ?? match.level ?? match.strength);
+    }
+    const state = parent.state as Record<string, unknown> | undefined;
+    if (!state || typeof state !== 'object') {
+      return null;
+    }
+    const currentIndex = Number(state.currentIndex ?? state.bay ?? state.activeBay);
+    if (Number.isFinite(currentIndex) && currentIndex === bayNumber) {
+      return this.normalizeBayIntensity(state.intensity ?? state.level ?? state.strength);
+    }
+    return null;
   }
 
   private normalizeOscillationIntensity(value: unknown, bayNumber: number): number | null {
@@ -616,11 +735,16 @@ export class PuraApi {
     try {
       const { apiIntensity, controller: defaultController } = this.normalizeIntensity(intensity);
       const resolvedController = controller || defaultController;
-      const response = await this.makeRequest('POST', `devices/${deviceId}/intensity`, {
-        bay,
-        controller: resolvedController,
-        intensity: apiIntensity,
-      }) as { success?: boolean };
+      const response = await this.makeRequest(
+        'POST',
+        `devices/${deviceId}/intensity`,
+        {
+          bay,
+          controller: resolvedController,
+          intensity: apiIntensity,
+        },
+        { timeoutMs: 3500 },
+      ) as { success?: boolean };
       this.log.debug('Pura intensity response:', {
         deviceId,
         bay,
@@ -649,9 +773,12 @@ export class PuraApi {
    */
   async setAlwaysOn(deviceId: string, bay: number): Promise<boolean> {
     try {
-      const response = await this.makeRequest('POST', `devices/${deviceId}/always-on`, {
-        bay,
-      }) as { success?: boolean };
+      const response = await this.makeRequest(
+        'POST',
+        `devices/${deviceId}/always-on`,
+        { bay },
+        { timeoutMs: 3500 },
+      ) as { success?: boolean };
       return response.success === true;
     } catch (error) {
       this.log.error(`Failed to set always on for device ${deviceId}:`, error);
@@ -668,7 +795,7 @@ export class PuraApi {
         'POST',
         `devices/${deviceId}/stop-all`,
         undefined,
-        { suppressHttpErrorLog: true },
+        { suppressHttpErrorLog: true, timeoutMs: 3500 },
       ) as { success?: boolean };
       return response.success === true;
     } catch (error) {
@@ -686,9 +813,12 @@ export class PuraApi {
 
   async setAwayMode(deviceId: string, awayMode: boolean): Promise<boolean> {
     try {
-      const response = await this.makeRequest('POST', `devices/${deviceId}/awayMode`, {
-        awayMode,
-      }) as { success?: boolean };
+      const response = await this.makeRequest(
+        'POST',
+        `devices/${deviceId}/awayMode`,
+        { awayMode },
+        { timeoutMs: 3500 },
+      ) as { success?: boolean };
       return response.success === true;
     } catch (error) {
       this.log.error(`Failed to set away mode for device ${deviceId}:`, error);
@@ -717,7 +847,7 @@ export class PuraApi {
         brightness: scaledBrightness,
         color: normalizedColor,
         controller,
-      }) as Record<string, unknown>;
+      }, { timeoutMs: 3500 }) as Record<string, unknown>;
       const success = response.success === true;
       this.log.debug(
         `[Nightlight] Response device=${deviceId} success=${success} payload=${this.formatDebugPayload(response)}`,

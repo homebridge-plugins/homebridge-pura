@@ -2,6 +2,7 @@ import type { API, Characteristic, DynamicPlatformPlugin, Logging, PlatformAcces
 import WebSocket from 'ws';
 
 import { PuraPlatformAccessory } from './platformAccessory.js';
+import { PuraNightlightAccessory } from './nightlightAccessory.js';
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
 import { PuraApi } from './puraApi.js';
 import { PuraDevice, PuraConfig } from './puraTypes.js';
@@ -10,8 +11,10 @@ import { fetchLatestCognitoConfig } from './pypuraLookup.js';
 type DiffuserAccessory = PlatformAccessory & {
   context: {
     device: PuraDevice;
+    accessoryType?: 'diffuser' | 'nightlight';
+    serviceMode?: 'switch' | 'fan';
   };
-  handler?: PuraPlatformAccessory;
+  handler?: PuraPlatformAccessory | PuraNightlightAccessory;
 };
 
 /**
@@ -46,11 +49,15 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   private webhookReceived = false;
   private intentWindowMs = 8000;
   private lastIntentAt: Map<string, { state: boolean; at: number }> = new Map();
+  private readonly lastNightlightInteractionAtByDevice = new Map<string, number>();
+  private readonly sameDeviceNightlightOffGuardMs = 3500;
+  private readonly recentNightlightAutoOffAtByDevice = new Map<string, number>();
   private realtimeSocket: WebSocket | null = null;
   private realtimeReconnectTimer: NodeJS.Timeout | null = null;
   private realtimeFailures = 0;
   private realtimeConnectionAnnounced = false;
   private disabledDueToConfig = false;
+  private preservingAccessoriesDueToDegradedDiscovery = false;
 
   constructor(
     public readonly log: Logging,
@@ -225,12 +232,16 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       // Register each device
       const discoveredUuids = new Set<string>();
       for (const device of devices) {
-        const uuid = await this.registerDevice(device);
-        discoveredUuids.add(uuid);
+        const uuids = await this.registerDevice(device);
+        for (const uuid of uuids) {
+          discoveredUuids.add(uuid);
+        }
       }
 
       // Remove accessories that are no longer present
-      this.removeStaleAccessories(discoveredUuids);
+      if (!this.shouldPreserveAccessoriesOnEmptyDiscovery(devices)) {
+        this.removeStaleAccessories(discoveredUuids);
+      }
 
       // Set up refresh interval
       this.setupRefreshInterval();
@@ -284,38 +295,121 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   /**
    * Register a Pura device as a HomeKit accessory
    */
-  private async registerDevice(device: PuraDevice): Promise<string> {
+  private async registerDevice(device: PuraDevice): Promise<string[]> {
     this.log.debug('Registering device:', device.name, device.id);
 
-    // Single diffuser accessory (On/Off)
-    return this.registerDiffuserAccessory(device);
+    const uuids: string[] = [];
+    uuids.push(await this.registerDiffuserAccessory(device));
+    if ((this.puraConfig.enableNightlightAccessory ?? false) && this.supportsNightlightAccessory(device)) {
+      uuids.push(await this.registerNightlightAccessory(device));
+    } else {
+      this.unregisterNightlightAccessory(device.id);
+    }
+    return uuids;
+  }
 
-    // No nightlight accessory (diffuser switch only)
+  private getDiffuserServiceMode(): 'switch' | 'fan' {
+    const fanEnabled = Boolean(
+      this.puraConfig.enableFanService ?? this.puraConfig.useFanService,
+    );
+    return fanEnabled ? 'fan' : 'switch';
+  }
+
+  private getDiffuserUniqueId(deviceId: string, serviceMode = this.getDiffuserServiceMode()): string {
+    return `${deviceId}-diffuser-${serviceMode}`;
+  }
+
+  private getLegacyDiffuserUniqueId(deviceId: string): string {
+    return `${deviceId}-diffuser`;
   }
 
   private async registerDiffuserAccessory(device: PuraDevice): Promise<string> {
     const deviceName = device.name || `Pura ${device.id}`;
     const baseName = deviceName.endsWith('Diffuser') ? deviceName : `${deviceName} Diffuser`;
     const accessoryName = baseName;
-    const uniqueId = `${device.id}-diffuser`;
+    const serviceMode = this.getDiffuserServiceMode();
+    const uniqueId = this.getDiffuserUniqueId(device.id, serviceMode);
     const uuid = this.api.hap.uuid.generate(uniqueId);
+    const legacyUuid = this.api.hap.uuid.generate(this.getLegacyDiffuserUniqueId(device.id));
+    const alternateMode = serviceMode === 'fan' ? 'switch' : 'fan';
+    const alternateUuid = this.api.hap.uuid.generate(this.getDiffuserUniqueId(device.id, alternateMode));
 
     const existingAccessory = this.accessories.get(uuid) as DiffuserAccessory | undefined;
     if (existingAccessory) {
       this.log.info('Restoring existing accessory from cache:', existingAccessory.displayName);
       existingAccessory.context.device = device;
+      existingAccessory.context.accessoryType = 'diffuser';
+      existingAccessory.context.serviceMode = serviceMode;
       this.api.updatePlatformAccessories([existingAccessory]);
       existingAccessory.handler = new PuraPlatformAccessory(this, existingAccessory, this.puraApi);
     } else {
+      if (this.accessories.has(legacyUuid) || this.accessories.has(alternateUuid)) {
+        this.log.info(
+          `Migrating ${accessoryName} to ${serviceMode} service mode; replacing cached diffuser accessory.`,
+        );
+      }
       this.log.info('Adding new accessory:', accessoryName);
       const accessory = new this.api.platformAccessory(accessoryName, uuid) as DiffuserAccessory;
       accessory.context.device = device;
+      accessory.context.accessoryType = 'diffuser';
+      accessory.context.serviceMode = serviceMode;
       accessory.handler = new PuraPlatformAccessory(this, accessory, this.puraApi);
       this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
       this.accessories.set(uuid, accessory);
     }
 
     return uuid;
+  }
+
+  private async registerNightlightAccessory(device: PuraDevice): Promise<string> {
+    const deviceName = device.name || `Pura ${device.id}`;
+    const accessoryName = `${deviceName} Nightlight`;
+    const uniqueId = `${device.id}-nightlight`;
+    const uuid = this.api.hap.uuid.generate(uniqueId);
+
+    const existingAccessory = this.accessories.get(uuid) as DiffuserAccessory | undefined;
+    if (existingAccessory) {
+      this.log.info('Restoring existing accessory from cache:', existingAccessory.displayName);
+      existingAccessory.context.device = device;
+      existingAccessory.context.accessoryType = 'nightlight';
+      this.api.updatePlatformAccessories([existingAccessory]);
+      existingAccessory.handler = new PuraNightlightAccessory(this, existingAccessory, this.puraApi);
+    } else {
+      this.log.info('Adding new accessory:', accessoryName);
+      const accessory = new this.api.platformAccessory(accessoryName, uuid) as DiffuserAccessory;
+      accessory.context.device = device;
+      accessory.context.accessoryType = 'nightlight';
+      accessory.handler = new PuraNightlightAccessory(this, accessory, this.puraApi);
+      this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+      this.accessories.set(uuid, accessory);
+    }
+
+    return uuid;
+  }
+
+  private unregisterNightlightAccessory(deviceId: string) {
+    const uuid = this.api.hap.uuid.generate(`${deviceId}-nightlight`);
+    const accessory = this.accessories.get(uuid);
+    if (!accessory) {
+      return;
+    }
+    this.log.info('Removing existing accessory from cache:', accessory.displayName);
+    this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+    this.accessories.delete(uuid);
+  }
+
+  private supportsNightlightAccessory(device: PuraDevice): boolean {
+    const model = device.type?.toLowerCase() ?? '';
+    if (model.includes('plus')) {
+      return false;
+    }
+    const raw = device.__raw as Record<string, unknown> | undefined;
+    const hwVersion = typeof raw?.hwVersion === 'string' ? raw.hwVersion : undefined;
+    if (!hwVersion) {
+      return true;
+    }
+    const major = Number(hwVersion.split('.')[0]);
+    return !(Number.isFinite(major) && major === 22);
   }
 
 
@@ -333,15 +427,37 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   }
 
   private async reconcileDiscoveredDevices(devices: PuraDevice[]): Promise<void> {
+    if (this.shouldPreserveAccessoriesOnEmptyDiscovery(devices)) {
+      return;
+    }
     const discoveredUuids = new Set<string>();
     for (const device of devices) {
-      const uuid = this.api.hap.uuid.generate(`${device.id}-diffuser`);
-      discoveredUuids.add(uuid);
-      if (!this.accessories.has(uuid)) {
+      const diffuserUuid = this.api.hap.uuid.generate(this.getDiffuserUniqueId(device.id));
+      discoveredUuids.add(diffuserUuid);
+      if ((this.puraConfig.enableNightlightAccessory ?? false) && this.supportsNightlightAccessory(device)) {
+        const nightlightUuid = this.api.hap.uuid.generate(`${device.id}-nightlight`);
+        discoveredUuids.add(nightlightUuid);
+      }
+      if (!this.accessories.has(diffuserUuid)) {
         await this.registerDevice(device);
       }
     }
     this.removeStaleAccessories(discoveredUuids);
+  }
+
+  private shouldPreserveAccessoriesOnEmptyDiscovery(devices: PuraDevice[]): boolean {
+    const shouldPreserve = this.puraApi.wasLastDevicesFetchDegraded()
+      && devices.length === 0
+      && this.accessories.size > 0;
+    if (shouldPreserve && !this.preservingAccessoriesDueToDegradedDiscovery) {
+      this.log.warn(
+        'Received an empty device list after a degraded API fetch. Preserving cached accessories until recovery.',
+      );
+    } else if (!shouldPreserve && this.preservingAccessoriesDueToDegradedDiscovery) {
+      this.log.info('Device discovery recovered; stale accessory reconciliation resumed.');
+    }
+    this.preservingAccessoriesDueToDegradedDiscovery = shouldPreserve;
+    return shouldPreserve;
   }
 
   /**
@@ -639,7 +755,12 @@ export class PuraPlatform implements DynamicPlatformPlugin {
         const intent = this.lastIntentAt.get(deviceId);
         const now = Date.now();
         if (intent && now - intent.at <= this.intentWindowMs) {
-          this.triggerWebhookRefreshWithDelay(this.intentWindowMs + 1000);
+          if (this.debugEnabled) {
+            this.log.debug(
+              `Skipping immediate refresh for ${deviceId} during intent window ` +
+              `(ageMs=${now - intent.at}).`,
+            );
+          }
           return;
         }
         this.triggerWebhookRefreshWithDelay(2000);
@@ -684,12 +805,16 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     }
 
     void this.updateDiffuserAccessory(normalized);
+    void this.updateNightlightAccessory(normalized);
     return true;
   }
 
   private findAccessoryByDeviceId(deviceId: string): DiffuserAccessory | undefined {
     for (const accessory of this.accessories.values()) {
       const diffuser = accessory as DiffuserAccessory;
+      if (diffuser.context?.accessoryType === 'nightlight') {
+        continue;
+      }
       if (diffuser.context?.device?.id === deviceId) {
         return diffuser;
       }
@@ -706,11 +831,61 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     if (bay1?.active || bay2?.active) {
       return true;
     }
+    const bay1HasIntensity = Number.isFinite(bay1?.intensity) && Number(bay1?.intensity) > 0;
+    const bay2HasIntensity = Number.isFinite(bay2?.intensity) && Number(bay2?.intensity) > 0;
+    if (bay1HasIntensity || bay2HasIntensity) {
+      return true;
+    }
     return false;
   }
 
   recordIntent(deviceId: string, state: boolean) {
     this.lastIntentAt.set(deviceId, { state, at: Date.now() });
+  }
+
+  recordNightlightInteraction(deviceId: string) {
+    this.lastNightlightInteractionAtByDevice.set(deviceId, Date.now());
+  }
+
+  recordNightlightAutoOff(deviceId: string) {
+    this.recentNightlightAutoOffAtByDevice.set(deviceId, Date.now());
+  }
+
+  consumeRecentNightlightAutoOff(deviceId: string, maxAgeMs = 15000): boolean {
+    const markedAt = this.recentNightlightAutoOffAtByDevice.get(deviceId);
+    if (markedAt === undefined) {
+      return false;
+    }
+    const ageMs = Date.now() - markedAt;
+    if (ageMs < 0 || ageMs > maxAgeMs) {
+      this.recentNightlightAutoOffAtByDevice.delete(deviceId);
+      return false;
+    }
+    this.recentNightlightAutoOffAtByDevice.delete(deviceId);
+    return true;
+  }
+
+  /**
+   * Schedule a near-term refresh. This is useful when we just performed a write and want to
+   * reconcile fields that may not be present in realtime partial updates (e.g., nightlight).
+   */
+  requestRefreshSoon(delayMs = 2000) {
+    this.triggerWebhookRefreshWithDelay(delayMs);
+  }
+
+  getRecentNightlightInteraction(deviceId: string): { ageMs: number } | undefined {
+    const recentAt = this.lastNightlightInteractionAtByDevice.get(deviceId);
+    if (recentAt === undefined) {
+      return undefined;
+    }
+    const ageMs = Date.now() - recentAt;
+    if (ageMs < 0 || ageMs > this.sameDeviceNightlightOffGuardMs) {
+      this.lastNightlightInteractionAtByDevice.delete(deviceId);
+      return undefined;
+    }
+    return {
+      ageMs,
+    };
   }
 
   private triggerWebhookRefresh() {
@@ -797,7 +972,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       
       for (const device of devices) {
         await this.updateDiffuserAccessory(device);
-        // No nightlight accessory
+        await this.updateNightlightAccessory(device);
       }
       this.lastRefreshAt = Date.now();
     } catch (error) {
@@ -811,6 +986,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
             await this.reconcileDiscoveredDevices(devices);
             for (const device of devices) {
               await this.updateDiffuserAccessory(device);
+              await this.updateNightlightAccessory(device);
             }
             this.lastRefreshAt = Date.now();
           } catch (retryError) {
@@ -825,9 +1001,13 @@ export class PuraPlatform implements DynamicPlatformPlugin {
    * Update a device accessory with fresh device data
    */
   private async updateDiffuserAccessory(device: PuraDevice) {
-    const uniqueId = `${device.id}-diffuser`;
+    const uniqueId = this.getDiffuserUniqueId(device.id);
     const uuid = this.api.hap.uuid.generate(uniqueId);
-    const accessory = this.accessories.get(uuid) as DiffuserAccessory | undefined;
+    let accessory = this.accessories.get(uuid) as DiffuserAccessory | undefined;
+    if (!accessory) {
+      const legacyUuid = this.api.hap.uuid.generate(this.getLegacyDiffuserUniqueId(device.id));
+      accessory = this.accessories.get(legacyUuid) as DiffuserAccessory | undefined;
+    }
 
     if (accessory) {
       const intent = this.lastIntentAt.get(device.id);
@@ -844,6 +1024,21 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       if (handler) {
         handler.updateDevice(device);
       }
+    }
+  }
+
+  private async updateNightlightAccessory(device: PuraDevice) {
+    const uniqueId = `${device.id}-nightlight`;
+    const uuid = this.api.hap.uuid.generate(uniqueId);
+    const accessory = this.accessories.get(uuid) as DiffuserAccessory | undefined;
+    if (!accessory) {
+      return;
+    }
+    accessory.context.device = device;
+    this.api.updatePlatformAccessories([accessory]);
+    const handler = accessory.handler;
+    if (handler) {
+      handler.updateDevice(device);
     }
   }
 

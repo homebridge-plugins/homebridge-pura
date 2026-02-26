@@ -166,7 +166,7 @@
             style="height:auto;"
           />
         </div>
-        <h5 class="card-title">Pura Sign In</h5>
+        <h5 class="card-title">Pura Authentication</h5>
         <p class="card-text mb-4">Please enter your Pura account credentials.</p>
 
         <div class="mb-3">
@@ -189,6 +189,15 @@
           </div>
         </div>
 
+        <div class="d-flex gap-2 align-items-center">
+          <button class="btn btn-outline-primary" id="testBtn" type="button">Test Login</button>
+        </div>
+
+        <p class="test-hint mb-4 mt-2" id="testHint">Credentials must be tested before saving.</p>
+
+        <h5 class="card-title mt-2">Options</h5>
+        <p class="card-text mb-4">Options for those who want more control.</p>
+
         <div class="form-check form-switch ms-1 mb-4">
           <input class="form-check-input" id="forceNightlightOff" type="checkbox" role="switch" aria-describedby="forceOff" />
           <label class="form-check-label" for="forceNightlightOff">Force Nightlight Off</label>
@@ -198,18 +207,20 @@
         </div>
 
         <div class="form-check form-switch ms-1 mb-4">
-          <input class="form-check-input" id="enableNightlightAccessory" type="checkbox" role="switch" aria-describedby="nightlightAccessoryHelp" />
-          <label class="form-check-label" for="enableNightlightAccessory">Enable Nightlight Controls</label>
-          <div id="nightlightAccessoryHelp" class="form-text">
-            Adds separate HomeKit nightlight controls (On, Brightness, and Color) for compatible diffusers.
+          <input class="form-check-input" id="enableFanService" type="checkbox" role="switch" aria-describedby="fanServiceHelp" />
+          <label class="form-check-label" for="enableFanService">Enable Intensity Control</label>
+          <div id="fanServiceHelp" class="form-text">
+            Replaces the on/off switch with intensity control (Subtle, Medium, Strong). For multi-bay diffusers, HomeKit intensity changes are applied across available bays to keep auto-alternate behavior consistent. Changing this may require recreating HomeKit scenes or automations for all Pura diffusers in this plugin.
           </div>
         </div>
 
-        <div class="d-flex gap-2 align-items-center pt-4">
-          <button class="btn btn-outline-primary" id="testBtn" type="button">Test Login</button>
+        <div class="form-check form-switch ms-1 mb-4">
+          <input class="form-check-input" id="enableNightlightAccessory" type="checkbox" role="switch" aria-describedby="nightlightAccessoryHelp" />
+          <label class="form-check-label" for="enableNightlightAccessory">Enable Nightlight Controls</label>
+          <div id="nightlightAccessoryHelp" class="form-text">
+            Adds a separate Nightlight accessory tile (On, Brightness, and Color) for compatible diffusers. You can group it with the diffuser in the Home app if desired.
+          </div>
         </div>
-
-        <p class="test-hint" id="testHint">Credentials must be tested before saving.</p>
 
         <div class="small" id="status"></div>
       </div>
@@ -253,6 +264,7 @@
         password: document.getElementById('password'),
         passwordToggle: document.getElementById('passwordToggle'),
         forceNightlightOff: document.getElementById('forceNightlightOff'),
+        enableFanService: document.getElementById('enableFanService'),
         enableNightlightAccessory: document.getElementById('enableNightlightAccessory'),
         testBtn: document.getElementById('testBtn'),
         testHint: document.getElementById('testHint'),
@@ -407,6 +419,7 @@
           username: '',
           password: '',
           forceNightlightOff: false,
+          enableFanService: false,
           enableNightlightAccessory: false,
         };
       };
@@ -418,6 +431,7 @@
           username: els.username.value.trim(),
           password: els.password.value,
           forceNightlightOff: !!els.forceNightlightOff.checked,
+          enableFanService: !!els.enableFanService.checked,
           enableNightlightAccessory: !!els.enableNightlightAccessory.checked,
         };
         await homebridge.updatePluginConfig([config]);
@@ -449,12 +463,13 @@
         els.username.value = current.username || '';
         els.password.value = current.password || '';
         els.forceNightlightOff.checked = !!current.forceNightlightOff;
+        els.enableFanService.checked = !!(current.enableFanService ?? current.useFanService);
         els.enableNightlightAccessory.checked = !!current.enableNightlightAccessory;
         initialCredentialKey = getCredentialKey();
 
         setUiStatus('');
 
-        for (const field of [els.name, els.forceNightlightOff, els.enableNightlightAccessory]) {
+        for (const field of [els.name, els.forceNightlightOff, els.enableFanService, els.enableNightlightAccessory]) {
           field.addEventListener('change', async () => {
             await syncConfig();
             homebridge.toast.info('Config updated. Click Save to write config.json.');
