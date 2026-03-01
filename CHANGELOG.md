@@ -1,5 +1,11 @@
 # Release Notes
 
+## 1.6.9 - 2026-03-01
+- Treat transient Pura cloud HTTP failures (`408`, `429`, `500`, `502`, `503`, `504`) as temporary availability issues during device refresh.
+- Reduce error-log noise for transient device-list fetch failures while preserving retry/fallback behavior and degraded-cycle handling.
+- Update Homebridge UI input field styling to use `0.25rem` corner radius.
+- Refine Homebridge UI form spacing by tightening helper-text line height and label bottom margin.
+
 ## 1.6.6 - 2026-02-26
 - Introduce **Intensity Control** mode that changes each diffuser from an on/off switch to a HomeKit fan accessory.
 - Map fan `RotationSpeed` to Pura intensity levels (`30` subtle, `50` medium, `100` strong), with multi-bay syncing.

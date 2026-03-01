@@ -236,6 +236,7 @@ export class PuraApi {
       const endpoint = endpoints[i];
       try {
         const response = await this.makeRequest('GET', endpoint, undefined, {
+          suppressHttpErrorLog: true,
           suppressTransportErrorLog: true,
           timeoutMs: 7000,
         }) as Record<string, unknown>;
@@ -244,10 +245,11 @@ export class PuraApi {
         lastError = error;
         const isPrimaryEndpoint = i === 0;
         if (this.isTransientNetworkError(error)) {
-          this.log.warn(`Pura devices endpoint timed out (${endpoint}). Retrying shortly...`);
+          this.log.warn(`Pura devices endpoint temporarily unavailable (${endpoint}). Retrying shortly...`);
           await this.delay(1500);
           try {
             const retryResponse = await this.makeRequest('GET', endpoint, undefined, {
+              suppressHttpErrorLog: true,
               suppressTransportErrorLog: true,
               timeoutMs: 7000,
             }) as Record<string, unknown>;
@@ -267,6 +269,7 @@ export class PuraApi {
           await this.delay(1500);
           try {
             const retryResponse = await this.makeRequest('GET', endpoint, undefined, {
+              suppressHttpErrorLog: true,
               suppressTransportErrorLog: true,
               timeoutMs: 7000,
             }) as Record<string, unknown>;
@@ -287,7 +290,7 @@ export class PuraApi {
 
     if (this.isTransientNetworkError(lastError)) {
       this.lastDevicesFetchDegraded = true;
-      this.log.warn('Pura devices endpoint timed out. Returning no device updates this cycle.');
+      this.log.warn('Pura devices endpoint temporarily unavailable. Returning no device updates this cycle.');
       return [];
     }
 
@@ -336,6 +339,13 @@ export class PuraApi {
       return false;
     }
     const message = error.message.toLowerCase();
+    const httpStatusMatch = message.match(/api request failed:\s*(\d{3})/i);
+    if (httpStatusMatch) {
+      const status = Number(httpStatusMatch[1]);
+      if ([408, 429, 500, 502, 503, 504].includes(status)) {
+        return true;
+      }
+    }
     return message.includes('etimedout')
       || message.includes('econnreset')
       || message.includes('eai_again')
