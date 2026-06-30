@@ -99,7 +99,7 @@ export class PuraPlatformAccessory {
     const revisionChanged = this.applyRevisionCharacteristics(infoService, firmwareRevision, hardwareRevision);
     const contextChanged = this.persistRevisionContext(firmwareRevision, hardwareRevision);
     if (revisionChanged || contextChanged) {
-      this.platform.api.updatePlatformAccessories([this.accessory]);
+      this.platform.persistAccessoryIfRegistered(this.accessory);
       if (this.platform.isDebugEnabled()) {
         this.platform.log.debug(
           `Persisted accessory metadata for ${this.accessory.displayName} (startup): ` +
@@ -1406,7 +1406,7 @@ export class PuraPlatformAccessory {
     const revisionChanged = this.applyRevisionCharacteristics(infoService, firmware.value, hardware.value);
     const contextChanged = this.persistRevisionContext(firmware.value, hardware.value);
     if (revisionChanged || contextChanged) {
-      this.platform.api.updatePlatformAccessories([this.accessory]);
+      this.platform.persistAccessoryIfRegistered(this.accessory);
       if (this.platform.isDebugEnabled()) {
         this.platform.log.debug(
           `Persisted accessory metadata for ${this.accessory.displayName}: revisionChanged=${revisionChanged}, ` +
