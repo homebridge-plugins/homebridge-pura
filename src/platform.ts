@@ -932,6 +932,22 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     return this.debugEnabled;
   }
 
+  /**
+   * Persist accessory changes to Homebridge's cache, but only if the accessory has already been
+   * registered with the platform. Calling updatePlatformAccessories on a not-yet-registered
+   * accessory injects a plugin-less accessory into Homebridge's cache, which makes serialization
+   * fail with "Cannot serialize accessory - missing associated plugin" and breaks persistence for
+   * every accessory until the next clean write. New accessories are persisted by
+   * registerPlatformAccessories instead, so skipping here is safe.
+   */
+  persistAccessoryIfRegistered(accessory: PlatformAccessory): void {
+    const associatedPlugin = (accessory as { _associatedPlugin?: string })._associatedPlugin;
+    if (!associatedPlugin) {
+      return;
+    }
+    this.api.updatePlatformAccessories([accessory]);
+  }
+
   private scheduleRealtimeStableLog() {
     if (this.realtimeStableTimer) {
       clearTimeout(this.realtimeStableTimer);
