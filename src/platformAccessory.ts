@@ -12,7 +12,6 @@ export class PuraPlatformAccessory {
   private service: Service;
   private nightlightService?: Service;
   private fragranceServices = new Map<string, Service>();
-  private fragranceRemainingServices = new Map<string, Service>();
   private device: PuraDevice;
   private useFanService: boolean;
   private enableBoundNightlightService: boolean;
@@ -132,7 +131,10 @@ export class PuraPlatformAccessory {
       this.service = switchService || this.accessory.addService(this.platform.Service.Switch);
     }
 
-    this.service.setCharacteristic(this.platform.Characteristic.Name, accessory.displayName);
+    this.setHomeKitServiceName(
+      this.service,
+      this.isFragranceControlEnabled() ? 'Pura' : accessory.displayName,
+    );
 
     const activeCharacteristic = this.useFanService
       ? this.platform.Characteristic.Active
@@ -207,8 +209,11 @@ export class PuraPlatformAccessory {
     return `fragrance-${fragranceId}`;
   }
 
-  private getFragranceRemainingServiceSubtype(fragranceId: string): string {
-    return `fragrance-${fragranceId}-remaining`;
+  private setHomeKitServiceName(service: Service, name: string) {
+    service.displayName = name;
+    service.setCharacteristic(this.platform.Characteristic.Name, name);
+    service.addOptionalCharacteristic(this.platform.Characteristic.ConfiguredName);
+    service.setCharacteristic(this.platform.Characteristic.ConfiguredName, name);
   }
 
   private getKnownFragrances(): Record<string, string> {
@@ -225,18 +230,27 @@ export class PuraPlatformAccessory {
 
   private configureFragranceServices() {
     const subtypePrefix = 'fragrance-';
+    // Apple Home does not render FilterMaintenance when it is linked to a fan-style
+    // fragrance control. Remove services created by earlier versions rather than
+    // publishing technically valid but invisible HomeKit state.
+    for (const service of [...this.accessory.services]) {
+      if (
+        service.subtype?.startsWith(subtypePrefix)
+        && service.UUID === this.platform.Service.FilterMaintenance.UUID
+      ) {
+        this.accessory.removeService(service);
+      }
+    }
     if (!this.isFragranceControlEnabled()) {
       for (const service of [...this.accessory.services]) {
         if (
           service.subtype?.startsWith(subtypePrefix)
-          && (service.UUID === this.platform.Service.Fanv2.UUID
-            || service.UUID === this.platform.Service.FilterMaintenance.UUID)
+          && service.UUID === this.platform.Service.Fanv2.UUID
         ) {
           this.accessory.removeService(service);
         }
       }
       this.fragranceServices.clear();
-      this.fragranceRemainingServices.clear();
       return;
     }
 
@@ -264,22 +278,8 @@ export class PuraPlatformAccessory {
           .onGet(() => this.getFragranceRotationSpeed(fragranceId));
         this.fragranceServices.set(fragranceId, service);
       }
-      service.setCharacteristic(this.platform.Characteristic.Name, fragranceName);
-
-      const remainingSubtype = this.getFragranceRemainingServiceSubtype(fragranceId);
-      let remainingService = this.fragranceRemainingServices.get(fragranceId);
-      if (!remainingService) {
-        const remainingName = `${fragranceName} Remaining`;
-        remainingService = this.accessory.getServiceById(this.platform.Service.FilterMaintenance, remainingSubtype)
-          || this.accessory.addService(this.platform.Service.FilterMaintenance, remainingName, remainingSubtype);
-        remainingService.getCharacteristic(this.platform.Characteristic.FilterLifeLevel)
-          .onGet(() => this.getFragranceRemainingPercent(fragranceId));
-        remainingService.getCharacteristic(this.platform.Characteristic.FilterChangeIndication)
-          .onGet(() => this.getFragranceChangeIndication(fragranceId));
-        this.fragranceRemainingServices.set(fragranceId, remainingService);
-        service.addLinkedService(remainingService);
-      }
-      remainingService.setCharacteristic(this.platform.Characteristic.Name, `${fragranceName} Remaining`);
+      this.setHomeKitServiceName(service, fragranceName);
+      this.updateFragranceRemainingStatus(fragranceId, fragranceName, this.getFragranceBay(fragranceId)?.bay);
     }
     this.applyFragranceStates();
   }
@@ -301,6 +301,9 @@ export class PuraPlatformAccessory {
     }
     const normalized: Record<string, number> = {};
     for (const [id, value] of Object.entries(stored as Record<string, unknown>)) {
+      if (value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) {
+        continue;
+      }
       const numericValue = Number(value);
       if (Number.isFinite(numericValue)) {
         normalized[id] = Math.max(0, Math.min(100, numericValue));
@@ -316,7 +319,15 @@ export class PuraPlatformAccessory {
   }
 
   private resolveFragranceRemainingPercent(fragranceId: string, bay?: PuraBay): number | undefined {
-    const reported = Number(bay?.remainingPercent);
+    const reportedValue: unknown = bay?.remainingPercent;
+    if (
+      reportedValue === null
+      || reportedValue === undefined
+      || (typeof reportedValue === 'string' && reportedValue.trim() === '')
+    ) {
+      return this.getStoredFragranceRemainingLevels()[fragranceId];
+    }
+    const reported = Number(reportedValue);
     if (Number.isFinite(reported)) {
       const normalized = Math.max(0, Math.min(100, reported));
       this.storeFragranceRemainingLevel(fragranceId, normalized);
@@ -325,28 +336,26 @@ export class PuraPlatformAccessory {
     return this.getStoredFragranceRemainingLevels()[fragranceId];
   }
 
-  private async getFragranceRemainingPercent(fragranceId: string): Promise<CharacteristicValue> {
-    const match = this.getFragranceBay(fragranceId);
-    const remainingPercent = this.resolveFragranceRemainingPercent(fragranceId, match?.bay);
-    if (!match || remainingPercent === undefined || this.isDeviceUnavailable()) {
-      throw new this.platform.api.hap.HapStatusError(
-        this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-      );
+  private updateFragranceRemainingStatus(fragranceId: string, fragranceName: string, bay?: PuraBay) {
+    if (!bay) {
+      return;
     }
-    return remainingPercent;
-  }
-
-  private async getFragranceChangeIndication(fragranceId: string): Promise<CharacteristicValue> {
-    const match = this.getFragranceBay(fragranceId);
-    const remainingPercent = this.resolveFragranceRemainingPercent(fragranceId, match?.bay);
-    if (!match || remainingPercent === undefined || this.isDeviceUnavailable()) {
-      throw new this.platform.api.hap.HapStatusError(
-        this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-      );
+    const remainingPercent = this.resolveFragranceRemainingPercent(fragranceId, bay);
+    if (remainingPercent === undefined) {
+      return;
     }
-    return match.bay.lowFragrance || remainingPercent <= 10
-      ? this.platform.Characteristic.FilterChangeIndication.CHANGE_FILTER
-      : this.platform.Characteristic.FilterChangeIndication.FILTER_OK;
+    const logged = this.accessory.context.loggedFragranceRemainingLevels;
+    const previousLevels = logged && typeof logged === 'object' && !Array.isArray(logged)
+      ? logged as Record<string, unknown>
+      : {};
+    if (previousLevels[fragranceId] === remainingPercent) {
+      return;
+    }
+    previousLevels[fragranceId] = remainingPercent;
+    this.accessory.context.loggedFragranceRemainingLevels = previousLevels;
+    this.platform.log.info(
+      `${this.getDiffuserLogLabel()} fragrance ${fragranceName} remaining: ${remainingPercent}%.`,
+    );
   }
 
   private getStoredFragranceIntensities(): Record<string, number> {
@@ -527,26 +536,9 @@ export class PuraPlatformAccessory {
         );
       }
     }
-    for (const [fragranceId, service] of this.fragranceRemainingServices) {
+    for (const [fragranceId, fragranceName] of Object.entries(this.getKnownFragrances())) {
       const match = this.getFragranceBay(fragranceId);
-      const remainingPercent = this.resolveFragranceRemainingPercent(fragranceId, match?.bay);
-      if (remainingPercent !== undefined) {
-        service.updateCharacteristic(this.platform.Characteristic.FilterLifeLevel, remainingPercent);
-        service.updateCharacteristic(
-          this.platform.Characteristic.FilterChangeIndication,
-          match?.bay.lowFragrance || remainingPercent <= 10
-            ? this.platform.Characteristic.FilterChangeIndication.CHANGE_FILTER
-            : this.platform.Characteristic.FilterChangeIndication.FILTER_OK,
-        );
-      }
-      if (service.testCharacteristic(this.platform.Characteristic.StatusFault)) {
-        service.updateCharacteristic(
-          this.platform.Characteristic.StatusFault,
-          match && remainingPercent !== undefined && !this.isDeviceUnavailable()
-            ? this.platform.Characteristic.StatusFault.NO_FAULT
-            : this.platform.Characteristic.StatusFault.GENERAL_FAULT,
-        );
-      }
+      this.updateFragranceRemainingStatus(fragranceId, fragranceName, match?.bay);
     }
   }
 
