@@ -3,6 +3,11 @@ import WebSocket from 'ws';
 
 import { PuraPlatformAccessory } from './platformAccessory.js';
 import { PuraNightlightAccessory } from './nightlightAccessory.js';
+import {
+  FragranceAccessoryContext,
+  PuraFragranceAccessory,
+  PuraFragranceController,
+} from './fragranceAccessory.js';
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
 import { PuraApi } from './puraApi.js';
 import { PuraDevice, PuraConfig } from './puraTypes.js';
@@ -11,10 +16,17 @@ import { fetchLatestCognitoConfig } from './pypuraLookup.js';
 type DiffuserAccessory = PlatformAccessory & {
   context: {
     device: PuraDevice;
-    accessoryType?: 'diffuser' | 'nightlight';
+    accessoryType?: 'diffuser' | 'nightlight' | 'fragrance';
     serviceMode?: 'switch' | 'fan';
+    parentDeviceId?: string;
+    fragranceId?: string;
+    fragranceName?: string;
+    rememberedIntensity?: number;
+    remainingPercent?: number;
+    loggedRemainingPercent?: number;
+    lowFragrance?: boolean;
   };
-  handler?: PuraPlatformAccessory | PuraNightlightAccessory;
+  handler?: PuraPlatformAccessory | PuraNightlightAccessory | PuraFragranceAccessory;
 };
 
 /**
@@ -58,6 +70,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   private realtimeConnectionAnnounced = false;
   private disabledDueToConfig = false;
   private preservingAccessoriesDueToDegradedDiscovery = false;
+  private readonly fragranceControllers = new Map<string, PuraFragranceController>();
 
   constructor(
     public readonly log: Logging,
@@ -299,13 +312,161 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     this.log.debug('Registering device:', device.name, device.id);
 
     const uuids: string[] = [];
-    uuids.push(await this.registerDiffuserAccessory(device));
+    if (this.shouldUseFirstClassFragranceAccessories(device)) {
+      for (const [fragranceId, fragranceName] of this.getKnownFragrances(device)) {
+        uuids.push(await this.registerFragranceAccessory(device, fragranceId, fragranceName));
+      }
+    } else {
+      uuids.push(await this.registerDiffuserAccessory(device));
+    }
     if (this.shouldUseSeparateNightlightAccessory() && this.supportsNightlightAccessory(device)) {
       uuids.push(await this.registerNightlightAccessory(device));
     } else {
       this.unregisterNightlightAccessory(device.id);
     }
     return uuids;
+  }
+
+  private shouldUseFirstClassFragranceAccessories(device: PuraDevice): boolean {
+    if (!this.puraConfig.enableFragranceControls) {
+      return false;
+    }
+    // Bound nightlight control currently lives on the generic diffuser tile.
+    // Retain that representation on models that support it rather than silently
+    // dropping an enabled nightlight while introducing fragrance accessories.
+    if (this.puraConfig.enableNightlightAccessory && this.supportsNightlightAccessory(device)) {
+      return false;
+    }
+    const model = device.type?.toLowerCase() ?? '';
+    const raw = device.__raw as Record<string, unknown> | undefined;
+    const hwVersion = typeof raw?.hwVersion === 'string' ? raw.hwVersion : '';
+    const hardwareMajor = Number(hwVersion.split('.')[0]);
+    return model.includes('plus') || hardwareMajor === 22 || Boolean(device.bay1 && device.bay2);
+  }
+
+  private getKnownFragrances(device: PuraDevice): Map<string, string> {
+    const known = new Map<string, string>();
+    for (const bay of [device.bay1, device.bay2]) {
+      if (bay?.fragrance?.id && bay.fragrance.name) {
+        known.set(bay.fragrance.id, bay.fragrance.name);
+      }
+    }
+    for (const accessory of this.accessories.values()) {
+      const context = accessory.context as Record<string, unknown>;
+      const cachedDevice = context.device as PuraDevice | undefined;
+      if (cachedDevice?.id !== device.id && context.parentDeviceId !== device.id) {
+        continue;
+      }
+      if (context.accessoryType === 'fragrance') {
+        const id = typeof context.fragranceId === 'string' ? context.fragranceId : '';
+        const name = typeof context.fragranceName === 'string' ? context.fragranceName : '';
+        if (id && name) {
+          known.set(id, name);
+        }
+      }
+      const legacy = context.knownFragrances;
+      if (legacy && typeof legacy === 'object' && !Array.isArray(legacy)) {
+        for (const [id, name] of Object.entries(legacy as Record<string, unknown>)) {
+          if (id && typeof name === 'string' && name.trim()) {
+            known.set(id, name.trim());
+          }
+        }
+      }
+    }
+    return known;
+  }
+
+  private getFragranceUniqueId(deviceId: string, fragranceId: string): string {
+    return `${deviceId}-fragrance-${fragranceId}`;
+  }
+
+  private getFragranceController(device: PuraDevice): PuraFragranceController {
+    let controller = this.fragranceControllers.get(device.id);
+    if (!controller) {
+      controller = new PuraFragranceController(this, this.puraApi, device);
+      this.fragranceControllers.set(device.id, controller);
+    } else {
+      controller.updateDevice(device);
+    }
+    return controller;
+  }
+
+  private getLegacyFragranceValue(deviceId: string, key: 'fragranceIntensities' | 'fragranceRemainingLevels', fragranceId: string) {
+    for (const accessory of this.accessories.values()) {
+      const context = accessory.context as Record<string, unknown>;
+      const cachedDevice = context.device as PuraDevice | undefined;
+      if (cachedDevice?.id !== deviceId) {
+        continue;
+      }
+      const values = context[key];
+      if (values && typeof values === 'object' && !Array.isArray(values)) {
+        const value = (values as Record<string, unknown>)[fragranceId];
+        if (value !== null && value !== undefined && !(typeof value === 'string' && value.trim() === '')) {
+          const numeric = Number(value);
+          if (Number.isFinite(numeric)) {
+            return numeric;
+          }
+        }
+      }
+    }
+    return undefined;
+  }
+
+  private async registerFragranceAccessory(
+    device: PuraDevice,
+    fragranceId: string,
+    fragranceName: string,
+  ): Promise<string> {
+    const uuid = this.api.hap.uuid.generate(this.getFragranceUniqueId(device.id, fragranceId));
+    const controller = this.getFragranceController(device);
+    let accessory = this.accessories.get(uuid) as DiffuserAccessory | undefined;
+    if (!accessory) {
+      this.log.info('Adding new fragrance accessory:', fragranceName);
+      accessory = new this.api.platformAccessory(
+        fragranceName,
+        uuid,
+        this.api.hap.Categories.FAN,
+      ) as DiffuserAccessory;
+      accessory.context.device = device;
+      accessory.context.accessoryType = 'fragrance';
+      accessory.context.parentDeviceId = device.id;
+      accessory.context.fragranceId = fragranceId;
+      accessory.context.fragranceName = fragranceName;
+      accessory.context.rememberedIntensity = this.getLegacyFragranceValue(
+        device.id,
+        'fragranceIntensities',
+        fragranceId,
+      );
+      accessory.context.remainingPercent = this.getLegacyFragranceValue(
+        device.id,
+        'fragranceRemainingLevels',
+        fragranceId,
+      );
+      accessory.handler = new PuraFragranceAccessory(
+        this,
+        accessory as PlatformAccessory & { context: FragranceAccessoryContext },
+        controller,
+      );
+      this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+      this.accessories.set(uuid, accessory);
+    } else {
+      accessory.context.device = device;
+      accessory.context.accessoryType = 'fragrance';
+      accessory.context.parentDeviceId = device.id;
+      accessory.context.fragranceId = fragranceId;
+      accessory.context.fragranceName = fragranceName;
+      if (!accessory.handler) {
+        accessory.handler = new PuraFragranceAccessory(
+          this,
+          accessory as PlatformAccessory & { context: FragranceAccessoryContext },
+          controller,
+        );
+      } else {
+        accessory.handler.updateDevice(device);
+      }
+      this.api.updatePlatformAccessories([accessory]);
+    }
+    return uuid;
   }
 
   private shouldUseSeparateNightlightAccessory(): boolean {
@@ -424,6 +585,10 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   private removeStaleAccessories(discoveredUuids: Set<string>) {
     for (const [uuid, accessory] of this.accessories) {
       if (!discoveredUuids.has(uuid)) {
+        const context = accessory.context as Record<string, unknown>;
+        if (context.accessoryType === 'fragrance' && typeof context.parentDeviceId === 'string') {
+          this.fragranceControllers.get(context.parentDeviceId)?.detach(String(context.fragranceId ?? ''));
+        }
         this.log.info('Removing existing accessory from cache:', accessory.displayName);
         this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
         this.accessories.delete(uuid);
@@ -437,14 +602,9 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     }
     const discoveredUuids = new Set<string>();
     for (const device of devices) {
-      const diffuserUuid = this.api.hap.uuid.generate(this.getDiffuserUniqueId(device.id));
-      discoveredUuids.add(diffuserUuid);
-      if (this.shouldUseSeparateNightlightAccessory() && this.supportsNightlightAccessory(device)) {
-        const nightlightUuid = this.api.hap.uuid.generate(`${device.id}-nightlight`);
-        discoveredUuids.add(nightlightUuid);
-      }
-      if (!this.accessories.has(diffuserUuid)) {
-        await this.registerDevice(device);
+      const uuids = await this.registerDevice(device);
+      for (const uuid of uuids) {
+        discoveredUuids.add(uuid);
       }
     }
     this.removeStaleAccessories(discoveredUuids);
@@ -809,8 +969,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       return false;
     }
 
-    void this.updateDiffuserAccessory(normalized);
-    void this.updateNightlightAccessory(normalized);
+    void this.updateDeviceAccessories(normalized);
     return true;
   }
 
@@ -992,8 +1151,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       await this.reconcileDiscoveredDevices(devices);
       
       for (const device of devices) {
-        await this.updateDiffuserAccessory(device);
-        await this.updateNightlightAccessory(device);
+        await this.updateDeviceAccessories(device);
       }
       this.lastRefreshAt = Date.now();
     } catch (error) {
@@ -1006,8 +1164,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
             const devices = await this.puraApi.getDevices();
             await this.reconcileDiscoveredDevices(devices);
             for (const device of devices) {
-              await this.updateDiffuserAccessory(device);
-              await this.updateNightlightAccessory(device);
+              await this.updateDeviceAccessories(device);
             }
             this.lastRefreshAt = Date.now();
           } catch (retryError) {
@@ -1046,6 +1203,19 @@ export class PuraPlatform implements DynamicPlatformPlugin {
         handler.updateDevice(device);
       }
     }
+  }
+
+  private async updateFragranceAccessories(device: PuraDevice) {
+    const controller = this.fragranceControllers.get(device.id);
+    if (controller) {
+      controller.updateDevice(device);
+    }
+  }
+
+  private async updateDeviceAccessories(device: PuraDevice) {
+    await this.updateDiffuserAccessory(device);
+    await this.updateFragranceAccessories(device);
+    await this.updateNightlightAccessory(device);
   }
 
   private async updateNightlightAccessory(device: PuraDevice) {

@@ -30,6 +30,7 @@
   "scripts": {
     "build": "node scripts/clean-dist.js && tsc",
     "lint": "eslint . --max-warnings=0",
+    "test:fragrance": "npm run build && node scripts/test-fragrance-accessories.js",
     "prepublishOnly": "npm run lint && npm run build",
     "watch": "npm run build && npm link && nodemon"
   },

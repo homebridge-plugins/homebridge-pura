@@ -9,7 +9,7 @@ By default this plugin exposes a single on/off switch per diffuser. It’s desig
 You can optionally enable:
 - Intensity Control: fan-style accessory with Subtle/Medium/Strong intensity levels.
 - Nightlight Control: supports on/off, Brightness (snapped to Pura's 10-step brightness levels), and color for compatible diffusers.
-- Fragrance Controls: one fan-style service per discovered fragrance, with explicit fragrance selection and independent intensity.
+- Fragrance Controls: one first-class fan-style accessory per discovered fragrance, with explicit fragrance selection, independent intensity, and visible vial remaining.
 
 ## Supported Diffusers
 This plugin has been designed and tested for the following diffusers.
@@ -55,7 +55,7 @@ Add the following platform to your `config.json`:
 - **forceNightlightOff**: Pura turns the nightlight on/off with the diffuser. If enabled, the plugin sends a nightlight-off command right after turning on a diffuser. (default: false)
 - **enableFanService (Enable Intensity Control)**: Replaces the on/off switch with a fan accessory to control intensity (Subtle, Medium, Strong). For multi-bay diffusers, HomeKit intensity changes are applied across available bays to keep auto-alternate behavior consistent unless Fragrance Controls are enabled. (default: false)
 - **enableNightlightAccessory**: Enables nightlight controls (On/Brightness/Color) for compatible diffusers. (default: false)
-- **enableFragranceControls**: Adds one fan-style HomeKit service per discovered fragrance. Services use the Pura fragrance ID for stable identity, follow a fragrance if it moves between bays, select that fragrance when activated, and retain an independent Subtle/Medium/Strong intensity. (default: false)
+- **enableFragranceControls**: On supported multi-bay diffusers, replaces the generic diffuser control with one fan-style HomeKit accessory per discovered fragrance. Accessories use the Pura fragrance ID for stable identity, follow a fragrance if it moves between bays, select that fragrance when activated, retain an independent Subtle/Medium/Strong intensity, and visibly report vial remaining through a linked Battery service. Single-bay and unsupported devices retain the generic diffuser representation. (default: false)
 
 ## Usage
 
@@ -72,9 +72,9 @@ Switching accessory types will require recreating HomeKit scenes and automations
 
 If `enableNightlightAccessory` is set to `true`, compatible diffusers expose nightlight controls.
 
-If `enableFragranceControls` is set to `true`, each discovered fragrance is exposed as a separate fan-style service named for the installed scent. Activating a fragrance selects its current bay and disables the other fragrance service. This allows HomeKit scenes and schedules to intentionally alternate fragrances without relying on the Pura app's last-selected bay. A fragrance service is keyed by the Pura fragrance ID rather than its bay, so its HomeKit identity remains stable if the vial is moved. Previously discovered fragrances remain available for automations and report unavailable when the vial is not installed.
+If `enableFragranceControls` is set to `true` on a supported multi-bay diffuser, each discovered fragrance is exposed as its own bridged fan-style accessory named for the installed scent. The generic diffuser accessory is suppressed so a two-fragrance device presents two useful HomeKit controls rather than three. Activating a fragrance selects its current bay and turns the other fragrance accessory off. This allows HomeKit scenes and schedules to intentionally alternate fragrances without relying on the Pura app's last-selected bay. A fragrance accessory is keyed by the Pura fragrance ID rather than its bay, so its HomeKit identity remains stable if the vial is moved. Previously discovered fragrances remain available for automations and report unavailable when the vial is not installed.
 
-The plugin records Pura's remaining percentage by stable fragrance ID and reports changes in the Homebridge log. It also exposes each vial's remaining level through a linked HomeKit Battery service (for example, `Salt Remaining`). This is an intentional HomeKit UI abstraction: `BatteryLevel` represents Pura's vial/refill remaining percentage, while `StatusLowBattery` represents Pura's low-fragrance warning. The value follows the fragrance ID if a vial moves between bays.
+The plugin stores each fragrance accessory's Pura-reported remaining percentage in that fragrance's own accessory context. It exposes the value through a linked HomeKit Battery service (for example, `Salt Remaining`). This is an intentional HomeKit UI abstraction: `BatteryLevel` represents Pura's vial/refill remaining percentage, while `StatusLowBattery` represents Pura's low-fragrance warning. Giving each fragrance its own bridged accessory also avoids Apple Home conflating multiple Battery services attached to one accessory. The value follows the fragrance ID if a vial moves between bays.
 
 Fragrance controls use the same intensity mapping as the diffuser fan service:
 - Subtle: 30
@@ -92,7 +92,7 @@ The Pura API exposes one active fragrance at a time. "Independent intensity" the
   - Brightness (snapped to Pura's 10-step brightness levels)
   - Color (Hue/Saturation)
 - **Fragrance Controls (optional)**:
-  - Select a fragrance by turning on its named service
+  - Select a fragrance by turning on its named accessory
   - Set a remembered Subtle/Medium/Strong intensity per fragrance
   - View Pura-reported vial remaining as a battery-style percentage and in the Homebridge log
   - Alternate fragrances using ordinary HomeKit scenes or schedules
@@ -105,7 +105,7 @@ The plugin will automatically:
   - Switch by default
   - Intensity control accessory when `enableFanService=true`
 - Optionally add nightlight controls on compatible models when enabled
-- Optionally add stable fragrance-specific controls for installed vials when enabled
+- Optionally replace a supported multi-bay diffuser tile with stable, first-class fragrance accessories when enabled
 - Update device status via realtime updates with a 5-minute polling fallback (15s when realtime is down)
 - Handle authentication and token refresh (including periodic Cognito refresh polling)
 

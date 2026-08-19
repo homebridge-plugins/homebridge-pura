@@ -11,8 +11,6 @@ import { PuraConfig, PuraDevice, PuraBay } from './puraTypes.js';
 export class PuraPlatformAccessory {
   private service: Service;
   private nightlightService?: Service;
-  private fragranceServices = new Map<string, Service>();
-  private fragranceRemainingServices = new Map<string, Service>();
   private device: PuraDevice;
   private useFanService: boolean;
   private enableBoundNightlightService: boolean;
@@ -132,10 +130,7 @@ export class PuraPlatformAccessory {
       this.service = switchService || this.accessory.addService(this.platform.Service.Switch);
     }
 
-    this.setHomeKitServiceName(
-      this.service,
-      this.isFragranceControlEnabled() ? 'Pura' : accessory.displayName,
-    );
+    this.setHomeKitServiceName(this.service, accessory.displayName);
 
     const activeCharacteristic = this.useFanService
       ? this.platform.Characteristic.Active
@@ -206,14 +201,6 @@ export class PuraPlatformAccessory {
     return Boolean((this.platform.config as PuraConfig).enableFragranceControls ?? false);
   }
 
-  private getFragranceServiceSubtype(fragranceId: string): string {
-    return `fragrance-${fragranceId}`;
-  }
-
-  private getFragranceRemainingServiceSubtype(fragranceId: string): string {
-    return `fragrance-${fragranceId}-remaining`;
-  }
-
   private setHomeKitServiceName(service: Service, name: string) {
     service.displayName = name;
     service.setCharacteristic(this.platform.Characteristic.Name, name);
@@ -221,394 +208,19 @@ export class PuraPlatformAccessory {
     service.setCharacteristic(this.platform.Characteristic.ConfiguredName, name);
   }
 
-  private getKnownFragrances(): Record<string, string> {
-    const stored = this.accessory.context.knownFragrances;
-    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
-      return {};
-    }
-    return Object.fromEntries(
-      Object.entries(stored as Record<string, unknown>)
-        .filter(([id, name]) => id.trim() && typeof name === 'string' && name.trim())
-        .map(([id, name]) => [id, String(name).trim()]),
-    );
-  }
-
   private configureFragranceServices() {
     const subtypePrefix = 'fragrance-';
-    // Apple Home does not render FilterMaintenance when it is linked to a fan-style
-    // fragrance control. Remove services created by earlier versions rather than
-    // publishing technically valid but invisible HomeKit state.
+    // Fragrances are now first-class platform accessories. Remove services
+    // published by earlier PR revisions rather than nesting them here again.
     for (const service of [...this.accessory.services]) {
       if (
         service.subtype?.startsWith(subtypePrefix)
-        && service.UUID === this.platform.Service.FilterMaintenance.UUID
+        && (service.UUID === this.platform.Service.FilterMaintenance.UUID
+          || service.UUID === this.platform.Service.Fanv2.UUID
+          || service.UUID === this.platform.Service.Battery.UUID)
       ) {
         this.accessory.removeService(service);
       }
-    }
-    if (!this.isFragranceControlEnabled()) {
-      for (const service of [...this.accessory.services]) {
-        if (
-          service.subtype?.startsWith(subtypePrefix)
-          && (service.UUID === this.platform.Service.Fanv2.UUID
-            || service.UUID === this.platform.Service.Battery.UUID)
-        ) {
-          this.accessory.removeService(service);
-        }
-      }
-      this.fragranceServices.clear();
-      this.fragranceRemainingServices.clear();
-      return;
-    }
-
-    const known = this.getKnownFragrances();
-    for (const bay of [this.device.bay1, this.device.bay2]) {
-      const fragrance = bay?.fragrance;
-      if (fragrance?.id && fragrance.name) {
-        known[fragrance.id] = fragrance.name;
-      }
-    }
-    this.accessory.context.knownFragrances = known;
-
-    for (const [fragranceId, fragranceName] of Object.entries(known)) {
-      const subtype = this.getFragranceServiceSubtype(fragranceId);
-      let service = this.fragranceServices.get(fragranceId);
-      if (!service) {
-        service = this.accessory.getServiceById(this.platform.Service.Fanv2, subtype)
-          || this.accessory.addService(this.platform.Service.Fanv2, fragranceName, subtype);
-        service.getCharacteristic(this.platform.Characteristic.Active)
-          .onSet((value) => this.setFragranceActive(fragranceId, value))
-          .onGet(() => this.getFragranceActive(fragranceId));
-        service.getCharacteristic(this.platform.Characteristic.RotationSpeed)
-          .setProps({ minValue: 0, maxValue: 100, minStep: 1 })
-          .onSet((value) => this.setFragranceRotationSpeed(fragranceId, value))
-          .onGet(() => this.getFragranceRotationSpeed(fragranceId));
-        this.fragranceServices.set(fragranceId, service);
-      }
-      this.setHomeKitServiceName(service, fragranceName);
-
-      const remainingSubtype = this.getFragranceRemainingServiceSubtype(fragranceId);
-      let remainingService = this.fragranceRemainingServices.get(fragranceId);
-      if (!remainingService) {
-        const remainingName = `${fragranceName} Remaining`;
-        remainingService = this.accessory.getServiceById(this.platform.Service.Battery, remainingSubtype)
-          || this.accessory.addService(this.platform.Service.Battery, remainingName, remainingSubtype);
-        remainingService.getCharacteristic(this.platform.Characteristic.BatteryLevel)
-          .onGet(() => this.getFragranceRemainingPercent(fragranceId));
-        remainingService.getCharacteristic(this.platform.Characteristic.StatusLowBattery)
-          .onGet(() => this.getFragranceLowStatus(fragranceId));
-        remainingService.getCharacteristic(this.platform.Characteristic.ChargingState)
-          .onGet(() => this.platform.Characteristic.ChargingState.NOT_CHARGEABLE);
-        this.fragranceRemainingServices.set(fragranceId, remainingService);
-        service.addLinkedService(remainingService);
-      }
-      this.setHomeKitServiceName(remainingService, `${fragranceName} Remaining`);
-      this.updateFragranceRemainingStatus(fragranceId, fragranceName, this.getFragranceBay(fragranceId)?.bay);
-    }
-    this.applyFragranceStates();
-  }
-
-  private getFragranceBay(fragranceId: string): { number: 1 | 2; bay: PuraBay } | undefined {
-    if (this.device.bay1?.fragrance?.id === fragranceId) {
-      return { number: 1, bay: this.device.bay1 };
-    }
-    if (this.device.bay2?.fragrance?.id === fragranceId) {
-      return { number: 2, bay: this.device.bay2 };
-    }
-    return undefined;
-  }
-
-  private getStoredFragranceRemainingLevels(): Record<string, number> {
-    const stored = this.accessory.context.fragranceRemainingLevels;
-    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
-      return {};
-    }
-    const normalized: Record<string, number> = {};
-    for (const [id, value] of Object.entries(stored as Record<string, unknown>)) {
-      if (value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) {
-        continue;
-      }
-      const numericValue = Number(value);
-      if (Number.isFinite(numericValue)) {
-        normalized[id] = Math.max(0, Math.min(100, numericValue));
-      }
-    }
-    return normalized;
-  }
-
-  private storeFragranceRemainingLevel(fragranceId: string, remainingPercent: number) {
-    const stored = this.getStoredFragranceRemainingLevels();
-    stored[fragranceId] = Math.max(0, Math.min(100, remainingPercent));
-    this.accessory.context.fragranceRemainingLevels = stored;
-  }
-
-  private resolveFragranceRemainingPercent(fragranceId: string, bay?: PuraBay): number | undefined {
-    const reportedValue: unknown = bay?.remainingPercent;
-    if (
-      reportedValue === null
-      || reportedValue === undefined
-      || (typeof reportedValue === 'string' && reportedValue.trim() === '')
-    ) {
-      return this.getStoredFragranceRemainingLevels()[fragranceId];
-    }
-    const reported = Number(reportedValue);
-    if (Number.isFinite(reported)) {
-      const normalized = Math.max(0, Math.min(100, reported));
-      this.storeFragranceRemainingLevel(fragranceId, normalized);
-      return normalized;
-    }
-    return this.getStoredFragranceRemainingLevels()[fragranceId];
-  }
-
-  private updateFragranceRemainingStatus(fragranceId: string, fragranceName: string, bay?: PuraBay) {
-    if (!bay) {
-      return;
-    }
-    const remainingPercent = this.resolveFragranceRemainingPercent(fragranceId, bay);
-    if (remainingPercent === undefined) {
-      return;
-    }
-    const logged = this.accessory.context.loggedFragranceRemainingLevels;
-    const previousLevels = logged && typeof logged === 'object' && !Array.isArray(logged)
-      ? logged as Record<string, unknown>
-      : {};
-    if (previousLevels[fragranceId] === remainingPercent) {
-      return;
-    }
-    previousLevels[fragranceId] = remainingPercent;
-    this.accessory.context.loggedFragranceRemainingLevels = previousLevels;
-    this.platform.log.info(
-      `${this.getDiffuserLogLabel()} fragrance ${fragranceName} remaining: ${remainingPercent}%.`,
-    );
-  }
-
-  private async getFragranceRemainingPercent(fragranceId: string): Promise<CharacteristicValue> {
-    const match = this.getFragranceBay(fragranceId);
-    const remainingPercent = this.resolveFragranceRemainingPercent(fragranceId, match?.bay);
-    if (!match || remainingPercent === undefined || this.isDeviceUnavailable()) {
-      throw new this.platform.api.hap.HapStatusError(
-        this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-      );
-    }
-    return remainingPercent;
-  }
-
-  private async getFragranceLowStatus(fragranceId: string): Promise<CharacteristicValue> {
-    const match = this.getFragranceBay(fragranceId);
-    if (!match || this.isDeviceUnavailable()) {
-      throw new this.platform.api.hap.HapStatusError(
-        this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-      );
-    }
-    return match.bay.lowFragrance
-      ? this.platform.Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW
-      : this.platform.Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL;
-  }
-
-  private getStoredFragranceIntensities(): Record<string, number> {
-    const stored = this.accessory.context.fragranceIntensities;
-    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
-      return {};
-    }
-    const normalized: Record<string, number> = {};
-    for (const [id, value] of Object.entries(stored as Record<string, unknown>)) {
-      const numericValue = Number(value);
-      if (Number.isFinite(numericValue) && numericValue > 0) {
-        normalized[id] = numericValue;
-      }
-    }
-    return normalized;
-  }
-
-  private getStoredFragranceIntensity(fragranceId: string, bay?: PuraBay): number {
-    const stored = this.getStoredFragranceIntensities()[fragranceId];
-    const reported = Number(bay?.intensity);
-    const fallback = Number.isFinite(reported) && reported > 0 ? reported : 60;
-    return Math.max(1, Math.min(100, stored ?? fallback));
-  }
-
-  private storeFragranceIntensity(fragranceId: string, intensity: number) {
-    const stored = this.getStoredFragranceIntensities();
-    stored[fragranceId] = Math.max(1, Math.min(100, intensity));
-    this.accessory.context.fragranceIntensities = stored;
-  }
-
-  private isFragranceActive(fragranceId: string): boolean {
-    const match = this.getFragranceBay(fragranceId);
-    return Boolean(match?.bay.active);
-  }
-
-  private async activateFragrance(fragranceId: string, intensity: number): Promise<void> {
-    const match = this.getFragranceBay(fragranceId);
-    if (!match || this.isDeviceUnavailable()) {
-      this.applyFragranceStates();
-      throw new this.platform.api.hap.HapStatusError(
-        this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-      );
-    }
-
-    const normalizedIntensity = Math.max(1, Math.min(100, intensity));
-    this.platform.recordIntent(this.device.id, true);
-    if (this.shouldResetAwayModeBeforeActivating()) {
-      await this.puraApi.setAwayMode(this.device.id, false);
-    }
-    const selected = await this.puraApi.setAlwaysOn(this.device.id, match.number);
-    const controller = this.device.controller || 'default';
-    const adjusted = selected && await this.puraApi.setIntensity(
-      this.device.id,
-      match.number,
-      normalizedIntensity,
-      controller,
-    );
-    if (!adjusted) {
-      this.applyFragranceStates();
-      throw new this.platform.api.hap.HapStatusError(
-        this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-      );
-    }
-
-    this.device = {
-      ...this.device,
-      bay1: this.device.bay1
-        ? { ...this.device.bay1, active: match.number === 1, intensity: match.number === 1 ? normalizedIntensity : this.device.bay1.intensity }
-        : undefined,
-      bay2: this.device.bay2
-        ? { ...this.device.bay2, active: match.number === 2, intensity: match.number === 2 ? normalizedIntensity : this.device.bay2.intensity }
-        : undefined,
-    };
-    this.accessory.context.device = this.device;
-    this.currentStateActive = true;
-    this.accessory.context.lastBay = match.number;
-    this.accessory.context.lastIntensity = normalizedIntensity;
-    this.storeFragranceIntensity(fragranceId, normalizedIntensity);
-    this.pendingIntensityIntent = {
-      at: Date.now(),
-      ttlMs: 15000,
-      intensity: normalizedIntensity,
-      bay: match.number,
-    };
-    this.recentIntensityHold = { until: Date.now() + 15000, level: normalizedIntensity };
-    this.applyCurrentState();
-    this.applyFragranceStates();
-    this.platform.requestRefreshSoon(2000);
-    this.platform.log.info(
-      `${this.getDiffuserLogLabel()} selected fragrance ${match.bay.fragrance?.name ?? fragranceId} ` +
-      `at intensity ${normalizedIntensity} (${this.describeIntensityLevel(normalizedIntensity)}).`,
-    );
-  }
-
-  private async setFragranceActive(fragranceId: string, value: CharacteristicValue) {
-    await this.enqueueRotationWrite(async () => {
-      const isOn = value === this.platform.Characteristic.Active.ACTIVE;
-      if (isOn) {
-        const match = this.getFragranceBay(fragranceId);
-        await this.activateFragrance(fragranceId, this.getStoredFragranceIntensity(fragranceId, match?.bay));
-        return;
-      }
-      if (!this.isFragranceActive(fragranceId)) {
-        this.applyFragranceStates();
-        return;
-      }
-      this.platform.recordIntent(this.device.id, false);
-      if (!await this.puraApi.stopAll(this.device.id)) {
-        this.applyFragranceStates();
-        throw new this.platform.api.hap.HapStatusError(
-          this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-        );
-      }
-      this.currentStateActive = false;
-      this.pendingIntensityIntent = undefined;
-      if (this.device.bay1) {
-        this.device.bay1 = { ...this.device.bay1, active: false, intensity: 0 };
-      }
-      if (this.device.bay2) {
-        this.device.bay2 = { ...this.device.bay2, active: false, intensity: 0 };
-      }
-      this.applyCurrentState();
-      this.applyFragranceStates();
-      this.platform.requestRefreshSoon(2000);
-    });
-  }
-
-  private async getFragranceActive(fragranceId: string): Promise<CharacteristicValue> {
-    if (!this.getFragranceBay(fragranceId) || this.isDeviceUnavailable()) {
-      throw new this.platform.api.hap.HapStatusError(
-        this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-      );
-    }
-    return this.isFragranceActive(fragranceId)
-      ? this.platform.Characteristic.Active.ACTIVE
-      : this.platform.Characteristic.Active.INACTIVE;
-  }
-
-  private async setFragranceRotationSpeed(fragranceId: string, value: CharacteristicValue) {
-    const mappedIntensity = this.mapRotationToIntensity(Number(value));
-    if (mappedIntensity <= 0) {
-      await this.setFragranceActive(fragranceId, this.platform.Characteristic.Active.INACTIVE);
-      return;
-    }
-    this.storeFragranceIntensity(fragranceId, mappedIntensity);
-    await this.enqueueRotationWrite(() => this.activateFragrance(fragranceId, mappedIntensity));
-  }
-
-  private async getFragranceRotationSpeed(fragranceId: string): Promise<CharacteristicValue> {
-    const match = this.getFragranceBay(fragranceId);
-    if (!match || this.isDeviceUnavailable()) {
-      throw new this.platform.api.hap.HapStatusError(
-        this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-      );
-    }
-    return this.mapIntensityToRotation(this.getStoredFragranceIntensity(fragranceId, match.bay));
-  }
-
-  private applyFragranceStates() {
-    for (const [fragranceId, service] of this.fragranceServices) {
-      const match = this.getFragranceBay(fragranceId);
-      const installed = Boolean(match);
-      const active = installed && Boolean(match?.bay.active);
-      service.updateCharacteristic(
-        this.platform.Characteristic.Active,
-        active ? this.platform.Characteristic.Active.ACTIVE : this.platform.Characteristic.Active.INACTIVE,
-      );
-      service.updateCharacteristic(
-        this.platform.Characteristic.RotationSpeed,
-        this.mapIntensityToRotation(this.getStoredFragranceIntensity(fragranceId, match?.bay)),
-      );
-      if (service.testCharacteristic(this.platform.Characteristic.StatusFault)) {
-        service.updateCharacteristic(
-          this.platform.Characteristic.StatusFault,
-          installed && !this.isDeviceUnavailable()
-            ? this.platform.Characteristic.StatusFault.NO_FAULT
-            : this.platform.Characteristic.StatusFault.GENERAL_FAULT,
-        );
-      }
-    }
-    for (const [fragranceId, fragranceName] of Object.entries(this.getKnownFragrances())) {
-      const match = this.getFragranceBay(fragranceId);
-      const remainingService = this.fragranceRemainingServices.get(fragranceId);
-      const remainingPercent = this.resolveFragranceRemainingPercent(fragranceId, match?.bay);
-      if (remainingService && remainingPercent !== undefined) {
-        remainingService.updateCharacteristic(this.platform.Characteristic.BatteryLevel, remainingPercent);
-        remainingService.updateCharacteristic(
-          this.platform.Characteristic.StatusLowBattery,
-          match?.bay.lowFragrance
-            ? this.platform.Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW
-            : this.platform.Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL,
-        );
-        remainingService.updateCharacteristic(
-          this.platform.Characteristic.ChargingState,
-          this.platform.Characteristic.ChargingState.NOT_CHARGEABLE,
-        );
-        if (remainingService.testCharacteristic(this.platform.Characteristic.StatusFault)) {
-          remainingService.updateCharacteristic(
-            this.platform.Characteristic.StatusFault,
-            match && !this.isDeviceUnavailable()
-              ? this.platform.Characteristic.StatusFault.NO_FAULT
-              : this.platform.Characteristic.StatusFault.GENERAL_FAULT,
-          );
-        }
-      }
-      this.updateFragranceRemainingStatus(fragranceId, fragranceName, match?.bay);
     }
   }
 
@@ -622,7 +234,6 @@ export class PuraPlatformAccessory {
       }
     }
     this.applyCurrentState();
-    this.applyFragranceStates();
     this.applyNightlightState();
     this.updateFaultState();
   }
