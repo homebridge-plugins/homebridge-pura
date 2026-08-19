@@ -1639,6 +1639,14 @@ export class PuraPlatformAccessory {
       }
     }
 
+    // Explicit fragrance controls intentionally replace Pura's automatic bay alternation.
+    // Recommending Auto-alternate in that mode is contradictory and can undo the user's
+    // deliberate fragrance selection.
+    if (this.isFragranceControlEnabled()) {
+      this.lastAutoAlternativeOffState = false;
+      return;
+    }
+
     const autoAlternativeLikelyOff = this.isAutoAlternativeLikelyOff(device);
     if (autoAlternativeLikelyOff !== this.lastAutoAlternativeOffState) {
       const isInitialLog = this.lastAutoAlternativeOffState === null;

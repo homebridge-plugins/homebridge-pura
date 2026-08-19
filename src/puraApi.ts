@@ -595,6 +595,9 @@ export class PuraApi {
   }
 
   private normalizePercentage(value: unknown): number | undefined {
+    if (value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) {
+      return undefined;
+    }
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) {
       return undefined;
