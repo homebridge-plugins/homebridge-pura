@@ -46,6 +46,8 @@ export interface PuraBay {
   activeAt?: number;
   timer?: PuraTimer;
   fragrance?: PuraFragrance;
+  remainingPercent?: number;
+  lowFragrance?: boolean;
 }
 
 export interface PuraTimer {

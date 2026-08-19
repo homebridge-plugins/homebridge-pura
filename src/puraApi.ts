@@ -535,6 +535,9 @@ export class PuraApi {
       return undefined;
     }
     const record = value as Record<string, unknown>;
+    const remaining = record.remaining && typeof record.remaining === 'object'
+      ? record.remaining as Record<string, unknown>
+      : undefined;
     const activeAtRaw = Number(record.activeAt);
     const activeAt = Number.isFinite(activeAtRaw) && activeAtRaw > 0 ? activeAtRaw : undefined;
     const nowSeconds = Math.floor(Date.now() / 1000);
@@ -586,7 +589,17 @@ export class PuraApi {
       activeAt,
       timer: record.timer as PuraTimer | undefined,
       fragrance: record.fragrance as PuraFragrance | undefined,
+      remainingPercent: this.normalizePercentage(remaining?.percent),
+      lowFragrance: this.normalizeBooleanish(record.lowFragrance),
     };
+  }
+
+  private normalizePercentage(value: unknown): number | undefined {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      return undefined;
+    }
+    return Math.max(0, Math.min(100, numeric));
   }
 
   private resolveOnlineState(source: Record<string, unknown>): boolean | undefined {
