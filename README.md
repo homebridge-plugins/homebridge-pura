@@ -74,7 +74,7 @@ If `enableNightlightAccessory` is set to `true`, compatible diffusers expose nig
 
 If `enableFragranceControls` is set to `true`, each discovered fragrance is exposed as a separate fan-style service named for the installed scent. Activating a fragrance selects its current bay and disables the other fragrance service. This allows HomeKit scenes and schedules to intentionally alternate fragrances without relying on the Pura app's last-selected bay. A fragrance service is keyed by the Pura fragrance ID rather than its bay, so its HomeKit identity remains stable if the vial is moved. Previously discovered fragrances remain available for automations and report unavailable when the vial is not installed.
 
-The plugin records Pura's remaining percentage by stable fragrance ID and reports changes in the Homebridge log. Apple Home does not render the standard HomeKit Filter Maintenance service when it is attached to this fan-style accessory, so the plugin does not publish a misleading invisible service or use a semantically incorrect replacement characteristic.
+The plugin records Pura's remaining percentage by stable fragrance ID and reports changes in the Homebridge log. It also exposes each vial's remaining level through a linked HomeKit Battery service (for example, `Salt Remaining`). This is an intentional HomeKit UI abstraction: `BatteryLevel` represents Pura's vial/refill remaining percentage, while `StatusLowBattery` represents Pura's low-fragrance warning. The value follows the fragrance ID if a vial moves between bays.
 
 Fragrance controls use the same intensity mapping as the diffuser fan service:
 - Subtle: 30
@@ -94,7 +94,7 @@ The Pura API exposes one active fragrance at a time. "Independent intensity" the
 - **Fragrance Controls (optional)**:
   - Select a fragrance by turning on its named service
   - Set a remembered Subtle/Medium/Strong intensity per fragrance
-  - View Pura-reported remaining-percentage changes in the Homebridge log
+  - View Pura-reported vial remaining as a battery-style percentage and in the Homebridge log
   - Alternate fragrances using ordinary HomeKit scenes or schedules
 
 ### Device Management
