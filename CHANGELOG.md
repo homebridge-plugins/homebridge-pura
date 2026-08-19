@@ -1,5 +1,8 @@
 # Release Notes
 
+## Unreleased
+- Add opt-in fragrance-specific fan services for dual-bay diffusers. Services use stable Pura fragrance IDs, follow vials between bays, select the requested fragrance, and remember independent intensity levels for HomeKit schedules and scenes. ([#22](https://github.com/homebridge-plugins/homebridge-pura/issues/22))
+
 ## 1.6.10 - 2026-06-30
 - Fix accessory persistence on Homebridge 2.1+. The diffuser was re-created on every child-bridge restart, logging `Cannot serialize accessory … - missing associated plugin` and a spurious switch-mode "migration". The accessory handler no longer persists revision metadata before the accessory is registered, so Homebridge can serialize the cached accessories successfully. ([#24](https://github.com/homebridge-plugins/homebridge-pura/issues/24))
 - Bump the `homebridge` development/test dependency to `2.1.0` so CI exercises the stable release users run.

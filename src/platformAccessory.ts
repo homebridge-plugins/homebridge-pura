@@ -11,6 +11,7 @@ import { PuraConfig, PuraDevice, PuraBay } from './puraTypes.js';
 export class PuraPlatformAccessory {
   private service: Service;
   private nightlightService?: Service;
+  private fragranceServices = new Map<string, Service>();
   private device: PuraDevice;
   private useFanService: boolean;
   private enableBoundNightlightService: boolean;
@@ -114,7 +115,9 @@ export class PuraPlatformAccessory {
     );
     // Nightlight controls can be exposed on this diffuser accessory when configured in bound mode.
     this.enableBoundNightlightService = this.shouldUseBoundNightlightService();
-    const fanService = this.accessory.getService(this.platform.Service.Fanv2);
+    const fanService = this.accessory.services.find(
+      (service) => service.UUID === this.platform.Service.Fanv2.UUID && !service.subtype,
+    );
     const switchService = this.accessory.getService(this.platform.Service.Switch);
     if (this.useFanService) {
       if (switchService) {
@@ -148,6 +151,7 @@ export class PuraPlatformAccessory {
     }
 
     this.configureNightlightService();
+    this.configureFragranceServices();
     this.updateCurrentState();
     this.updateFaultState();
     this.logRecommendationHints(this.device);
@@ -194,6 +198,257 @@ export class PuraPlatformAccessory {
     return this.isNightlightControlEnabled();
   }
 
+  private isFragranceControlEnabled(): boolean {
+    return Boolean((this.platform.config as PuraConfig).enableFragranceControls ?? false);
+  }
+
+  private getFragranceServiceSubtype(fragranceId: string): string {
+    return `fragrance-${fragranceId}`;
+  }
+
+  private getKnownFragrances(): Record<string, string> {
+    const stored = this.accessory.context.knownFragrances;
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
+      return {};
+    }
+    return Object.fromEntries(
+      Object.entries(stored as Record<string, unknown>)
+        .filter(([id, name]) => id.trim() && typeof name === 'string' && name.trim())
+        .map(([id, name]) => [id, String(name).trim()]),
+    );
+  }
+
+  private configureFragranceServices() {
+    const subtypePrefix = 'fragrance-';
+    if (!this.isFragranceControlEnabled()) {
+      for (const service of [...this.accessory.services]) {
+        if (service.UUID === this.platform.Service.Fanv2.UUID && service.subtype?.startsWith(subtypePrefix)) {
+          this.accessory.removeService(service);
+        }
+      }
+      this.fragranceServices.clear();
+      return;
+    }
+
+    const known = this.getKnownFragrances();
+    for (const bay of [this.device.bay1, this.device.bay2]) {
+      const fragrance = bay?.fragrance;
+      if (fragrance?.id && fragrance.name) {
+        known[fragrance.id] = fragrance.name;
+      }
+    }
+    this.accessory.context.knownFragrances = known;
+
+    for (const [fragranceId, fragranceName] of Object.entries(known)) {
+      const subtype = this.getFragranceServiceSubtype(fragranceId);
+      let service = this.fragranceServices.get(fragranceId);
+      if (!service) {
+        service = this.accessory.getServiceById(this.platform.Service.Fanv2, subtype)
+          || this.accessory.addService(this.platform.Service.Fanv2, fragranceName, subtype);
+        service.getCharacteristic(this.platform.Characteristic.Active)
+          .onSet((value) => this.setFragranceActive(fragranceId, value))
+          .onGet(() => this.getFragranceActive(fragranceId));
+        service.getCharacteristic(this.platform.Characteristic.RotationSpeed)
+          .setProps({ minValue: 0, maxValue: 100, minStep: 1 })
+          .onSet((value) => this.setFragranceRotationSpeed(fragranceId, value))
+          .onGet(() => this.getFragranceRotationSpeed(fragranceId));
+        this.fragranceServices.set(fragranceId, service);
+      }
+      service.setCharacteristic(this.platform.Characteristic.Name, fragranceName);
+    }
+    this.applyFragranceStates();
+  }
+
+  private getFragranceBay(fragranceId: string): { number: 1 | 2; bay: PuraBay } | undefined {
+    if (this.device.bay1?.fragrance?.id === fragranceId) {
+      return { number: 1, bay: this.device.bay1 };
+    }
+    if (this.device.bay2?.fragrance?.id === fragranceId) {
+      return { number: 2, bay: this.device.bay2 };
+    }
+    return undefined;
+  }
+
+  private getStoredFragranceIntensities(): Record<string, number> {
+    const stored = this.accessory.context.fragranceIntensities;
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
+      return {};
+    }
+    const normalized: Record<string, number> = {};
+    for (const [id, value] of Object.entries(stored as Record<string, unknown>)) {
+      const numericValue = Number(value);
+      if (Number.isFinite(numericValue) && numericValue > 0) {
+        normalized[id] = numericValue;
+      }
+    }
+    return normalized;
+  }
+
+  private getStoredFragranceIntensity(fragranceId: string, bay?: PuraBay): number {
+    const stored = this.getStoredFragranceIntensities()[fragranceId];
+    const reported = Number(bay?.intensity);
+    const fallback = Number.isFinite(reported) && reported > 0 ? reported : 60;
+    return Math.max(1, Math.min(100, stored ?? fallback));
+  }
+
+  private storeFragranceIntensity(fragranceId: string, intensity: number) {
+    const stored = this.getStoredFragranceIntensities();
+    stored[fragranceId] = Math.max(1, Math.min(100, intensity));
+    this.accessory.context.fragranceIntensities = stored;
+  }
+
+  private isFragranceActive(fragranceId: string): boolean {
+    const match = this.getFragranceBay(fragranceId);
+    return Boolean(match?.bay.active);
+  }
+
+  private async activateFragrance(fragranceId: string, intensity: number): Promise<void> {
+    const match = this.getFragranceBay(fragranceId);
+    if (!match || this.isDeviceUnavailable()) {
+      this.applyFragranceStates();
+      throw new this.platform.api.hap.HapStatusError(
+        this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+      );
+    }
+
+    const normalizedIntensity = Math.max(1, Math.min(100, intensity));
+    this.platform.recordIntent(this.device.id, true);
+    if (this.shouldResetAwayModeBeforeActivating()) {
+      await this.puraApi.setAwayMode(this.device.id, false);
+    }
+    const selected = await this.puraApi.setAlwaysOn(this.device.id, match.number);
+    const controller = this.device.controller || 'default';
+    const adjusted = selected && await this.puraApi.setIntensity(
+      this.device.id,
+      match.number,
+      normalizedIntensity,
+      controller,
+    );
+    if (!adjusted) {
+      this.applyFragranceStates();
+      throw new this.platform.api.hap.HapStatusError(
+        this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+      );
+    }
+
+    this.device = {
+      ...this.device,
+      bay1: this.device.bay1
+        ? { ...this.device.bay1, active: match.number === 1, intensity: match.number === 1 ? normalizedIntensity : this.device.bay1.intensity }
+        : undefined,
+      bay2: this.device.bay2
+        ? { ...this.device.bay2, active: match.number === 2, intensity: match.number === 2 ? normalizedIntensity : this.device.bay2.intensity }
+        : undefined,
+    };
+    this.accessory.context.device = this.device;
+    this.currentStateActive = true;
+    this.accessory.context.lastBay = match.number;
+    this.accessory.context.lastIntensity = normalizedIntensity;
+    this.storeFragranceIntensity(fragranceId, normalizedIntensity);
+    this.pendingIntensityIntent = {
+      at: Date.now(),
+      ttlMs: 15000,
+      intensity: normalizedIntensity,
+      bay: match.number,
+    };
+    this.recentIntensityHold = { until: Date.now() + 15000, level: normalizedIntensity };
+    this.applyCurrentState();
+    this.applyFragranceStates();
+    this.platform.requestRefreshSoon(2000);
+    this.platform.log.info(
+      `${this.getDiffuserLogLabel()} selected fragrance ${match.bay.fragrance?.name ?? fragranceId} ` +
+      `at intensity ${normalizedIntensity} (${this.describeIntensityLevel(normalizedIntensity)}).`,
+    );
+  }
+
+  private async setFragranceActive(fragranceId: string, value: CharacteristicValue) {
+    await this.enqueueRotationWrite(async () => {
+      const isOn = value === this.platform.Characteristic.Active.ACTIVE;
+      if (isOn) {
+        const match = this.getFragranceBay(fragranceId);
+        await this.activateFragrance(fragranceId, this.getStoredFragranceIntensity(fragranceId, match?.bay));
+        return;
+      }
+      if (!this.isFragranceActive(fragranceId)) {
+        this.applyFragranceStates();
+        return;
+      }
+      this.platform.recordIntent(this.device.id, false);
+      if (!await this.puraApi.stopAll(this.device.id)) {
+        this.applyFragranceStates();
+        throw new this.platform.api.hap.HapStatusError(
+          this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+        );
+      }
+      this.currentStateActive = false;
+      this.pendingIntensityIntent = undefined;
+      if (this.device.bay1) {
+        this.device.bay1 = { ...this.device.bay1, active: false, intensity: 0 };
+      }
+      if (this.device.bay2) {
+        this.device.bay2 = { ...this.device.bay2, active: false, intensity: 0 };
+      }
+      this.applyCurrentState();
+      this.applyFragranceStates();
+      this.platform.requestRefreshSoon(2000);
+    });
+  }
+
+  private async getFragranceActive(fragranceId: string): Promise<CharacteristicValue> {
+    if (!this.getFragranceBay(fragranceId) || this.isDeviceUnavailable()) {
+      throw new this.platform.api.hap.HapStatusError(
+        this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+      );
+    }
+    return this.isFragranceActive(fragranceId)
+      ? this.platform.Characteristic.Active.ACTIVE
+      : this.platform.Characteristic.Active.INACTIVE;
+  }
+
+  private async setFragranceRotationSpeed(fragranceId: string, value: CharacteristicValue) {
+    const mappedIntensity = this.mapRotationToIntensity(Number(value));
+    if (mappedIntensity <= 0) {
+      await this.setFragranceActive(fragranceId, this.platform.Characteristic.Active.INACTIVE);
+      return;
+    }
+    this.storeFragranceIntensity(fragranceId, mappedIntensity);
+    await this.enqueueRotationWrite(() => this.activateFragrance(fragranceId, mappedIntensity));
+  }
+
+  private async getFragranceRotationSpeed(fragranceId: string): Promise<CharacteristicValue> {
+    const match = this.getFragranceBay(fragranceId);
+    if (!match || this.isDeviceUnavailable()) {
+      throw new this.platform.api.hap.HapStatusError(
+        this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+      );
+    }
+    return this.mapIntensityToRotation(this.getStoredFragranceIntensity(fragranceId, match.bay));
+  }
+
+  private applyFragranceStates() {
+    for (const [fragranceId, service] of this.fragranceServices) {
+      const match = this.getFragranceBay(fragranceId);
+      const installed = Boolean(match);
+      const active = installed && Boolean(match?.bay.active);
+      service.updateCharacteristic(
+        this.platform.Characteristic.Active,
+        active ? this.platform.Characteristic.Active.ACTIVE : this.platform.Characteristic.Active.INACTIVE,
+      );
+      service.updateCharacteristic(
+        this.platform.Characteristic.RotationSpeed,
+        this.mapIntensityToRotation(this.getStoredFragranceIntensity(fragranceId, match?.bay)),
+      );
+      if (service.testCharacteristic(this.platform.Characteristic.StatusFault)) {
+        service.updateCharacteristic(
+          this.platform.Characteristic.StatusFault,
+          installed && !this.isDeviceUnavailable()
+            ? this.platform.Characteristic.StatusFault.NO_FAULT
+            : this.platform.Characteristic.StatusFault.GENERAL_FAULT,
+        );
+      }
+    }
+  }
+
   private updateCurrentState() {
     const activeBay = this.getActiveBay();
     this.currentStateActive = Boolean(activeBay);
@@ -204,6 +459,7 @@ export class PuraPlatformAccessory {
       }
     }
     this.applyCurrentState();
+    this.applyFragranceStates();
     this.applyNightlightState();
     this.updateFaultState();
   }
@@ -394,7 +650,7 @@ export class PuraPlatformAccessory {
       return false;
     }
 
-    if (syncSecondary && secondaryBays.length > 0) {
+    if (syncSecondary && !this.isFragranceControlEnabled() && secondaryBays.length > 0) {
       // Do not block the primary command path on secondary bay sync; this keeps HomeKit writes responsive.
       void this.syncSecondaryBayIntensities(secondaryBays, intensity, controller);
     }
@@ -432,7 +688,7 @@ export class PuraPlatformAccessory {
     intensity: number,
     controller: string,
   ): void {
-    if (bays.length === 0) {
+    if (this.isFragranceControlEnabled() || bays.length === 0) {
       return;
     }
     this.pendingSecondaryBaySync = {
@@ -1218,6 +1474,7 @@ export class PuraPlatformAccessory {
     const nextOnline = this.normalizeOnlineState(stabilizedDevice.online);
     this.logOnlineStateTransition(previousOnline, nextOnline);
     this.device = stabilizedDevice;
+    this.configureFragranceServices();
     if (typeof stabilizedDevice.nightlight?.active === 'boolean') {
       this.pendingNightlightActive = stabilizedDevice.nightlight.active;
     }

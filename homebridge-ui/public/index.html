@@ -220,15 +220,23 @@
           <input class="form-check-input" id="enableFanService" type="checkbox" role="switch" aria-describedby="fanServiceHelp" />
           <label class="form-check-label" for="enableFanService">Enable Intensity Control</label>
           <div id="fanServiceHelp" class="form-text">
-            Replaces the on/off switch with a fan accessory to control intensity (Subtle, Medium, Strong). For multi-bay diffusers, HomeKit intensity changes are applied across available bays to keep auto-alternate behavior consistent. Changing this may require recreating HomeKit scenes or automations for all Pura diffusers in this plugin.
+            Replaces the on/off switch with a fan accessory to control intensity (Subtle, Medium, Strong). For multi-bay diffusers, HomeKit intensity changes are applied across available bays unless Fragrance Controls are enabled. Changing this may require recreating HomeKit scenes or automations for all Pura diffusers in this plugin.
           </div>
         </div>
 
-        <div class="form-check form-switch ms-1">
+        <div class="form-check form-switch ms-1 mb-4">
           <input class="form-check-input" id="enableNightlightAccessory" type="checkbox" role="switch" aria-describedby="nightlightAccessoryHelp" />
           <label class="form-check-label" for="enableNightlightAccessory">Enable Nightlight Controls</label>
           <div id="nightlightAccessoryHelp" class="form-text">
             Enables nightlight controls (On, Brightness, and Color) for compatible diffusers.
+          </div>
+        </div>
+
+        <div class="form-check form-switch ms-1">
+          <input class="form-check-input" id="enableFragranceControls" type="checkbox" role="switch" aria-describedby="fragranceControlsHelp" />
+          <label class="form-check-label" for="enableFragranceControls">Enable Fragrance Controls</label>
+          <div id="fragranceControlsHelp" class="form-text">
+            Adds one fan-style service per discovered fragrance so HomeKit scenes and schedules can select a scent and remember its intensity.
           </div>
         </div>
 
@@ -276,6 +284,7 @@
         forceNightlightOff: document.getElementById('forceNightlightOff'),
         enableFanService: document.getElementById('enableFanService'),
         enableNightlightAccessory: document.getElementById('enableNightlightAccessory'),
+        enableFragranceControls: document.getElementById('enableFragranceControls'),
         testBtn: document.getElementById('testBtn'),
         testHint: document.getElementById('testHint'),
         status: statusEl,
@@ -444,6 +453,7 @@
           forceNightlightOff: false,
           enableFanService: false,
           enableNightlightAccessory: false,
+          enableFragranceControls: false,
         };
       };
 
@@ -456,6 +466,7 @@
           forceNightlightOff: !!els.forceNightlightOff.checked,
           enableFanService: !!els.enableFanService.checked,
           enableNightlightAccessory: !!els.enableNightlightAccessory.checked,
+          enableFragranceControls: !!els.enableFragranceControls.checked,
         };
         await homebridge.updatePluginConfig([config]);
       };
@@ -488,6 +499,7 @@
         els.forceNightlightOff.checked = !!current.forceNightlightOff;
         els.enableFanService.checked = !!(current.enableFanService ?? current.useFanService);
         els.enableNightlightAccessory.checked = !!current.enableNightlightAccessory;
+        els.enableFragranceControls.checked = !!current.enableFragranceControls;
         initialCredentialKey = getCredentialKey();
 
         setUiStatus('');
@@ -496,6 +508,7 @@
           els.name,
           els.forceNightlightOff,
           els.enableFanService,
+          els.enableFragranceControls,
         ]) {
           field.addEventListener('change', async () => {
             await syncConfig();

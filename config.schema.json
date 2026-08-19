@@ -45,13 +45,19 @@
         "title": "Enable Intensity Control",
         "type": "boolean",
         "default": false,
-        "description": "Replaces the on/off switch with a fan accessory to control intensity (Subtle, Medium, Strong). For multi-bay diffusers, HomeKit intensity changes are applied across available bays to keep auto-alternate behavior consistent. Changing this may require recreating HomeKit scenes or automations for all Pura diffusers in this plugin."
+        "description": "Replaces the on/off switch with a fan accessory to control intensity (Subtle, Medium, Strong). For multi-bay diffusers, HomeKit intensity changes are applied across available bays unless Fragrance Controls are enabled. Changing this may require recreating HomeKit scenes or automations for all Pura diffusers in this plugin."
       },
       "enableNightlightAccessory": {
         "title": "Enable Nightlight Controls",
         "type": "boolean",
         "default": false,
         "description": "Enables nightlight controls (On, Brightness, and Color) on the diffuser accessory (Single Tile) for compatible diffusers."
+      },
+      "enableFragranceControls": {
+        "title": "Enable Fragrance Controls",
+        "type": "boolean",
+        "default": false,
+        "description": "Adds one fan-style HomeKit service per discovered fragrance. Each service keeps a stable identity based on the Pura fragrance ID, selects that fragrance when activated, and controls its intensity independently."
       }
     }
   },

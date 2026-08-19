@@ -11,6 +11,7 @@ export interface PuraConfig extends PlatformConfig {
   enableFanService?: boolean;
   useFanService?: boolean;
   enableNightlightAccessory?: boolean;
+  enableFragranceControls?: boolean;
 }
 
 export interface PuraDevice {
