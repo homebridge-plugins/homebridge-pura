@@ -43,6 +43,7 @@ export interface PuraBay {
   name?: string;
   active: boolean;
   intensity: number;
+  exactIntensity?: number;
   activeAt?: number;
   timer?: PuraTimer;
   fragrance?: PuraFragrance;
@@ -54,7 +55,7 @@ export interface PuraTimer {
   active: boolean;
   start?: number;
   end?: number;
-  intensity?: number;
+  intensity?: number | string;
 }
 
 export interface PuraFragrance {

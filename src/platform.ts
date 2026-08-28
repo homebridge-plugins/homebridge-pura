@@ -13,6 +13,37 @@ import { PuraApi } from './puraApi.js';
 import { PuraDevice, PuraConfig } from './puraTypes.js';
 import { fetchLatestCognitoConfig } from './pypuraLookup.js';
 
+export function resolveRefreshBaseIntervalSeconds(
+  realtimeConnected: boolean,
+  enableFragranceControls: boolean,
+): number {
+  return realtimeConnected && !enableFragranceControls ? 300 : 15;
+}
+
+export function buildTimerRealtimeDeviceUpdate(timerRecord: unknown): Record<string, unknown> | undefined {
+  if (!timerRecord || typeof timerRecord !== 'object') {
+    return undefined;
+  }
+  const timer = timerRecord as Record<string, unknown>;
+  const bay = Number(timer.bay);
+  const intensity = Number(timer.intensity);
+  if ((bay !== 1 && bay !== 2) || !Number.isFinite(intensity) || intensity <= 0) {
+    return undefined;
+  }
+  const start = Number(timer.start);
+  return {
+    controller: 'timer',
+    deviceActiveState: {
+      activeBay: bay,
+      activeBayIntensity: intensity,
+    },
+    [`bay${bay}`]: {
+      ...(Number.isFinite(start) && start > 0 ? { activeAt: start } : {}),
+      timer,
+    },
+  };
+}
+
 type DiffuserAccessory = PlatformAccessory & {
   context: {
     device: PuraDevice;
@@ -933,6 +964,13 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       }
     }
 
+    if (deviceId && recordType === 'TIMER' && (eventType === 'INSERT' || eventType === 'MODIFY')) {
+      const timerUpdate = buildTimerRealtimeDeviceUpdate(record.timerRecord);
+      if (timerUpdate && this.applyDeviceRecord(deviceId, timerUpdate)) {
+        return;
+      }
+    }
+
     this.triggerWebhookRefresh();
   }
 
@@ -1073,13 +1111,21 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   }
 
   private updatePollingForRealtime() {
-    const nextBase = this.realtimeConnected ? 300 : 15;
+    const fragranceReconciliationEnabled = Boolean(this.puraConfig.enableFragranceControls);
+    const nextBase = resolveRefreshBaseIntervalSeconds(
+      this.realtimeConnected,
+      fragranceReconciliationEnabled,
+    );
     if (this.refreshBaseIntervalSeconds === nextBase) {
       return;
     }
     this.refreshBaseIntervalSeconds = nextBase;
     this.refreshFailures = 0;
-    const label = this.realtimeConnected ? 'realtime connected' : 'realtime disconnected';
+    const label = this.realtimeConnected
+      ? fragranceReconciliationEnabled
+        ? 'realtime connected; fragrance reconciliation enabled'
+        : 'realtime connected'
+      : 'realtime disconnected';
     this.log.debug(`Adjusting polling interval to ${nextBase}s (${label}).`);
     const ageMs = Date.now() - this.lastRefreshAt;
     if (!this.refreshInFlight && ageMs > 60000) {

@@ -18,6 +18,43 @@ const DEFAULT_USER_POOL_ID = 'us-east-1_LaB718hYv'; // Base64 decoded from pypur
 const DEFAULT_CLIENT_ID = '4iekubat0jb5iljfbaalsiqf9j'; // Base64 decoded from pypura
 const DEFAULT_BASE_URL = 'https://trypura.io/mobile/api/';
 
+export function mapHomeKitIntensityToPuraLevel(intensity: number): 1 | 3 | 5 | 7 | 10 {
+  const clamped = Math.max(1, Math.min(100, Number(intensity) || 1));
+  if (clamped <= 20) {
+    return 1;
+  }
+  if (clamped <= 40) {
+    return 3;
+  }
+  if (clamped <= 60) {
+    return 5;
+  }
+  if (clamped <= 80) {
+    return 7;
+  }
+  return 10;
+}
+
+export function mapPuraNumericIntensityToHomeKit(intensity: unknown): 20 | 40 | 60 | 80 | 100 | null {
+  const numeric = Number(intensity);
+  if (!Number.isFinite(numeric) || numeric <= 0 || numeric > 10) {
+    return null;
+  }
+  if (numeric <= 1) {
+    return 20;
+  }
+  if (numeric <= 3) {
+    return 40;
+  }
+  if (numeric <= 5) {
+    return 60;
+  }
+  if (numeric <= 7) {
+    return 80;
+  }
+  return 100;
+}
+
 export class PuraApi {
   private userPool: CognitoUserPool;
   private cognitoUser: CognitoUser | null = null;
@@ -559,13 +596,18 @@ export class PuraApi {
     ];
     const explicitActive = explicitActiveValues.find((state): state is boolean => state !== undefined);
     const hasExplicitActiveSignal = explicitActive !== undefined;
-    const intensityFromRecord = this.normalizeBayIntensity(record.intensity ?? record.level ?? record.strength);
+    const recordIntensityValue = record.intensity ?? record.level ?? record.strength;
+    const defaultsIntensityValue =
+      (parent.deviceDefaults as Record<string, unknown> | undefined)?.[`bay${bayNumber}Intensity`];
+    const parentStateIntensityValue = this.resolveParentStateIntensityValue(parent, bayNumber);
+    const oscillationIntensityValue = this.resolveOscillationIntensityValue(parent.oscillation, bayNumber);
+    const intensityFromRecord = this.normalizeBayIntensity(recordIntensityValue);
     const intensityFromDefaults = this.normalizeBayIntensity(
-      (parent.deviceDefaults as Record<string, unknown> | undefined)?.[`bay${bayNumber}Intensity`],
+      defaultsIntensityValue,
     );
-    const intensityFromParentState = this.normalizeParentStateIntensity(parent, bayNumber);
+    const intensityFromParentState = this.normalizeBayIntensity(parentStateIntensityValue);
     const oscillationActive = this.normalizeOscillationActive(parent.oscillation, bayNumber);
-    const intensityFromOscillation = this.normalizeOscillationIntensity(parent.oscillation, bayNumber);
+    const intensityFromOscillation = this.normalizeBayIntensity(oscillationIntensityValue);
     const intensityEvidence = (
       (intensityFromRecord !== null && Number.isFinite(intensityFromRecord) && intensityFromRecord > 0) ||
       (intensityFromOscillation !== null && Number.isFinite(intensityFromOscillation) && intensityFromOscillation > 0) ||
@@ -581,11 +623,25 @@ export class PuraApi {
     const normalizedIntensity = active
       ? (intensityFromRecord ?? intensityFromOscillation ?? intensityFromParentState ?? intensityFromDefaults ?? 0)
       : reportedIntensity;
+    const exactIntensity = active
+      ? (
+        mapPuraNumericIntensityToHomeKit(recordIntensityValue) ??
+        mapPuraNumericIntensityToHomeKit(oscillationIntensityValue) ??
+        mapPuraNumericIntensityToHomeKit(parentStateIntensityValue) ??
+        mapPuraNumericIntensityToHomeKit(defaultsIntensityValue) ??
+        undefined
+      )
+      : (
+        mapPuraNumericIntensityToHomeKit(recordIntensityValue) ??
+        mapPuraNumericIntensityToHomeKit(oscillationIntensityValue) ??
+        undefined
+      );
     return {
       id: typeof record.id === 'number' ? record.id : bayNumber,
       name: typeof record.name === 'string' ? record.name : undefined,
       active: Boolean(active),
       intensity: Math.max(0, Math.min(100, normalizedIntensity)),
+      exactIntensity,
       activeAt,
       timer: record.timer as PuraTimer | undefined,
       fragrance: record.fragrance as PuraFragrance | undefined,
@@ -634,16 +690,7 @@ export class PuraApi {
       }
       const asNumber = Number(normalized);
       if (Number.isFinite(asNumber)) {
-        if (asNumber <= 0) {
-          return 0;
-        }
-        if (asNumber <= 33) {
-          return 30;
-        }
-        if (asNumber <= 66) {
-          return 50;
-        }
-        return 100;
+        return this.normalizeNumericBayIntensity(asNumber);
       }
       return null;
     }
@@ -651,8 +698,21 @@ export class PuraApi {
     if (!Number.isFinite(asNumber)) {
       return null;
     }
+    return this.normalizeNumericBayIntensity(asNumber);
+  }
+
+  private normalizeNumericBayIntensity(asNumber: number): number {
     if (asNumber <= 0) {
       return 0;
+    }
+    if (asNumber <= 10) {
+      if (asNumber <= 3) {
+        return 30;
+      }
+      if (asNumber <= 7) {
+        return 50;
+      }
+      return 100;
     }
     if (asNumber <= 33) {
       return 30;
@@ -688,7 +748,11 @@ export class PuraApi {
     return undefined;
   }
 
-  private normalizeParentStateIntensity(parent: Record<string, unknown>, bayNumber: number): number | null {
+  private resolveParentStateIntensityValue(parent: Record<string, unknown>, bayNumber: number): unknown {
+    const activeState = parent.deviceActiveState as Record<string, unknown> | undefined;
+    if (activeState && Number(activeState.activeBay) === bayNumber) {
+      return activeState.activeBayIntensity ?? activeState.intensity ?? activeState.level;
+    }
     const states = Array.isArray(parent.states) ? parent.states : [];
     const match = states.find((state) => {
       if (!state || typeof state !== 'object') {
@@ -698,22 +762,22 @@ export class PuraApi {
       return stateRecord.bay === bayNumber;
     }) as Record<string, unknown> | undefined;
     if (match) {
-      return this.normalizeBayIntensity(match.intensity ?? match.level ?? match.strength);
+      return match.intensity ?? match.level ?? match.strength;
     }
     const state = parent.state as Record<string, unknown> | undefined;
     if (!state || typeof state !== 'object') {
-      return null;
+      return undefined;
     }
     const currentIndex = Number(state.currentIndex ?? state.bay ?? state.activeBay);
     if (Number.isFinite(currentIndex) && currentIndex === bayNumber) {
-      return this.normalizeBayIntensity(state.intensity ?? state.level ?? state.strength);
+      return state.intensity ?? state.level ?? state.strength;
     }
-    return null;
+    return undefined;
   }
 
-  private normalizeOscillationIntensity(value: unknown, bayNumber: number): number | null {
+  private resolveOscillationIntensityValue(value: unknown, bayNumber: number): unknown {
     if (!value || typeof value !== 'object') {
-      return null;
+      return undefined;
     }
     const record = value as Record<string, unknown>;
     const states = Array.isArray(record.states) ? record.states : [];
@@ -725,13 +789,13 @@ export class PuraApi {
       return stateRecord.bay === bayNumber;
     }) as Record<string, unknown> | undefined;
     if (match) {
-      return this.normalizeBayIntensity(match.intensity);
+      return match.intensity;
     }
     const state = record.state as Record<string, unknown> | undefined;
     if (state && state.currentIndex === bayNumber) {
-      return this.normalizeBayIntensity(state.intensity);
+      return state.intensity;
     }
-    return null;
+    return undefined;
   }
 
   private normalizeOscillationActive(value: unknown, bayNumber: number): boolean {
@@ -759,8 +823,8 @@ export class PuraApi {
    */
   async setIntensity(deviceId: string, bay: number, intensity: number, controller?: string): Promise<boolean> {
     try {
-      const { apiIntensity, controller: defaultController } = this.normalizeIntensity(intensity);
-      const resolvedController = controller || defaultController;
+      const apiIntensity = mapHomeKitIntensityToPuraLevel(intensity);
+      const resolvedController = controller || 'default';
       const response = await this.makeRequest(
         'POST',
         `devices/${deviceId}/intensity`,
@@ -783,15 +847,6 @@ export class PuraApi {
       this.log.error(`Failed to set intensity for device ${deviceId}:`, error);
       return false;
     }
-  }
-
-  private normalizeIntensity(intensity: number): { apiIntensity: string; controller: string } {
-    const clamped = Math.max(0, Math.min(100, Number(intensity) || 0));
-    const apiIntensity = clamped <= 33 ? 'subtle' : clamped <= 66 ? 'medium' : 'strong';
-    return {
-      apiIntensity,
-      controller: 'default',
-    };
   }
 
   /**

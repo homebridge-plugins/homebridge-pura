@@ -2,6 +2,7 @@
 
 ## Unreleased
 - Add opt-in first-class fragrance accessories for supported multi-bay diffusers. Each accessory uses its stable Pura fragrance ID, follows its vial between bays, selects the requested fragrance, remembers an independent intensity, and visibly reports its own remaining percentage through a linked HomeKit Battery service. The generic diffuser tile is suppressed while this mode is enabled, avoiding redundant controls and Apple Home's conflation of multiple Battery services on one accessory. ([#22](https://github.com/homebridge-plugins/homebridge-pura/issues/22))
+- Expose all five measured Pura Plus intensity positions on fragrance accessories using numeric API values `1`, `3`, `5`, `7`, and `10`. Preserve exact regular and timer changes from raw realtime events and briefly protect fresh exact values from Pura's three-level REST readback.
 
 ## 1.6.10 - 2026-06-30
 - Fix accessory persistence on Homebridge 2.1+. The diffuser was re-created on every child-bridge restart, logging `Cannot serialize accessory … - missing associated plugin` and a spurious switch-mode "migration". The accessory handler no longer persists revision metadata before the accessory is registered, so Homebridge can serialize the cached accessories successfully. ([#24](https://github.com/homebridge-plugins/homebridge-pura/issues/24))

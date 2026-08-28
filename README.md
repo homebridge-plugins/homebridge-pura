@@ -55,7 +55,7 @@ Add the following platform to your `config.json`:
 - **forceNightlightOff**: Pura turns the nightlight on/off with the diffuser. If enabled, the plugin sends a nightlight-off command right after turning on a diffuser. (default: false)
 - **enableFanService (Enable Intensity Control)**: Replaces the on/off switch with a fan accessory to control intensity (Subtle, Medium, Strong). For multi-bay diffusers, HomeKit intensity changes are applied across available bays to keep auto-alternate behavior consistent unless Fragrance Controls are enabled. (default: false)
 - **enableNightlightAccessory**: Enables nightlight controls (On/Brightness/Color) for compatible diffusers. (default: false)
-- **enableFragranceControls**: On supported multi-bay diffusers, replaces the generic diffuser control with one fan-style HomeKit accessory per discovered fragrance. Accessories use the Pura fragrance ID for stable identity, follow a fragrance if it moves between bays, select that fragrance when activated, retain an independent Subtle/Medium/Strong intensity, and visibly report vial remaining through a linked Battery service. Single-bay and unsupported devices retain the generic diffuser representation. (default: false)
+- **enableFragranceControls**: On supported multi-bay diffusers, replaces the generic diffuser control with one fan-style HomeKit accessory per discovered fragrance. Accessories use the Pura fragrance ID for stable identity, follow a fragrance if it moves between bays, select that fragrance when activated, retain an independent five-level intensity, and visibly report vial remaining through a linked Battery service. Single-bay and unsupported devices retain the generic diffuser representation. (default: false)
 
 ## Usage
 
@@ -76,10 +76,17 @@ If `enableFragranceControls` is set to `true` on a supported multi-bay diffuser,
 
 The plugin stores each fragrance accessory's Pura-reported remaining percentage in that fragrance's own accessory context. It exposes the value through a linked HomeKit Battery service (for example, `Salt Remaining`). This is an intentional HomeKit UI abstraction: `BatteryLevel` represents Pura's vial/refill remaining percentage, while `StatusLowBattery` represents Pura's low-fragrance warning. Giving each fragrance its own bridged accessory also avoids Apple Home conflating multiple Battery services attached to one accessory. The value follows the fragrance ID if a vial moves between bays.
 
-Fragrance controls use the same intensity mapping as the diffuser fan service:
-- Subtle: 30
-- Medium: 50
-- Strong: 100
+Pura Plus fragrance accessories expose five HomeKit intensity positions. Controlled writes against both Pura's timer and regular intensity endpoints established this mapping:
+
+| HomeKit | Pura numeric command | Pura app button |
+| ---: | ---: | ---: |
+| 20 | 1 | 1 |
+| 40 | 3 | 2 |
+| 60 | 5 | 3 |
+| 80 | 7 | 4 |
+| 100 | 10 | 5 |
+
+Pura's REST device-status response compresses those positions into `subtle` (numeric 1-3), `medium` (4-7), and `strong` (8-10). Raw realtime device and timer events preserve the exact numeric value, so Pura-app changes can synchronize all five positions while realtime is connected. Each fragrance also persists its last exact value and briefly protects a fresh exact event from a following coarse REST refresh, preventing the HomeKit slider from bouncing through a representative value while Pura's updates settle. If an app change occurs during a realtime outage, REST can identify the broad group but cannot reconstruct a same-group position until a later exact event or HomeKit command.
 
 The Pura API exposes one active fragrance at a time. "Independent intensity" therefore means each fragrance remembers and applies its own intensity when selected; it does not run both bays simultaneously.
 
@@ -93,7 +100,7 @@ The Pura API exposes one active fragrance at a time. "Independent intensity" the
   - Color (Hue/Saturation)
 - **Fragrance Controls (optional)**:
   - Select a fragrance by turning on its named accessory
-  - Set a remembered Subtle/Medium/Strong intensity per fragrance
+  - Set one of five remembered Pura Plus intensity positions per fragrance
   - View Pura-reported vial remaining as a battery-style percentage and in the Homebridge log
   - Alternate fragrances using ordinary HomeKit scenes or schedules
 

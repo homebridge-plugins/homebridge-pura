@@ -11,6 +11,7 @@ export interface FragranceAccessoryContext {
   fragranceId: string;
   fragranceName: string;
   rememberedIntensity?: number;
+  exactIntensityObservedAt?: number;
   remainingPercent?: number;
   loggedRemainingPercent?: number;
   lowFragrance?: boolean;
@@ -19,6 +20,43 @@ export interface FragranceAccessoryContext {
 type FragranceAccessory = PlatformAccessory & {
   context: FragranceAccessoryContext;
 };
+
+export function snapFragranceIntensity(value: number): 20 | 40 | 60 | 80 | 100 {
+  const clamped = Math.max(1, Math.min(100, Number(value) || 60));
+  const snapped = Math.max(20, Math.min(100, Math.round(clamped / 20) * 20));
+  return snapped as 20 | 40 | 60 | 80 | 100;
+}
+
+function intensityGroup(value: number): 'subtle' | 'medium' | 'strong' {
+  if (value <= 40) {
+    return 'subtle';
+  }
+  if (value <= 80) {
+    return 'medium';
+  }
+  return 'strong';
+}
+
+export function resolveFragranceIntensity(
+  exactIntensity: number | undefined,
+  coarseIntensity: number | undefined,
+  rememberedIntensity: number | undefined,
+): 20 | 40 | 60 | 80 | 100 {
+  if (Number.isFinite(exactIntensity) && Number(exactIntensity) > 0) {
+    return snapFragranceIntensity(Number(exactIntensity));
+  }
+  const remembered = Number.isFinite(rememberedIntensity) && Number(rememberedIntensity) > 0
+    ? snapFragranceIntensity(Number(rememberedIntensity))
+    : undefined;
+  if (Number.isFinite(coarseIntensity) && Number(coarseIntensity) > 0) {
+    const coarse = Number(coarseIntensity);
+    if (remembered && intensityGroup(remembered) === intensityGroup(coarse)) {
+      return remembered;
+    }
+    return coarse <= 40 ? 40 : coarse <= 80 ? 60 : 100;
+  }
+  return remembered ?? 60;
+}
 
 /**
  * Shared command/state backend for all fragrance accessories belonging to one
@@ -205,7 +243,7 @@ export class PuraFragranceController {
   }
 
   private clampIntensity(value: number): number {
-    return Math.max(1, Math.min(100, Number(value) || 60));
+    return snapFragranceIntensity(value);
   }
 
   private communicationError() {
@@ -217,6 +255,8 @@ export class PuraFragranceController {
 
 /** One first-class HomeKit accessory whose identity follows a Pura fragrance ID. */
 export class PuraFragranceAccessory {
+  private static readonly exactIntensityHoldMs = 10_000;
+
   private readonly service: Service;
   private readonly batteryService: Service;
   private device: PuraDevice;
@@ -242,7 +282,7 @@ export class PuraFragranceAccessory {
       .onSet(this.setActive.bind(this))
       .onGet(this.getActive.bind(this));
     this.service.getCharacteristic(this.platform.Characteristic.RotationSpeed)
-      .setProps({ minValue: 0, maxValue: 100, minStep: 1 })
+      .setProps({ minValue: 0, maxValue: 100, minStep: 20 })
       .onSet(this.setRotationSpeed.bind(this))
       .onGet(this.getRotationSpeed.bind(this));
 
@@ -265,18 +305,31 @@ export class PuraFragranceAccessory {
   }
 
   rememberIntensity(intensity: number) {
-    this.accessory.context.rememberedIntensity = this.clampIntensity(intensity);
+    this.accessory.context.rememberedIntensity = snapFragranceIntensity(intensity);
     this.platform.persistAccessoryIfRegistered(this.accessory);
   }
 
   updateDevice(device: PuraDevice) {
     this.device = device;
     this.accessory.context.device = device;
+    const existingRemembered = Number(this.accessory.context.rememberedIntensity);
+    if (Number.isFinite(existingRemembered) && existingRemembered > 0) {
+      const migratedRemembered = snapFragranceIntensity(existingRemembered);
+      if (migratedRemembered !== existingRemembered) {
+        this.rememberIntensity(migratedRemembered);
+      }
+    }
     const match = this.controller.getBay(this.fragranceId);
     const installed = Boolean(match);
     const active = Boolean(match?.bay.active);
-    if (match?.bay.intensity && match.bay.intensity > 0) {
-      this.rememberIntensity(match.bay.intensity);
+    if (match?.bay.exactIntensity && match.bay.exactIntensity > 0) {
+      this.accessory.context.exactIntensityObservedAt = Date.now();
+    }
+    if (
+      (match?.bay.exactIntensity && match.bay.exactIntensity > 0) ||
+      (match?.bay.intensity && match.bay.intensity > 0)
+    ) {
+      this.rememberIntensity(this.resolveCurrentIntensity(match?.bay));
     }
     if (match?.bay.remainingPercent !== undefined) {
       const remaining = this.clampPercent(match.bay.remainingPercent);
@@ -371,14 +424,22 @@ export class PuraFragranceAccessory {
   }
 
   private getRememberedIntensity(bay?: PuraBay): number {
+    return this.resolveCurrentIntensity(bay);
+  }
+
+  private resolveCurrentIntensity(bay?: PuraBay): number {
     const stored = Number(this.accessory.context.rememberedIntensity);
-    const reported = Number(bay?.intensity);
-    return this.clampIntensity(
-      Number.isFinite(stored) && stored > 0
-        ? stored
-        : Number.isFinite(reported) && reported > 0
-          ? reported
-          : 60,
+    const exactObservedAt = Number(this.accessory.context.exactIntensityObservedAt);
+    const hasFreshExact = !bay?.exactIntensity &&
+      Number.isFinite(exactObservedAt) &&
+      Date.now() - exactObservedAt <= PuraFragranceAccessory.exactIntensityHoldMs;
+    if (hasFreshExact && Number.isFinite(stored) && stored > 0) {
+      return snapFragranceIntensity(stored);
+    }
+    return resolveFragranceIntensity(
+      bay?.exactIntensity,
+      bay?.intensity,
+      Number.isFinite(stored) && stored > 0 ? stored : undefined,
     );
   }
 
@@ -414,28 +475,15 @@ export class PuraFragranceAccessory {
     if (value <= 0) {
       return 0;
     }
-    if (value <= 33) {
-      return 30;
-    }
-    if (value <= 66) {
-      return 50;
-    }
-    return 100;
+    return snapFragranceIntensity(value);
   }
 
   private mapIntensityToRotation(intensity: number): number {
-    const value = Math.max(0, Math.min(100, Number(intensity) || 0));
-    if (value <= 40) {
-      return 30;
-    }
-    if (value <= 75) {
-      return 50;
-    }
-    return 100;
+    return snapFragranceIntensity(intensity);
   }
 
   private clampIntensity(value: number): number {
-    return Math.max(1, Math.min(100, Number(value) || 60));
+    return snapFragranceIntensity(value);
   }
 
   private clampPercent(value: number): number {
