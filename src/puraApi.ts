@@ -581,8 +581,9 @@ export class PuraApi {
     const diffusionMode = typeof parent.diffusionMode === 'string' ? parent.diffusionMode : undefined;
     const standardMode = diffusionMode === 'standard';
     const online = this.resolveOnlineState(parent) !== false;
-    // Standard-mode devices can update activeAt less frequently than bay active/intensity fields.
-    // Use a wider window to reduce false OFF transitions between cloud updates.
+    // In standard mode, Pura keeps activeAt at the session's original start time and clears it
+    // to 0 only when diffusion stops. Do not age out a running standard-mode session.
+    // Other modes use activeAt as time-bounded evidence because their payload semantics differ.
     const activeAtWindowSeconds = standardMode
       ? (online ? 900 : 300)
       : (online ? 300 : 120);
@@ -614,7 +615,7 @@ export class PuraApi {
       (intensityFromParentState !== null && Number.isFinite(intensityFromParentState) && intensityFromParentState > 0)
     );
     const inferredActive = oscillationActive ||
-      (standardMode && !hasExplicitActiveSignal && activeAtRecent) ||
+      (standardMode && !hasExplicitActiveSignal && activeAt !== undefined) ||
       (activeAtRecent && intensityEvidence);
     const active = explicitActive ?? inferredActive;
     // Preserve reported intensity even when the active flag is stale/missing. The accessory layer

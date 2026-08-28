@@ -109,6 +109,59 @@ const coarseOnly = realApi.normalizeDeviceRecord({
 assert.equal(coarseOnly.bay1.intensity, 50);
 assert.equal(coarseOnly.bay1.exactIntensity, undefined, 'coarse REST labels must not claim exact state');
 
+const oldStandardSession = realApi.normalizeDeviceRecord({
+  id: deviceId,
+  model: 3,
+  deviceVer: 'plus_1',
+  diffusionMode: 'standard',
+  connected: true,
+  bay1: { id: 1, activeAt: now - (22 * 60) },
+  deviceDefaults: { bay1Intensity: 'subtle' },
+});
+assert.equal(
+  oldStandardSession.bay1.active,
+  true,
+  'standard diffusion must remain active when Pura retains the original session timestamp',
+);
+assert.equal(oldStandardSession.bay1.intensity, 30);
+
+const stoppedStandardSession = realApi.normalizeDeviceRecord({
+  id: deviceId,
+  model: 3,
+  deviceVer: 'plus_1',
+  diffusionMode: 'standard',
+  connected: true,
+  bay1: { id: 1, activeAt: 0 },
+  deviceDefaults: { bay1Intensity: 'subtle' },
+});
+assert.equal(stoppedStandardSession.bay1.active, false, 'activeAt 0 must represent stopped diffusion');
+
+const explicitlyStoppedStandardSession = realApi.normalizeDeviceRecord({
+  id: deviceId,
+  model: 3,
+  deviceVer: 'plus_1',
+  diffusionMode: 'standard',
+  connected: true,
+  bay1: { id: 1, active: false, activeAt: now - (22 * 60) },
+  deviceDefaults: { bay1Intensity: 'subtle' },
+});
+assert.equal(
+  explicitlyStoppedStandardSession.bay1.active,
+  false,
+  'an explicit stopped signal must override a retained standard-mode timestamp',
+);
+
+const expiredTimerSession = realApi.normalizeDeviceRecord({
+  id: deviceId,
+  model: 3,
+  deviceVer: 'plus_1',
+  diffusionMode: 'timer',
+  connected: true,
+  bay1: { id: 1, activeAt: now - (22 * 60) },
+  deviceActiveState: { activeBay: 1, activeBayIntensity: 1 },
+});
+assert.equal(expiredTimerSession.bay1.active, false, 'non-standard modes must retain bounded timestamp inference');
+
 const makeDevice = ({ swapped = false, saltInstalled = true } = {}) => ({
   id: deviceId,
   name: 'Pura Plus',
