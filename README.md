@@ -11,7 +11,7 @@ You can optionally enable:
 - Nightlight Control: supports on/off, Brightness (snapped to Pura's 10-step brightness levels), and color for compatible diffusers.
 
 ## Supported Diffusers
-This plugin has been designed and tested for the following diffusers. Every model gets an on/off
+This plugin is designed for the following diffusers. Every model gets an on/off
 control by default. Intensity and nightlight controls are opt-in — see
 [Configuration Options](#configuration-options).
 
@@ -20,14 +20,20 @@ control by default. Intensity and nightlight controls are opt-in — see
 | <img src="branding/pura-mini.png" alt="Pura Mini" width="56" /> | **Pura Mini** | 1 | Subtle / Medium / Strong | Yes |
 | <img src="branding/pura-4.png" alt="Pura 4" width="56" /> | **Pura 4** | 2 | Subtle / Medium / Strong | Yes |
 | <img src="branding/pura-plus.png" alt="Pura Plus" width="56" /> | **Pura Plus** | 2 | Subtle / Medium / Strong | No <sup>1</sup> |
-| <img src="branding/pura-home.png" alt="Pura Home" width="56" /> | **Pura Home** | 2 | Subtle / Medium / Strong | Yes |
+| <img src="branding/pura-home.png" alt="Pura Home" width="56" /> | **Pura Home** | 2 | Subtle / Medium / Strong | Yes <sup>2</sup> |
 
 <sup>1</sup> The Pura Plus has an ambient light, but the plugin does not expose it as a HomeKit
 nightlight.
 
+<sup>2</sup> The Pura Home has not yet been exercised against physical hardware. Its controls
+follow the same path as every other model, so they are expected to work, but it will report a
+generic model name in HomeKit until its hardware version is known. If you own one, a
+[report](https://github.com/homebridge-plugins/homebridge-pura/issues) of the `hwVersion` from a
+debug log would let us label it correctly.
+
 Other Pura hardware that reports itself through the same API — including the Pura 3 and the Pura
-Car — is picked up automatically and gets on/off and intensity control, but has not been verified
-against a physical device.
+Car — is picked up automatically and gets on/off and intensity control, but has likewise not been
+verified against a physical device.
 
 ## Installation
 
