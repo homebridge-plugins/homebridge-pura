@@ -798,6 +798,16 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       }
     }
 
+    // Log the shape of every realtime frame. Only DEVICE/MODIFY and TIMER records are acted on;
+    // anything else falls through to a full refresh, silently. Keys are logged rather than values
+    // so the frame can be identified without dumping the whole device record on every update.
+    this.log.debug(
+      `[Realtime] recordType=${String(recordType ?? 'absent')} ` +
+      `eventType=${String(eventType ?? 'absent')} ` +
+      `device=${deviceId || 'absent'} keys=[${Object.keys(record).join(',')}]` +
+      (recordType === 'TIMER' ? ` timerRecord=${this.formatRealtimeValue(record.timerRecord)}` : ''),
+    );
+
     if (deviceId && deviceRecord && recordType === 'DEVICE' && eventType === 'MODIFY') {
       const updated = this.applyDeviceRecord(deviceId, deviceRecord);
       if (updated) {
@@ -828,6 +838,19 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     }
 
     this.triggerWebhookRefresh();
+  }
+
+  /** Compact rendering of a small realtime sub-record for debug output. */
+  private formatRealtimeValue(value: unknown): string {
+    if (value === undefined) {
+      return 'absent';
+    }
+    try {
+      const text = JSON.stringify(value);
+      return text.length > 400 ? `${text.slice(0, 400)}...` : text;
+    } catch {
+      return String(value);
+    }
   }
 
   private applyDeviceRecord(deviceId: string, deviceRecord: Record<string, unknown>): boolean {
