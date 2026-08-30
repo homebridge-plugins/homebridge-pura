@@ -1,6 +1,7 @@
 # Release Notes
 
 ## Unreleased
+- Authenticate API requests with the Cognito ID token. Pura rejects the access token even when it is freshly issued, so every request was answered with a 401, followed by a needless token refresh, a second 401, and only then a successful retry. Each call cost three round trips instead of one. The access token is retained as a fallback. (pypura authenticates the same way.)
 - Report numeric bay intensity on Pura's 1-10 scale. Every level from 1 to 10 previously fell into the same coarse bucket, so a diffuser running at maximum output reported "Subtle" in HomeKit. ([#35](https://github.com/homebridge-plugins/homebridge-pura/pull/35))
 - Keep standard-mode diffusion active for the whole session. Pura holds `activeAt` at the session's original start time and clears it to `0` on stop, so the previous 15-minute window reported long-running sessions as off. The window is widened rather than removed, so a stale timestamp still ages out instead of pinning the diffuser on. ([#35](https://github.com/homebridge-plugins/homebridge-pura/pull/35))
 - Apply realtime `TIMER` events immediately, so a timed diffusion started from the Pura app shows up in HomeKit without waiting for the next poll. Timers scheduled for later, or already elapsed, are ignored.

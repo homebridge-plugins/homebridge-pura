@@ -123,6 +123,21 @@ assert.equal(
   'a missing remaining block must stay undefined rather than defaulting to 0',
 );
 
+// --- Authenticated requests use the ID token ---------------------------------------------------
+// Pura's API rejects the access token even when freshly issued; pypura authenticates with the ID
+// token for the same reason. Getting this backwards costs three round trips on every single call,
+// and the previous code carried a confident comment asserting the opposite - hence the test.
+{
+  const authApi = new PuraApi(silentLog);
+  authApi.session = {
+    isValid: () => true,
+    getAccessToken: () => ({ getExpiration: () => 0, getJwtToken: () => 'ACCESS_TOKEN' }),
+    getIdToken: () => ({ getExpiration: () => 0, getJwtToken: () => 'ID_TOKEN' }),
+  };
+  assert.equal(authApi.getAuthHeader(), 'Bearer ID_TOKEN', 'requests must default to the ID token');
+  assert.equal(authApi.getAuthHeader('access'), 'Bearer ACCESS_TOKEN', 'the access token stays available as a fallback');
+}
+
 // --- Realtime timer events ---------------------------------------------------------------------
 const timerNow = 10_000;
 assert.deepEqual(buildTimerRealtimeDeviceUpdate({ bay: 1, intensity: 7, start: 1234 }, timerNow), {

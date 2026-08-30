@@ -166,15 +166,19 @@ export class PuraApi {
   /**
    * Get authorization header for API requests
    */
-  private getAuthHeader(preferIdToken = false): string {
+  /**
+   * Pura's API authenticates with the Cognito ID token, not the access token. pypura does the
+   * same (`auth_token_type=TokenType.ID_TOKEN`). Sending the access token returns 401 even when it
+   * is freshly issued, so it is kept only as a fallback in case an endpoint ever disagrees.
+   */
+  private getAuthHeader(tokenType: 'id' | 'access' = 'id'): string {
     if (!this.session) {
       throw new Error('Not authenticated');
     }
-    if (preferIdToken) {
-      return `Bearer ${this.session.getIdToken().getJwtToken()}`;
+    if (tokenType === 'access') {
+      return `Bearer ${this.session.getAccessToken().getJwtToken()}`;
     }
-    // Pura API expects access token for bearer auth.
-    return `Bearer ${this.session.getAccessToken().getJwtToken()}`;
+    return `Bearer ${this.session.getIdToken().getJwtToken()}`;
   }
 
   getIdToken(): string | null {
@@ -226,16 +230,15 @@ export class PuraApi {
     };
 
     try {
-      // First attempt with access token.
+      // First attempt with the ID token, which is what Pura's API accepts.
       let { response, responseText } = await doRequest(this.getAuthHeader());
 
       // If unauthorized, try refresh then retry once.
       if (response.status === 401) {
-        // A 401 here should be rare: it means the access token was rejected even though the
-        // session still looks valid locally. Report the session's own view of expiry so a
-        // genuinely expired token can be told apart from one Pura rejects for another reason.
+        // A 401 here should be rare. Report the session's own view of expiry so a genuinely
+        // expired token can be told apart from one Pura rejects for another reason.
         this.log.debug(
-          `[Auth] 401 on ${method.toUpperCase()} ${endpoint} using the access token. ` +
+          `[Auth] 401 on ${method.toUpperCase()} ${endpoint} using the ID token. ` +
           `${this.describeSessionState()}. Refreshing and retrying.`,
         );
         try {
@@ -250,15 +253,15 @@ export class PuraApi {
         }
       }
 
-      // If still unauthorized, try ID token as fallback.
+      // If still unauthorized, fall back to the access token in case an endpoint disagrees.
       if (response.status === 401) {
         this.log.debug(
-          `[Auth] Still 401 after refresh on ${endpoint}; falling back to the ID token. ` +
-          'If this is the path that succeeds, the endpoint wants the ID token rather than the ' +
-          'access token and the first two attempts are wasted round trips.',
+          `[Auth] Still 401 after refresh on ${endpoint}; falling back to the access token. ` +
+          'If this is the path that succeeds, this endpoint wants the access token and the ' +
+          'token preference needs revisiting.',
         );
-        ({ response, responseText } = await doRequest(this.getAuthHeader(true)));
-        this.log.debug(`[Auth] ID token fallback returned ${response.status} for ${endpoint}.`);
+        ({ response, responseText } = await doRequest(this.getAuthHeader('access')));
+        this.log.debug(`[Auth] Access token fallback returned ${response.status} for ${endpoint}.`);
       }
 
       if (!response.ok) {
