@@ -131,6 +131,28 @@ export class PuraApi {
     });
   }
 
+  /**
+   * Describe the current session's expiry without ever emitting the tokens themselves. Cognito
+   * expirations are epoch seconds; a negative remaining value means the token is genuinely stale.
+   */
+  private describeSessionState(): string {
+    if (!this.session) {
+      return 'no session';
+    }
+    try {
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      const accessExp = this.session.getAccessToken().getExpiration();
+      const idExp = this.session.getIdToken().getExpiration();
+      return (
+        `session.isValid=${this.session.isValid()} ` +
+        `accessTokenExpiresIn=${accessExp - nowSeconds}s ` +
+        `idTokenExpiresIn=${idExp - nowSeconds}s`
+      );
+    } catch (error) {
+      return `session state unavailable (${error instanceof Error ? error.message : String(error)})`;
+    }
+  }
+
   private async refreshTokenWithLock(): Promise<PuraAuthTokens> {
     if (this.refreshInFlight) {
       return this.refreshInFlight;
@@ -209,9 +231,20 @@ export class PuraApi {
 
       // If unauthorized, try refresh then retry once.
       if (response.status === 401) {
+        // A 401 here should be rare: it means the access token was rejected even though the
+        // session still looks valid locally. Report the session's own view of expiry so a
+        // genuinely expired token can be told apart from one Pura rejects for another reason.
+        this.log.debug(
+          `[Auth] 401 on ${method.toUpperCase()} ${endpoint} using the access token. ` +
+          `${this.describeSessionState()}. Refreshing and retrying.`,
+        );
         try {
           await this.refreshTokenWithLock();
           ({ response, responseText } = await doRequest(this.getAuthHeader()));
+          this.log.debug(
+            `[Auth] Retry after refresh returned ${response.status} for ${endpoint}. ` +
+            `${this.describeSessionState()}`,
+          );
         } catch (refreshError) {
           this.log.debug('Token refresh failed during request retry:', refreshError);
         }
@@ -219,7 +252,13 @@ export class PuraApi {
 
       // If still unauthorized, try ID token as fallback.
       if (response.status === 401) {
+        this.log.debug(
+          `[Auth] Still 401 after refresh on ${endpoint}; falling back to the ID token. ` +
+          'If this is the path that succeeds, the endpoint wants the ID token rather than the ' +
+          'access token and the first two attempts are wasted round trips.',
+        );
         ({ response, responseText } = await doRequest(this.getAuthHeader(true)));
+        this.log.debug(`[Auth] ID token fallback returned ${response.status} for ${endpoint}.`);
       }
 
       if (!response.ok) {
