@@ -297,7 +297,7 @@
 
       const setTestButtonDefault = () => {
         els.testBtn.className = 'btn test-theme-lock';
-        els.testBtn.innerHTML = '<i class="fa-solid fa-circle-user me-2"></i>' + TEST_BUTTON_TEXT;
+        els.testBtn.innerHTML = '<i class="fa fa-user-circle me-2" aria-hidden="true"></i>' + TEST_BUTTON_TEXT;
         const canTest = canAttemptCredentialTest();
         els.testBtn.disabled = !canTest;
         if (els.testHint) {
@@ -320,7 +320,7 @@
 
       const setTestButtonSuccess = () => {
         els.testBtn.className = 'btn btn-outline-success test-success-lock';
-        els.testBtn.innerHTML = '<i class="fa me-2 fa-circle-check green-text ng-star-inserted" aria-hidden="true"></i>Success';
+        els.testBtn.innerHTML = '<i class="fa fa-check-circle me-2" aria-hidden="true"></i>Success';
         els.testBtn.disabled = true;
         if (els.testHint) {
           els.testHint.classList.remove('test-hint-error');
@@ -332,7 +332,7 @@
 
       const setTestButtonFailed = () => {
         els.testBtn.className = 'btn btn-outline-danger test-fail-lock';
-        els.testBtn.innerHTML = '<i class="fa-solid fa-circle-xmark me-2" aria-hidden="true"></i>Failed';
+        els.testBtn.innerHTML = '<i class="fa fa-times-circle me-2" aria-hidden="true"></i>Failed';
         els.testBtn.disabled = !canAttemptCredentialTest();
       };
 
