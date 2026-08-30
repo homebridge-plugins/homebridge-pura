@@ -35,3 +35,24 @@ jobs:
           npm audit fix || true
           npm list --outdated
           npm run build
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    # Pinned to a single Node version rather than the build matrix above: the test suite drives
+    # the platform through @homebridge/hap-nodejs, which declares engines ^22 || ^24. The plugin
+    # itself still supports Node 18+, and the build job above is what verifies that.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run the test suite
+        run: npm test
