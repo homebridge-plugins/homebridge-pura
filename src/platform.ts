@@ -8,6 +8,50 @@ import { PuraApi } from './puraApi.js';
 import { PuraDevice, PuraConfig } from './puraTypes.js';
 import { fetchLatestCognitoConfig } from './pypuraLookup.js';
 
+/**
+ * Translate a realtime TIMER record into a partial device update so a timed diffusion shows up
+ * in HomeKit immediately instead of waiting for the next poll.
+ *
+ * This deliberately writes only fields that genuinely belong to the device record (the bay's own
+ * active/intensity/activeAt). Synthetic top-level fields must never be emitted here: the result is
+ * deep-merged into the cached `__raw`, so anything invented would stick around and be read back as
+ * real device state until the next full REST refresh. In particular `controller` is left alone,
+ * because every write path resolves `device.controller || 'default'`.
+ */
+export function buildTimerRealtimeDeviceUpdate(
+  timerRecord: unknown,
+  nowSeconds: number = Math.floor(Date.now() / 1000),
+): Record<string, unknown> | undefined {
+  if (!timerRecord || typeof timerRecord !== 'object') {
+    return undefined;
+  }
+  const timer = timerRecord as Record<string, unknown>;
+  const bay = Number(timer.bay);
+  const intensity = Number(timer.intensity);
+  if ((bay !== 1 && bay !== 2) || !Number.isFinite(intensity) || intensity <= 0) {
+    return undefined;
+  }
+  const start = Number(timer.start);
+  const end = Number(timer.end);
+  const hasStart = Number.isFinite(start) && start > 0;
+  // A timer can be created ahead of time; only claim the bay is running once it has started and
+  // has not already elapsed. Allow a small skew so a just-started timer is not rejected.
+  if (hasStart && start > nowSeconds + 60) {
+    return undefined;
+  }
+  if (Number.isFinite(end) && end > 0 && end <= nowSeconds) {
+    return undefined;
+  }
+  return {
+    [`bay${bay}`]: {
+      active: true,
+      intensity,
+      ...(hasStart ? { activeAt: start } : {}),
+      timer,
+    },
+  };
+}
+
 type DiffuserAccessory = PlatformAccessory & {
   context: {
     device: PuraDevice;
@@ -768,6 +812,16 @@ export class PuraPlatform implements DynamicPlatformPlugin {
           }
           return;
         }
+        this.triggerWebhookRefreshWithDelay(2000);
+        return;
+      }
+    }
+
+    if (deviceId && recordType === 'TIMER' && (eventType === 'INSERT' || eventType === 'MODIFY')) {
+      const timerUpdate = buildTimerRealtimeDeviceUpdate(record.timerRecord);
+      if (timerUpdate && this.applyDeviceRecord(deviceId, timerUpdate)) {
+        // The optimistic update above only covers the bay the timer names. Reconcile against the
+        // full device record shortly after, the same way DEVICE/MODIFY does.
         this.triggerWebhookRefreshWithDelay(2000);
         return;
       }
