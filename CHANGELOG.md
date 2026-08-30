@@ -1,6 +1,12 @@
 # Release Notes
 
 ## Unreleased
+- Report numeric bay intensity on Pura's 1-10 scale. Every level from 1 to 10 previously fell into the same coarse bucket, so a diffuser running at maximum output reported "Subtle" in HomeKit. ([#35](https://github.com/homebridge-plugins/homebridge-pura/pull/35))
+- Keep standard-mode diffusion active for the whole session. Pura holds `activeAt` at the session's original start time and clears it to `0` on stop, so the previous 15-minute window reported long-running sessions as off. The window is widened rather than removed, so a stale timestamp still ages out instead of pinning the diffuser on. ([#35](https://github.com/homebridge-plugins/homebridge-pura/pull/35))
+- Apply realtime `TIMER` events immediately, so a timed diffusion started from the Pura app shows up in HomeKit without waiting for the next poll. Timers scheduled for later, or already elapsed, are ignored.
+- Read fragrance remaining level, low-fragrance status and exact intensity from the API. These are recorded in debug output and are not yet surfaced as HomeKit characteristics. ([#35](https://github.com/homebridge-plugins/homebridge-pura/pull/35))
+- Add `npm test`, covering intensity scaling, session-state inference and realtime timer handling.
+- Replace the supported-devices image in the README with a table listing each diffuser's bays, intensity control and nightlight support.
 - Refresh runtime dependencies: `tar`, `ws` and `amazon-cognito-identity-js` (which picks up `js-cookie` 3.x).
 - Refresh development dependencies: `typescript-eslint`, `@types/node` and `nodemon` (which picks up `brace-expansion` 5.0.8).
 - Drop `@types/tar`. `tar` v7 ships its own type definitions, so the DefinitelyTyped stub was stale v6 typing shadowing the real thing.
