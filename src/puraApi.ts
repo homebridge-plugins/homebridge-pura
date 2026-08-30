@@ -622,6 +622,19 @@ export class PuraApi {
         mapPuraNumericIntensityToHomeKit(oscillationIntensityValue) ??
         undefined
       );
+    // Diagnostic for Pura's intensity scale. The app exposes five positions but the REST payload
+    // reports them inconsistently across fields, so log every raw candidate alongside what we
+    // resolved from it. This is what tells us whether all five positions are recoverable.
+    this.log.debug(
+      `[Intensity] device=${parent.deviceId ?? parent.id ?? 'unknown'} bay=${bayNumber} ` +
+      `active=${Boolean(active)} | raw: record=${this.describeRaw(recordIntensityValue)} ` +
+      `defaults=${this.describeRaw(defaultsIntensityValue)} ` +
+      `parentState=${this.describeRaw(parentStateIntensityValue)} ` +
+      `oscillation=${this.describeRaw(oscillationIntensityValue)} ` +
+      `| resolved: coarse=${Math.max(0, Math.min(100, normalizedIntensity))} ` +
+      `exact=${exactIntensity ?? 'none'}`,
+    );
+
     return {
       id: typeof record.id === 'number' ? record.id : bayNumber,
       name: typeof record.name === 'string' ? record.name : undefined,
@@ -634,6 +647,17 @@ export class PuraApi {
       remainingPercent: this.normalizePercentage(remaining?.percent),
       lowFragrance: this.normalizeBooleanish(record.lowFragrance),
     };
+  }
+
+  /** Render a raw payload value with its type, so `5` and `"5"` are distinguishable in logs. */
+  private describeRaw(value: unknown): string {
+    if (value === undefined) {
+      return 'absent';
+    }
+    if (value === null) {
+      return 'null';
+    }
+    return `${JSON.stringify(value)}(${typeof value})`;
   }
 
   private normalizePercentage(value: unknown): number | undefined {

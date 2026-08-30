@@ -1568,6 +1568,7 @@ export class PuraPlatformAccessory {
         id: bay.id,
         active: bay.active,
         intensity: bay.intensity,
+        exactIntensity: bay.exactIntensity,
         activeAt: bay.activeAt,
         timerActive: bay.timer?.active,
         fragrance: bay.fragrance?.name,
