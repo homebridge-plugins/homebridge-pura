@@ -18,6 +18,26 @@ const DEFAULT_USER_POOL_ID = 'us-east-1_LaB718hYv'; // Base64 decoded from pypur
 const DEFAULT_CLIENT_ID = '4iekubat0jb5iljfbaalsiqf9j'; // Base64 decoded from pypura
 const DEFAULT_BASE_URL = 'https://trypura.io/mobile/api/';
 
+export function mapPuraNumericIntensityToHomeKit(intensity: unknown): 20 | 40 | 60 | 80 | 100 | null {
+  const numeric = Number(intensity);
+  if (!Number.isFinite(numeric) || numeric <= 0 || numeric > 10) {
+    return null;
+  }
+  if (numeric <= 1) {
+    return 20;
+  }
+  if (numeric <= 3) {
+    return 40;
+  }
+  if (numeric <= 5) {
+    return 60;
+  }
+  if (numeric <= 7) {
+    return 80;
+  }
+  return 100;
+}
+
 export class PuraApi {
   private userPool: CognitoUserPool;
   private cognitoUser: CognitoUser | null = null;
@@ -535,16 +555,22 @@ export class PuraApi {
       return undefined;
     }
     const record = value as Record<string, unknown>;
+    const remaining = record.remaining && typeof record.remaining === 'object'
+      ? record.remaining as Record<string, unknown>
+      : undefined;
     const activeAtRaw = Number(record.activeAt);
     const activeAt = Number.isFinite(activeAtRaw) && activeAtRaw > 0 ? activeAtRaw : undefined;
     const nowSeconds = Math.floor(Date.now() / 1000);
     const diffusionMode = typeof parent.diffusionMode === 'string' ? parent.diffusionMode : undefined;
     const standardMode = diffusionMode === 'standard';
     const online = this.resolveOnlineState(parent) !== false;
-    // Standard-mode devices can update activeAt less frequently than bay active/intensity fields.
-    // Use a wider window to reduce false OFF transitions between cloud updates.
+    // In standard mode, Pura keeps activeAt at the session's original start time and clears it to 0
+    // only when diffusion stops, so a 15 minute window reported long-running sessions as OFF. The
+    // window is widened rather than removed: if activeAt is ever left stale by the cloud, an
+    // unbounded check would pin the diffuser ON in HomeKit with no way to recover.
+    // Other modes use activeAt as time-bounded evidence because their payload semantics differ.
     const activeAtWindowSeconds = standardMode
-      ? (online ? 900 : 300)
+      ? (online ? 43200 : 300)
       : (online ? 300 : 120);
     const activeAtRecent = activeAt !== undefined &&
       Math.abs(nowSeconds - activeAt) < activeAtWindowSeconds;
@@ -556,13 +582,18 @@ export class PuraApi {
     ];
     const explicitActive = explicitActiveValues.find((state): state is boolean => state !== undefined);
     const hasExplicitActiveSignal = explicitActive !== undefined;
-    const intensityFromRecord = this.normalizeBayIntensity(record.intensity ?? record.level ?? record.strength);
+    const recordIntensityValue = record.intensity ?? record.level ?? record.strength;
+    const defaultsIntensityValue =
+      (parent.deviceDefaults as Record<string, unknown> | undefined)?.[`bay${bayNumber}Intensity`];
+    const parentStateIntensityValue = this.resolveParentStateIntensityValue(parent, bayNumber);
+    const oscillationIntensityValue = this.resolveOscillationIntensityValue(parent.oscillation, bayNumber);
+    const intensityFromRecord = this.normalizeBayIntensity(recordIntensityValue);
     const intensityFromDefaults = this.normalizeBayIntensity(
-      (parent.deviceDefaults as Record<string, unknown> | undefined)?.[`bay${bayNumber}Intensity`],
+      defaultsIntensityValue,
     );
-    const intensityFromParentState = this.normalizeParentStateIntensity(parent, bayNumber);
+    const intensityFromParentState = this.normalizeBayIntensity(parentStateIntensityValue);
     const oscillationActive = this.normalizeOscillationActive(parent.oscillation, bayNumber);
-    const intensityFromOscillation = this.normalizeOscillationIntensity(parent.oscillation, bayNumber);
+    const intensityFromOscillation = this.normalizeBayIntensity(oscillationIntensityValue);
     const intensityEvidence = (
       (intensityFromRecord !== null && Number.isFinite(intensityFromRecord) && intensityFromRecord > 0) ||
       (intensityFromOscillation !== null && Number.isFinite(intensityFromOscillation) && intensityFromOscillation > 0) ||
@@ -578,15 +609,42 @@ export class PuraApi {
     const normalizedIntensity = active
       ? (intensityFromRecord ?? intensityFromOscillation ?? intensityFromParentState ?? intensityFromDefaults ?? 0)
       : reportedIntensity;
+    const exactIntensity = active
+      ? (
+        mapPuraNumericIntensityToHomeKit(recordIntensityValue) ??
+        mapPuraNumericIntensityToHomeKit(oscillationIntensityValue) ??
+        mapPuraNumericIntensityToHomeKit(parentStateIntensityValue) ??
+        mapPuraNumericIntensityToHomeKit(defaultsIntensityValue) ??
+        undefined
+      )
+      : (
+        mapPuraNumericIntensityToHomeKit(recordIntensityValue) ??
+        mapPuraNumericIntensityToHomeKit(oscillationIntensityValue) ??
+        undefined
+      );
     return {
       id: typeof record.id === 'number' ? record.id : bayNumber,
       name: typeof record.name === 'string' ? record.name : undefined,
       active: Boolean(active),
       intensity: Math.max(0, Math.min(100, normalizedIntensity)),
+      exactIntensity,
       activeAt,
       timer: record.timer as PuraTimer | undefined,
       fragrance: record.fragrance as PuraFragrance | undefined,
+      remainingPercent: this.normalizePercentage(remaining?.percent),
+      lowFragrance: this.normalizeBooleanish(record.lowFragrance),
     };
+  }
+
+  private normalizePercentage(value: unknown): number | undefined {
+    if (value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) {
+      return undefined;
+    }
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      return undefined;
+    }
+    return Math.max(0, Math.min(100, numeric));
   }
 
   private resolveOnlineState(source: Record<string, unknown>): boolean | undefined {
@@ -618,16 +676,7 @@ export class PuraApi {
       }
       const asNumber = Number(normalized);
       if (Number.isFinite(asNumber)) {
-        if (asNumber <= 0) {
-          return 0;
-        }
-        if (asNumber <= 33) {
-          return 30;
-        }
-        if (asNumber <= 66) {
-          return 50;
-        }
-        return 100;
+        return this.normalizeNumericBayIntensity(asNumber);
       }
       return null;
     }
@@ -635,8 +684,28 @@ export class PuraApi {
     if (!Number.isFinite(asNumber)) {
       return null;
     }
+    return this.normalizeNumericBayIntensity(asNumber);
+  }
+
+  /**
+   * Pura reports numeric intensity on two different scales depending on the field and model: a
+   * 1-10 level, or a 0-100 percentage. They only overlap at 1-10, and a real device never sits at
+   * 1-10 percent, so treating that range as levels is the correct read. Without it every level
+   * from 1 to 10 fell into the old `<= 33` branch and the diffuser reported "subtle" even at
+   * maximum output.
+   */
+  private normalizeNumericBayIntensity(asNumber: number): number {
     if (asNumber <= 0) {
       return 0;
+    }
+    if (asNumber <= 10) {
+      if (asNumber <= 3) {
+        return 30;
+      }
+      if (asNumber <= 7) {
+        return 50;
+      }
+      return 100;
     }
     if (asNumber <= 33) {
       return 30;
@@ -672,7 +741,7 @@ export class PuraApi {
     return undefined;
   }
 
-  private normalizeParentStateIntensity(parent: Record<string, unknown>, bayNumber: number): number | null {
+  private resolveParentStateIntensityValue(parent: Record<string, unknown>, bayNumber: number): unknown {
     const states = Array.isArray(parent.states) ? parent.states : [];
     const match = states.find((state) => {
       if (!state || typeof state !== 'object') {
@@ -682,22 +751,22 @@ export class PuraApi {
       return stateRecord.bay === bayNumber;
     }) as Record<string, unknown> | undefined;
     if (match) {
-      return this.normalizeBayIntensity(match.intensity ?? match.level ?? match.strength);
+      return match.intensity ?? match.level ?? match.strength;
     }
     const state = parent.state as Record<string, unknown> | undefined;
     if (!state || typeof state !== 'object') {
-      return null;
+      return undefined;
     }
     const currentIndex = Number(state.currentIndex ?? state.bay ?? state.activeBay);
     if (Number.isFinite(currentIndex) && currentIndex === bayNumber) {
-      return this.normalizeBayIntensity(state.intensity ?? state.level ?? state.strength);
+      return state.intensity ?? state.level ?? state.strength;
     }
-    return null;
+    return undefined;
   }
 
-  private normalizeOscillationIntensity(value: unknown, bayNumber: number): number | null {
+  private resolveOscillationIntensityValue(value: unknown, bayNumber: number): unknown {
     if (!value || typeof value !== 'object') {
-      return null;
+      return undefined;
     }
     const record = value as Record<string, unknown>;
     const states = Array.isArray(record.states) ? record.states : [];
@@ -709,13 +778,13 @@ export class PuraApi {
       return stateRecord.bay === bayNumber;
     }) as Record<string, unknown> | undefined;
     if (match) {
-      return this.normalizeBayIntensity(match.intensity);
+      return match.intensity;
     }
     const state = record.state as Record<string, unknown> | undefined;
     if (state && state.currentIndex === bayNumber) {
-      return this.normalizeBayIntensity(state.intensity);
+      return state.intensity;
     }
-    return null;
+    return undefined;
   }
 
   private normalizeOscillationActive(value: unknown, bayNumber: number): boolean {

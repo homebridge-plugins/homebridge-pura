@@ -1571,6 +1571,8 @@ export class PuraPlatformAccessory {
         activeAt: bay.activeAt,
         timerActive: bay.timer?.active,
         fragrance: bay.fragrance?.name,
+        remainingPercent: bay.remainingPercent,
+        lowFragrance: bay.lowFragrance,
       };
     };
     return {
