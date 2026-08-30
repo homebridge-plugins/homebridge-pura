@@ -1,5 +1,11 @@
 # Release Notes
 
+## Unreleased
+- Refresh runtime dependencies: `tar`, `ws` and `amazon-cognito-identity-js` (which picks up `js-cookie` 3.x).
+- Refresh development dependencies: `typescript-eslint`, `@types/node` and `nodemon` (which picks up `brace-expansion` 5.0.8).
+- Drop `@types/tar`. `tar` v7 ships its own type definitions, so the DefinitelyTyped stub was stale v6 typing shadowing the real thing.
+- Drop the `@typescript-eslint/eslint-plugin` and `@typescript-eslint/parser` development dependencies. Only the `typescript-eslint` meta-package is imported by `eslint.config.js`, and declaring all three pinned conflicting versions that blocked dependency updates.
+
 ## 1.6.10 - 2026-06-30
 - Fix accessory persistence on Homebridge 2.1+. The diffuser was re-created on every child-bridge restart, logging `Cannot serialize accessory … - missing associated plugin` and a spurious switch-mode "migration". The accessory handler no longer persists revision metadata before the accessory is registered, so Homebridge can serialize the cached accessories successfully. ([#24](https://github.com/homebridge-plugins/homebridge-pura/issues/24))
 - Bump the `homebridge` development/test dependency to `2.1.0` so CI exercises the stable release users run.
