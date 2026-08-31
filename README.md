@@ -17,10 +17,10 @@ control by default. Intensity and nightlight controls are opt-in — see
 
 | | Diffuser | Fragrance bays | Intensity control | Nightlight control |
 |:--:|:--|:--:|:--|:--:|
-| <img src="branding/pura-mini.png" alt="Pura Mini" width="56" /> | **Pura Mini** | 1 | Subtle / Medium / Strong | Yes |
-| <img src="branding/pura-4.png" alt="Pura 4" width="56" /> | **Pura 4** | 2 | Subtle / Medium / Strong | Yes |
-| <img src="branding/pura-plus.png" alt="Pura Plus" width="56" /> | **Pura Plus** | 2 | Subtle / Medium / Strong | No <sup>1</sup> |
-| <img src="branding/pura-home.png" alt="Pura Home" width="56" /> | **Pura Home** | 2 | Subtle / Medium / Strong | Yes <sup>2</sup> |
+| <img src="branding/pura-mini.png" alt="Pura Mini" width="100" /> | **Pura Mini** | 1 | Subtle / Medium / Strong | Yes |
+| <img src="branding/pura-4.png" alt="Pura 4" width="100" /> | **Pura 4** | 2 | Subtle / Medium / Strong | Yes |
+| <img src="branding/pura-plus.png" alt="Pura Plus" width="100" /> | **Pura Plus** | 2 | Subtle / Medium / Strong | No <sup>1</sup> |
+| <img src="branding/pura-home.png" alt="Pura Home" width="100" /> | **Pura Home** | 2 | Subtle / Medium / Strong | Yes <sup>2</sup> |
 
 <sup>1</sup> The Pura Plus has an ambient light, but the plugin does not expose it as a HomeKit
 nightlight.
