@@ -58,6 +58,17 @@ export const DEVICE_LIST_ENDPOINTS = [
   'v2/users/devices',
 ];
 
+/**
+ * Whether a diffusion mode runs both bays at once.
+ *
+ * `oscillation-multi-bay` is the Pura app's "Auto-alternate fragrances" setting; `standard` runs one
+ * bay at a time. Matching the oscillation family rather than "anything that is not standard" keeps
+ * an unrecognised mode on the conservative path.
+ */
+export function runsBaysConcurrently(diffusionMode: string | undefined): boolean {
+  return typeof diffusionMode === 'string' && diffusionMode.toLowerCase().startsWith('oscillation');
+}
+
 export class PuraApi {
   private userPool: CognitoUserPool;
   private cognitoUser: CognitoUser | null = null;
@@ -508,9 +519,16 @@ export class PuraApi {
     const defaultNightlight = (record.deviceDefaults as Record<string, unknown> | undefined)?.nightlight;
     const nightlight = (record.nightlight ?? defaultNightlight) as PuraNightlight | undefined;
 
+    const diffusionMode = typeof record.diffusionMode === 'string' ? record.diffusionMode : undefined;
     const bay1 = this.normalizeBay(record, record.bay1, 1);
     const bay2 = this.normalizeBay(record, record.bay2, 2);
-    if (bay1 && bay2 && bay1.active && bay2.active) {
+    // In its oscillation modes Pura runs both bays concurrently, each at its own intensity, so
+    // forcing a single active bay there discards half the device - and the tie-break below is
+    // unstable, keeping a different bay depending on whether activeAt happens to be present in that
+    // payload. Standard mode genuinely runs one bay at a time and does occasionally report both as
+    // active, so the collapse is still right for it. Unrecognised modes keep the safer old
+    // behaviour rather than assuming concurrency.
+    if (!runsBaysConcurrently(diffusionMode) && bay1 && bay2 && bay1.active && bay2.active) {
       const bay1Stamp = bay1.activeAt ?? 0;
       const bay2Stamp = bay2.activeAt ?? 0;
       const keepBay = bay1Stamp === bay2Stamp
@@ -533,7 +551,7 @@ export class PuraApi {
       type: this.normalizeModel(this.resolveModelLabel(type, deviceVersion, hwVersion)),
       version: deviceVersion ?? '',
       controller: typeof record.controller === 'string' ? record.controller : undefined,
-      diffusionMode: typeof record.diffusionMode === 'string' ? record.diffusionMode : undefined,
+      diffusionMode,
       state: {
         battery: (record.batteryRemaining || record.battery) as number | undefined,
         firmwareVersion,
@@ -726,7 +744,9 @@ export class PuraApi {
     );
 
     return {
-      id: typeof record.id === 'number' ? record.id : bayNumber,
+      // The bay number, not Pura's internal record id - bay identity is about position.
+      // The raw record id is still reachable through __raw if it is ever needed.
+      id: bayNumber,
       name: typeof record.name === 'string' ? record.name : undefined,
       active: Boolean(active),
       intensity: Math.max(0, Math.min(100, normalizedIntensity)),

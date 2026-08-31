@@ -18,7 +18,12 @@ import {
   uuid,
 } from '@homebridge/hap-nodejs';
 
-import { DEVICE_LIST_ENDPOINTS, mapPuraNumericIntensityToHomeKit, PuraApi } from '../dist/puraApi.js';
+import {
+  DEVICE_LIST_ENDPOINTS,
+  mapPuraNumericIntensityToHomeKit,
+  PuraApi,
+  runsBaysConcurrently,
+} from '../dist/puraApi.js';
 import { buildTimerRealtimeDeviceUpdate, PuraPlatform } from '../dist/platform.js';
 
 const silentLog = { info() {}, debug() {}, warn() {}, error() {} };
@@ -201,6 +206,51 @@ for (const retired of ['users/devices', 'devices']) {
     false,
     'repeating the same update must report no change',
   );
+}
+
+// --- Concurrent bays in oscillation modes ------------------------------------------------------
+// Pura runs both bays at once in oscillation-multi-bay, each at its own intensity. Forcing a single
+// active bay discarded half the device, and picked a different half depending on whether activeAt
+// happened to be present. Standard mode really is one-at-a-time, so the collapse stays there.
+assert.equal(runsBaysConcurrently('oscillation-multi-bay'), true);
+assert.equal(runsBaysConcurrently('standard'), false);
+assert.equal(runsBaysConcurrently(undefined), false, 'an unknown mode must take the conservative path');
+assert.equal(runsBaysConcurrently('some-future-mode'), false);
+
+{
+  const bothRunning = {
+    id: 'dev-1', model: 1, deviceVer: 'v48', connected: true,
+    bay1: { id: 1, activeAt: now }, bay2: { id: 2, activeAt: now },
+    oscillation: { states: [{ bay: 1, active: true, intensity: 1 }, { bay: 2, active: true, intensity: 10 }] },
+  };
+
+  const oscillating = api.normalizeDeviceRecord({ ...bothRunning, diffusionMode: 'oscillation-multi-bay' });
+  assert.equal(oscillating.bay1.active, true, 'bay 1 stays active in oscillation mode');
+  assert.equal(oscillating.bay2.active, true, 'bay 2 stays active in oscillation mode');
+  assert.equal(oscillating.bay1.exactIntensity, 20, 'each bay keeps its own intensity');
+  assert.equal(oscillating.bay2.exactIntensity, 100, 'each bay keeps its own intensity');
+
+  const standard = api.normalizeDeviceRecord({ ...bothRunning, diffusionMode: 'standard' });
+  const stillActive = [standard.bay1.active, standard.bay2.active].filter(Boolean).length;
+  assert.equal(stillActive, 1, 'standard mode still collapses to a single active bay');
+
+  const unknownMode = api.normalizeDeviceRecord({ ...bothRunning, diffusionMode: undefined });
+  assert.equal(
+    [unknownMode.bay1.active, unknownMode.bay2.active].filter(Boolean).length,
+    1,
+    'an unknown mode keeps the conservative single-bay collapse',
+  );
+}
+
+// Bay identity is positional. It used to carry Pura's internal record id, which is meaningless as
+// a bay number and about to become load-bearing.
+{
+  const withRecordIds = api.normalizeDeviceRecord({
+    id: 'dev-1', model: 1, deviceVer: 'v48', connected: true, diffusionMode: 'standard',
+    bay1: { id: 1774673211, activeAt: now }, bay2: { id: 1774673244 },
+  });
+  assert.equal(withRecordIds.bay1.id, 1, 'bay1.id is the bay number');
+  assert.equal(withRecordIds.bay2.id, 2, 'bay2.id is the bay number');
 }
 
 // --- Realtime timer events ---------------------------------------------------------------------
