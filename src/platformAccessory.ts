@@ -895,7 +895,10 @@ export class PuraPlatformAccessory {
         }
 
         const activeBay = this.getEffectiveActiveBayNumber();
-        if (!this.currentStateActive || activeBay !== bay) {
+        // While alternating, both bays are genuinely running, so "is this the one active bay" is
+        // the wrong question - it would ignore an OFF for whichever bay lost the tie-break.
+        const thisBayRunning = this.currentStateActive && this.isBayActive(bay, activeBay);
+        if (!thisBayRunning) {
           // Ignored, so no intent is recorded - see recordIntent above.
           if (this.platform.isDebugEnabled()) {
             this.platform.log.debug(
@@ -913,6 +916,31 @@ export class PuraPlatformAccessory {
           throw new this.platform.api.hap.HapStatusError(
             this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
           );
+        }
+
+        // If another bay is still running - which only happens while alternating - turning this one
+        // off means "run just the other one" rather than "stop the diffuser". Pinning to the other
+        // bay leaves alternation, so the mode is set explicitly too: otherwise the auto-alternate
+        // switch would keep reading on while the device had quietly stopped alternating.
+        const otherRunningBay = this.getConfiguredBayNumbers()
+          .find((candidate) => candidate !== bay && this.isBayActive(candidate, activeBay));
+        if (otherRunningBay) {
+          this.platform.recordIntent(this.device.id, true);
+          if (!await this.puraApi.setAlwaysOn(this.device.id, otherRunningBay)) {
+            this.platform.log.error(`Failed to turn off ${bayLabel}`);
+            this.applyCurrentState();
+            return;
+          }
+          await this.puraApi.setDiffusionMode(this.device.id, DIFFUSION_MODE_SINGLE_BAY);
+          this.device = { ...this.device, diffusionMode: DIFFUSION_MODE_SINGLE_BAY };
+          this.applyAutoAlternateState();
+          this.platform.log.info(
+            `${bayLabel} turned off; ${this.getBayLogLabel(otherRunningBay)} continues and ` +
+            'auto-alternate is now off.',
+          );
+          this.applyCurrentState();
+          this.platform.requestRefreshSoon(2500);
+          return;
         }
 
         this.platform.recordIntent(this.device.id, false);
