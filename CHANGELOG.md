@@ -1,6 +1,6 @@
 # Release Notes
 
-## Unreleased
+## 1.7.0 - 2026-08-30
 - Stop trying two retired device-list endpoints. A Pura outage revealed that `users/devices` answers `400 getDevicesAndMigrate() Error` and `devices` answers `404`, so walking them only delayed an already failing cycle. The failure reported is now the primary endpoint's rather than the last one's, which also stops a transient timeout being misreported as a hard failure and losing the degraded-fetch handling that preserves cached accessories.
 - Stop a realtime reconnect firing an extra poll. Pura's socket closes every few minutes, and each close left a refresh scheduled at the disconnected 15s cadence which still fired after reconnecting. An idle diffuser was making roughly twice the API requests it needed.
 - Only re-authenticate when pypura's Cognito IDs actually change. The hourly check compared pypura's version string alone, so every unrelated release discarded a working session and forced a full re-authentication. Authentication recovery no longer retries with IDs that are already in use either, since that cannot succeed.
