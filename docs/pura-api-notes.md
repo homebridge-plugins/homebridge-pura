@@ -62,22 +62,41 @@ The device list response is keyed by device family rather than being a flat arra
 
 | `diffusionMode` | Pura app | Bay behaviour |
 | --- | --- | --- |
-| `oscillation-multi-bay` | Auto-alternate **on** | Both bays active, alternating, **independent intensities** |
-| `standard` | Auto-alternate **off** | One bay at a time |
+| `oscillation-multi-bay` | Auto-alternate **on** | Both bays in rotation, **independent intensities**, one diffusing at a time |
+| `standard` | Auto-alternate **off** | A single pinned bay |
 
 Confirmed by ha-pura, which exposes it as a switch named "Auto-alternate fragrances" and toggles
 between exactly these two strings.
 
+**Auto-alternate is about rotation over time, not concurrency.** Only one bay diffuses at a time in
+*either* mode — verified against the Pura app, which showed a single running bay while the record
+reported two. Alternating means the device puts both bays in the rotation and swaps between them
+periodically.
+
+### `active` and `activeAt` mean different things
+
+This is the trap, and it is easy to get backwards:
+
+- **`bay.active`** means the bay is *in the rotation*. In auto-alternate mode both bays carry it.
+- **`bay.activeAt`** is stamped on the bay that is *currently diffusing*, and moves when the device
+  swaps.
+
+So `active` alone does not identify the running bay. The rule that fits every observation:
+
+```
+both bays active  -> the one with the later activeAt is running
+one bay active    -> that bay is running, activeAt or not
+neither active    -> nothing is running
+```
+
+The "one bay active" case matters: after a vial is pulled the surviving bay can report
+`active: true` with **no** `activeAt` while genuinely diffusing, so requiring `activeAt` reads it as
+off.
+
 **Auto-alternate and bay selection are independent.** Toggling the mode does not change which bay
 is running, and selecting a single bay does not turn alternation off — a timer targeting one bay
-leaves `diffusionMode` at `oscillation-multi-bay`, and the Pura app behaves the same way. So while
-the mode is on, the device may be alternating across both bays *or* pinned to one; read each bay's
-own `active` rather than inferring it from the mode.
-
-**This is the single most important thing to branch on for multi-bay work.** Mutual exclusion
-between bays is correct in `standard` and wrong in `oscillation-multi-bay`. In oscillation mode a
-device genuinely reports two active bays at different levels, e.g. bay 1 at level 1 while bay 2 runs
-at level 10.
+leaves `diffusionMode` at `oscillation-multi-bay`, and the Pura app behaves the same way. Pulling a
+vial does not touch the toggle either.
 
 ## Intensity
 
@@ -230,14 +249,14 @@ caveats worth keeping in mind:
 ## Known rough edges
 
 Things confirmed to be wrong or incoherent, left in place because fixing them changes visible
-behaviour and belongs with the multi-bay work:
+behaviour:
 
-- **`normalizeDeviceRecord` forces bay exclusivity.** When both bays report active it zeroes one,
-  chosen by `activeAt` and then by intensity. In oscillation mode this discards a genuinely running
-  bay — and worse, it is *unstable*: the same physical state picks a different bay depending on
-  whether `activeAt` happens to be present, so HomeKit's idea of "the active bay" flips between
-  refreshes.
-- **`exactIntensity` survives that collapse.** A zeroed bay keeps reporting an exact level, so it
-  reads `active: false, intensity: 0, exactIntensity: 60`.
+- **`normalizeDeviceRecord` still collapses bays in `standard` mode.** When both bays report active
+  it zeroes one, chosen by `activeAt` and then by intensity, which also discards that bay's
+  intensity. Disabled in auto-alternate mode, where per-bay intensities have to survive. Harmless
+  today because per-bay reads fall back to the cached intensity, but it is a lossy step that only
+  exists to prop up the single-accessory view.
+- **`exactIntensity` survives that collapse**, so a zeroed bay reads
+  `active: false, intensity: 0, exactIntensity: 60`.
 - **`bay.id`** is Pura's internal record id (a large integer), not the bay number.
 - **`device.awayMode`** is typed `boolean` but arrives as an object, e.g. `{away, enabled}`.
