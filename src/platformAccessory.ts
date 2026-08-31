@@ -2143,13 +2143,6 @@ export class PuraPlatformAccessory {
     }
     this.logInferredOfflineTransition();
     this.logRecommendationHints(stabilizedDevice);
-    if (this.enableBayControl && this.platform.isDebugEnabled()) {
-      const key = this.summarizeBayDebugState();
-      if (key !== this.lastBayUpdateDebugKey) {
-        this.lastBayUpdateDebugKey = key;
-        this.platform.log.debug(`[BayControl] Device update for ${this.getDiffuserLogLabel()}: ${key}`);
-      }
-    }
     this.accessory.context.device = stabilizedDevice;
     this.updateAccessoryInformation();
     if (this.platform.isDebugEnabled()) {
@@ -2166,6 +2159,16 @@ export class PuraPlatformAccessory {
     }
     this.logNightlightProfileRoundTrip(previousNightlight, stabilizedDevice.nightlight);
     this.updateCurrentState();
+    // After updateCurrentState, not before: currentStateActive and the effective bay are resolved
+    // there, so logging earlier printed the previous update's values next to this update's bays -
+    // a diagnostic that reads as a contradiction while nothing is actually wrong.
+    if (this.enableBayControl && this.platform.isDebugEnabled()) {
+      const key = this.summarizeBayDebugState();
+      if (key !== this.lastBayUpdateDebugKey) {
+        this.lastBayUpdateDebugKey = key;
+        this.platform.log.debug(`[BayControl] Device update for ${this.getDiffuserLogLabel()}: ${key}`);
+      }
+    }
     // Pura re-syncs the nightlight whenever diffusion starts on a bay - which includes switching
     // from one bay to the other while already running, as a timer or the auto-alternate cycle does.
     // Arming only on an off->on transition missed those, so the nightlight came on and stayed on.
