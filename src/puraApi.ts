@@ -700,9 +700,16 @@ export class PuraApi {
       return `bay${bayNumber}=no-fragrance ${described.join(' ')}`;
     };
     const notable = [describe(1), describe(2)].filter((entry): entry is string => entry !== undefined);
-    if (notable.length > 0) {
-      this.log.debug(`[Bays] device=${deviceId} ${notable.join(' ')}`);
+    if (notable.length === 0) {
+      return;
     }
+    // When a bay comes through as null there is nothing in it to inspect, so widen to the record it
+    // sits in: if bay presence is reported anywhere else - a count, a vials array, a status block -
+    // this is what will show the field to look at.
+    const context = notable.some((entry) => entry.endsWith('=null') || entry.endsWith('=undefined'))
+      ? ` record=[${Object.keys(record).join(',')}]`
+      : '';
+    this.log.debug(`[Bays] device=${deviceId} ${notable.join(' ')}${context}`);
   }
 
   private normalizeBay(parent: Record<string, unknown>, value: unknown, bayNumber: number): PuraBay | undefined {
