@@ -283,7 +283,9 @@ export class PuraPlatformAccessory {
   }
 
   private getBayServiceName(bay: 1 | 2): string {
-    return `${this.getDiffuserLogLabel()} Bay ${bay}`;
+    // No diffuser prefix: Home already shows these nested under the accessory, so repeating it
+    // reads as "Hallway Diffuser > Hallway Diffuser Bay 1".
+    return `Bay ${bay}`;
   }
 
   private removeServiceIfPresent(service?: Service) {
@@ -348,7 +350,7 @@ export class PuraPlatformAccessory {
         const name = this.getBayServiceName(bay);
         const existing = this.accessory.getServiceById(this.platform.Service.Fanv2, subtype);
         const service = existing || this.accessory.addService(this.platform.Service.Fanv2, name, subtype);
-        service.setCharacteristic(this.platform.Characteristic.Name, name);
+        this.setServiceName(service, name);
         service.getCharacteristic(this.platform.Characteristic.Active)
           .onSet((value) => this.setBayOn(bay, value))
           .onGet(() => this.getBayOn(bay));
@@ -378,7 +380,7 @@ export class PuraPlatformAccessory {
         const name = this.getBayServiceName(bay);
         const existing = this.accessory.getServiceById(this.platform.Service.Switch, subtype);
         const service = existing || this.accessory.addService(this.platform.Service.Switch, name, subtype);
-        service.setCharacteristic(this.platform.Characteristic.Name, name);
+        this.setServiceName(service, name);
         service.getCharacteristic(this.platform.Characteristic.On)
           .onSet((value) => this.setBayOn(bay, value))
           .onGet(() => this.getBayOn(bay));
@@ -800,7 +802,6 @@ export class PuraPlatformAccessory {
         : Boolean(value);
       this.lastSetOnCommandAt = Date.now();
       this.platform.log.debug(`Set Characteristic Active for ${bayLabel} ->`, value);
-      this.platform.recordIntent(this.device.id, isOn);
       if (this.platform.isDebugEnabled()) {
         this.platform.log.debug(
           `[BayControl] setBayOn request for ${bayLabel}: ` +
@@ -811,6 +812,7 @@ export class PuraPlatformAccessory {
 
       try {
         if (isOn) {
+          this.platform.recordIntent(this.device.id, true);
           if (this.isDeviceUnavailable()) {
             this.enforceOffVisualState();
             this.updateFaultState();
@@ -894,6 +896,7 @@ export class PuraPlatformAccessory {
 
         const activeBay = this.getEffectiveActiveBayNumber();
         if (!this.currentStateActive || activeBay !== bay) {
+          // Ignored, so no intent is recorded - see recordIntent above.
           if (this.platform.isDebugEnabled()) {
             this.platform.log.debug(
               `[BayControl] Ignoring OFF for ${bayLabel}: ` +
@@ -912,6 +915,7 @@ export class PuraPlatformAccessory {
           );
         }
 
+        this.platform.recordIntent(this.device.id, false);
         const success = await this.puraApi.stopAll(this.device.id);
         if (!success) {
           this.platform.log.error(`Failed to turn off ${bayLabel}`);
@@ -2367,6 +2371,22 @@ export class PuraPlatformAccessory {
     return true;
   }
 
+  /**
+   * Whether a bay should read as on in HomeKit.
+   *
+   * Modes that run one bay at a time keep the existing single-active-bay logic, which also carries
+   * the pending-intent handling that stops a HomeKit write flapping. Oscillation modes genuinely run
+   * both bays, so each reports its own state - deriving them from one "active bay" left the other
+   * tile permanently off no matter what the device was doing.
+   */
+  private isBayActive(bay: 1 | 2, effectiveActiveBay: 1 | 2 | undefined): boolean {
+    if (!runsBaysConcurrently(this.device.diffusionMode)) {
+      return effectiveActiveBay === bay;
+    }
+    const source = bay === 1 ? this.device.bay1 : this.device.bay2;
+    return Boolean(source?.active);
+  }
+
   private applyCurrentState() {
     if (this.enableBayControl) {
       const activeBay = this.getEffectiveActiveBayNumber();
@@ -2375,7 +2395,7 @@ export class PuraPlatformAccessory {
         if (!service) {
           continue;
         }
-        const isActive = activeBay === bay;
+        const isActive = this.isBayActive(bay, activeBay);
         const value = this.getBayCharacteristicState(isActive);
         const activeCharacteristic = this.useFanService
           ? this.platform.Characteristic.Active
