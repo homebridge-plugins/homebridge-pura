@@ -77,6 +77,8 @@ export class PuraPlatformAccessory {
   private pendingPowerOnIntensityLogTimer?: ReturnType<typeof setTimeout>;
   private lastDiffuserActivatedAt?: number;
   private activeBayNumber?: 1 | 2;
+  /** Last activeAt seen per bay, used to spot a fresh diffusion session. */
+  private lastBayActiveAt: Partial<Record<1 | 2, number>> = {};
   private lastSuccessfulOnWriteAt?: number;
   private lastSetOnCommandAt?: number;
   private lastRotationWriteAt?: number;
@@ -464,19 +466,17 @@ export class PuraPlatformAccessory {
     return [this.bayServices[1], this.bayServices[2]].filter((service): service is Service => Boolean(service));
   }
 
-  /** Whether a bay can diffuse: a vial is present and has something left in it. */
+  /**
+   * Whether a bay can diffuse.
+   *
+   * Only a positive report of nothing left counts. Pura's payloads are routinely partial - realtime
+   * frames omit the fragrance block, and a reconciling refresh can drop a whole bay - so a missing
+   * fragrance or a missing bay says nothing about whether a vial is seated. Inferring "empty" from
+   * silence disabled a bay holding a full vial and refused to turn it on.
+   */
   private isBayUsable(bay: 1 | 2): boolean {
     const source = bay === 1 ? this.device.bay1 : this.device.bay2;
-    if (!source) {
-      return false;
-    }
-    // No fragrance block at all means no vial seated - that is how an empty bay arrives.
-    if (!source.fragrance?.id && !source.fragrance?.name) {
-      return false;
-    }
-    // A seated but spent vial reports 0; undefined just means the device has not said yet, which
-    // is not the same thing and must not be treated as empty.
-    return source.remainingPercent === undefined || source.remainingPercent > 0;
+    return source?.remainingPercent !== 0;
   }
 
   private isFragranceLevelEnabled(): boolean {
@@ -2085,7 +2085,9 @@ export class PuraPlatformAccessory {
     const nightlightStabilizedDevice = this.clampNightlightDuringHold(
       this.stabilizeNightlightDuringIntentWindow(device),
     );
-    const stabilizedDevice = this.stabilizeIntensityDuringIntentWindow(nightlightStabilizedDevice);
+    const stabilizedDevice = this.retainKnownBays(
+      this.stabilizeIntensityDuringIntentWindow(nightlightStabilizedDevice),
+    );
     const previousNightlight = this.device.nightlight;
     const previousOnline = this.normalizeOnlineState(this.device.online);
     const nextOnline = this.normalizeOnlineState(stabilizedDevice.online);
@@ -2130,13 +2132,48 @@ export class PuraPlatformAccessory {
       && previousActiveBayNumber !== undefined
       && this.activeBayNumber !== undefined
       && previousActiveBayNumber !== this.activeBayNumber;
-    if (diffuserJustActivated || activeBayJustChanged) {
+    // A session started from the Pura app on the bay already showing as active is neither of the
+    // above - nothing about the plugin's view changes except that the bay gets a fresh activeAt
+    // stamp. That is the only signal, and without it the nightlight came on and stayed on.
+    const sessionJustStarted = this.consumeNewBayActivation();
+    if (diffuserJustActivated || activeBayJustChanged || sessionJustStarted) {
       this.lastDiffuserActivatedAt = Date.now();
     }
     if (previousDiffuserActive && !this.currentStateActive) {
       this.cancelPendingPowerOnIntensityLog();
     }
     void this.maybeForceNightlightOff();
+  }
+
+  /**
+   * Whether any bay has been stamped with a newer activeAt than last time, meaning the device has
+   * started diffusing afresh. Records what it saw, so a given stamp only reports once.
+   */
+  private consumeNewBayActivation(): boolean {
+    let started = false;
+    for (const bay of [1, 2] as const) {
+      const source = bay === 1 ? this.device.bay1 : this.device.bay2;
+      if (!source) {
+        // The payload says nothing about this bay; keep what was last known.
+        continue;
+      }
+      // A bay reported without activeAt is idle, which has to be recorded as its own value -
+      // otherwise the idle-to-running edge looks like a first sighting and never fires.
+      const activeAt = typeof source.activeAt === 'number' && Number.isFinite(source.activeAt)
+        ? source.activeAt
+        : 0;
+      const previous = this.lastBayActiveAt[bay];
+      if (previous === undefined) {
+        // First sighting is whatever the device was already doing, not a new session.
+        this.lastBayActiveAt[bay] = activeAt;
+        continue;
+      }
+      if (activeAt > previous) {
+        started = true;
+        this.lastBayActiveAt[bay] = activeAt;
+      }
+    }
+    return started;
   }
 
   private logInferredOfflineTransition() {
@@ -3284,6 +3321,58 @@ export class PuraPlatformAccessory {
     }
 
     return undefined;
+  }
+
+  /**
+   * Carry what is already known about a bay across a payload that does not mention it.
+   *
+   * Pura's payloads are routinely partial. Realtime device frames report a bay's intensity but omit
+   * its fragrance block entirely, and a reconciling REST refresh sometimes drops the bay altogether
+   * - both observed while a full vial was physically seated. Every one of those made the bay look
+   * gone: the tile lost its fragrance name, read off, and refused to turn on.
+   *
+   * Bays are physical and do not come and go, so once the device has described one, that stands
+   * until it says something new. A bay missing from a payload is carried forward as idle, which is
+   * the conservative read and matches every observation - the dropped bay has never been the one
+   * actually diffusing.
+   *
+   * The cache lives in accessory context so it survives a restart, which is exactly when the plugin
+   * is least able to tell a quiet payload from a real change.
+   */
+  private retainKnownBays(device: PuraDevice): PuraDevice {
+    const merged: Partial<Record<'bay1' | 'bay2', PuraBay>> = {};
+    let changed = false;
+    for (const bay of [1, 2] as const) {
+      const key = bay === 1 ? 'bay1' : 'bay2';
+      const cacheKey = bay === 1 ? 'lastKnownBay1' : 'lastKnownBay2';
+      const context = this.accessory.context as Record<string, unknown>;
+      const incoming = device[key];
+      const cached = context[cacheKey] as PuraBay | undefined;
+
+      if (!incoming) {
+        if (cached) {
+          merged[key] = { ...cached, active: false, activeAt: undefined };
+          changed = true;
+        }
+        continue;
+      }
+
+      const hasFragrance = Boolean(incoming.fragrance?.id || incoming.fragrance?.name);
+      const resolved = hasFragrance || !cached
+        ? incoming
+        : {
+          ...incoming,
+          fragrance: cached.fragrance,
+          remainingPercent: incoming.remainingPercent ?? cached.remainingPercent,
+          lowFragrance: incoming.lowFragrance ?? cached.lowFragrance,
+        };
+      if (resolved !== incoming) {
+        merged[key] = resolved;
+        changed = true;
+      }
+      context[cacheKey] = { ...resolved, active: false, activeAt: undefined };
+    }
+    return changed ? { ...device, ...merged } : device;
   }
 
   private fillBayIntensityFromCache(bay?: PuraBay): PuraBay | undefined {

@@ -396,16 +396,90 @@ for (const key of ['controller', 'deviceActiveState']) {
   const { PuraPlatformAccessory } = await import('../dist/platformAccessory.js');
   const usable = (bay1) => PuraPlatformAccessory.prototype.isBayUsable.call({ device: { bay1 } }, 1);
 
-  assert.equal(usable(undefined), false, 'an absent bay is not usable');
-  assert.equal(usable({}), false, 'a bay with no fragrance block has no vial seated');
   assert.equal(usable({ fragrance: { name: 'Vetiver' }, remainingPercent: 0 }), false, 'a spent vial is not usable');
   assert.equal(usable({ fragrance: { name: 'Vetiver' }, remainingPercent: 1 }), true, '1% left still diffuses');
+
+  // Everything below is a partial payload observed from hardware while a full vial was seated.
+  // Reading any of them as empty disabled a working bay and refused to turn it on.
+  assert.equal(usable(undefined), true, 'a refresh that drops the bay says nothing about the vial');
+  assert.equal(usable({}), true, 'a bay reported with no fields at all is unknown, not empty');
+  assert.equal(
+    usable({ active: true, intensity: 30 }),
+    true,
+    'a realtime frame carries intensity but omits the fragrance block',
+  );
   assert.equal(
     usable({ fragrance: { name: 'Vetiver' }, remainingPercent: undefined }),
     true,
     'an unreported remaining is unknown, not empty',
   );
-  assert.equal(usable({ fragrance: { id: 'abc' } }), true, 'a fragrance id alone is enough to be seated');
+}
+
+// --- Partial payload stickiness -----------------------------------------------------------------
+// Realtime frames omit the fragrance block and a reconciling refresh sometimes drops the bay
+// outright, both while a vial is seated. Bays are physical and do not come and go, so what the
+// device last said has to survive - otherwise the tile loses its name and reads empty every time
+// one of those arrives.
+{
+  const { PuraPlatformAccessory } = await import('../dist/platformAccessory.js');
+  const { retainKnownBays } = PuraPlatformAccessory.prototype;
+  const ctx = { accessory: { context: {} } };
+  const apply = (device) => retainKnownBays.call(ctx, device);
+
+  const volcano = { id: 2, active: true, intensity: 30, activeAt: 1788157375, fragrance: { name: 'Volcano' }, remainingPercent: 100 };
+  assert.equal(apply({ bay2: volcano }).bay2.fragrance.name, 'Volcano', 'a full report passes through');
+
+  // Realtime: bay present, fragrance block gone.
+  const fromRealtime = apply({ bay2: { id: 2, active: true, intensity: 30 } });
+  assert.equal(fromRealtime.bay2.fragrance.name, 'Volcano', 'the known fragrance is carried over');
+  assert.equal(fromRealtime.bay2.remainingPercent, 100, 'so is the remaining percentage');
+  assert.equal(fromRealtime.bay2.intensity, 30, 'without discarding what the frame did report');
+  assert.equal(fromRealtime.bay2.active, true, 'and without overriding the reported state');
+
+  // Refresh drops the bay entirely.
+  const dropped = apply({ bay2: undefined });
+  assert.equal(dropped.bay2.fragrance.name, 'Volcano', 'a dropped bay is restored, not treated as gone');
+  assert.equal(dropped.bay2.active, false, 'and carried forward as idle - a dropped bay is never the running one');
+  assert.equal(dropped.bay2.activeAt, undefined, 'with no stale activeAt to mistake for a new session');
+
+  // A genuine change replaces the cache rather than being masked by it.
+  assert.equal(apply({ bay2: { id: 2, fragrance: { name: 'Salt' }, remainingPercent: 90 } }).bay2.fragrance.name, 'Salt', 'a new vial wins');
+  assert.equal(apply({ bay2: { id: 2 } }).bay2.fragrance.name, 'Salt', 'and becomes what is carried over');
+
+  // A positive zero is real information and the only empty signal there is.
+  assert.equal(apply({ bay2: { id: 2, remainingPercent: 0 } }).bay2.remainingPercent, 0, 'a reported zero survives the merge');
+
+  // A bay never seen is not invented - a single-bay diffuser must not grow a second one.
+  const fresh = { accessory: { context: {} } };
+  assert.equal(retainKnownBays.call(fresh, { bay1: { id: 1 } }).bay2, undefined, 'an unseen bay stays absent');
+}
+
+// --- New diffusion session ----------------------------------------------------------------------
+// Starting a bay from the Pura app that HomeKit already shows as active changes nothing the plugin
+// tracks except a fresh activeAt stamp. That is the only signal the nightlight auto-off can arm on.
+{
+  const { PuraPlatformAccessory } = await import('../dist/platformAccessory.js');
+  const { consumeNewBayActivation } = PuraPlatformAccessory.prototype;
+  const ctx = { lastBayActiveAt: {}, device: {} };
+  const seeing = (bay1, bay2) => {
+    ctx.device = { bay1, bay2 };
+    return consumeNewBayActivation.call(ctx);
+  };
+
+  // Startup: whatever the device is already doing is not a new session.
+  assert.equal(seeing({ activeAt: undefined }, { activeAt: 1788157375 }), false, 'first sighting never fires');
+  assert.equal(seeing({ activeAt: undefined }, { activeAt: 1788157375 }), false, 'an unchanged view is quiet');
+
+  // Bay 2's frame drops activeAt without diffusion having restarted anywhere.
+  assert.equal(seeing({ activeAt: undefined }, { activeAt: undefined }), false, 'a stamp going away is not a start');
+
+  // Bay 1 starts in the Pura app: idle -> stamped, on the bay already showing active.
+  assert.equal(seeing({ activeAt: 1788158575 }, { activeAt: undefined }), true, 'a fresh stamp is a new session');
+  assert.equal(seeing({ activeAt: 1788158575 }, { activeAt: undefined }), false, 'and only reports once');
+
+  // A bay missing from the payload must not clear what was known about it.
+  assert.equal(seeing({ activeAt: 1788158575 }, undefined), false, 'an absent bay is not a change');
+  assert.equal(seeing({ activeAt: 1788158575 }, { activeAt: 1788157375 }), false, 'bay 2 returning at its old stamp is quiet');
 }
 
 // --- Bay active state ---------------------------------------------------------------------------
@@ -438,7 +512,7 @@ for (const key of ['controller', 'deviceActiveState']) {
   assert.equal(activeIn('oscillation-multi-bay', running, running, undefined, 1), false, 'no active bay means off');
 
   // An empty bay is off in either mode, even when the device claims it is the active one.
-  const empty = { active: true };
+  const empty = { active: true, remainingPercent: 0 };
   assert.equal(activeIn('standard', empty, running, 1, 1), false, 'an empty bay reads off in standard mode');
   assert.equal(activeIn('oscillation-multi-bay', empty, running, 1, 1), false, 'an empty bay reads off when alternating');
 }
@@ -573,23 +647,20 @@ for (const key of ['controller', 'deviceActiveState']) {
     };
   };
 
-  // Bay 2 holds no vial: refuse, and touch nothing.
-  const empty = makeContext(undefined);
-  await assert.rejects(
-    () => proto.setBayRotationSpeed.call(empty.context, 2, 60),
-    (error) => error.hapStatus === HAPStatus.RESOURCE_DOES_NOT_EXIST,
-    'an empty bay is refused as missing, not as a communication failure',
-  );
-  assert.deepEqual(empty.calls, [], 'an empty bay is never re-armed and never written');
-
-  // A spent vial is refused the same way.
+  // A spent vial is refused as missing, not as a communication failure.
   const spent = makeContext({ id: 2, fragrance: { name: 'Volcano' }, remainingPercent: 0 });
   await assert.rejects(
     () => proto.setBayRotationSpeed.call(spent.context, 2, 60),
     (error) => error.hapStatus === HAPStatus.RESOURCE_DOES_NOT_EXIST,
-    'a spent vial is refused too',
+    'a spent vial is refused',
   );
   assert.deepEqual(spent.calls, [], 'a spent bay is never re-armed and never written');
+
+  // A bay whose payload simply says nothing about a vial is unknown, not empty, and must go
+  // through - refusing it locked out a bay holding a full vial.
+  const quiet = makeContext({ id: 2, active: true, intensity: 30 });
+  await proto.setBayRotationSpeed.call(quiet.context, 2, 60);
+  assert.deepEqual(quiet.calls, ['alwaysOn:2', 'intensity:2:50'], 'a bay with no fragrance reported still works');
 
   // A usable bay still goes through, so the guard is not simply blocking everything.
   const usable = makeContext({ id: 2, fragrance: { name: 'Volcano' }, remainingPercent: 40 });
