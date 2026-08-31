@@ -396,9 +396,6 @@ for (const key of ['controller', 'deviceActiveState']) {
   const { PuraPlatformAccessory } = await import('../dist/platformAccessory.js');
   const usable = (bay1) => PuraPlatformAccessory.prototype.isBayUsable.call({ device: { bay1 } }, 1);
 
-  assert.equal(usable({ fragrance: { name: 'Vetiver' }, remainingPercent: 0 }), false, 'a spent vial is not usable');
-  assert.equal(usable({ fragrance: { name: 'Vetiver' }, remainingPercent: 1 }), true, '1% left still diffuses');
-
   // vialId is the one field that positively separates an empty bay from a quiet payload, verified
   // by reading the same realtime shape with the vial in and out.
   assert.equal(usable({ vialId: '', isSmartVial: false }), false, 'an empty vialId is Pura saying the bay is empty');
@@ -407,6 +404,16 @@ for (const key of ['controller', 'deviceActiveState']) {
     true,
     'a seated vial reports its id even when the fragrance block is absent',
   );
+
+  // Remaining is Pura's estimate from wearing time, not a measurement, and the device diffuses
+  // straight through zero - a Mini was seen running a bay at 0%. Calling that unusable showed it
+  // off in HomeKit while it ran, with no way to stop it.
+  assert.equal(
+    usable({ fragrance: { name: 'Volcano' }, remainingPercent: 0, lowFragrance: true, active: true }),
+    true,
+    'a bay at 0% is still usable - the device keeps running it',
+  );
+  assert.equal(usable({ fragrance: { name: 'Vetiver' }, remainingPercent: 1 }), true, '1% left still diffuses');
 
   // Everything below is a partial payload observed from hardware while a full vial was seated.
   // Reading any of them as empty disabled a working bay and refused to turn it on.
@@ -589,8 +596,8 @@ for (const key of ['controller', 'deviceActiveState']) {
   // Nothing running at all.
   assert.equal(activeIn('oscillation-multi-bay', running, running, undefined, 1), false, 'no active bay means off');
 
-  // An empty bay is off in either mode, even when the device claims it is the active one.
-  const empty = { active: true, remainingPercent: 0 };
+  // A bay with no vial is off in either mode, even when the device claims it is the active one.
+  const empty = { active: true, vialId: '' };
   assert.equal(activeIn('standard', empty, running, 1, 1), false, 'an empty bay reads off in standard mode');
   assert.equal(activeIn('oscillation-multi-bay', empty, running, 1, 1), false, 'an empty bay reads off when alternating');
 }
@@ -754,14 +761,14 @@ for (const key of ['controller', 'deviceActiveState']) {
     };
   };
 
-  // A spent vial is refused as missing, not as a communication failure.
-  const spent = makeContext({ id: 2, fragrance: { name: 'Volcano' }, remainingPercent: 0 });
+  // A bay with no vial is refused as missing, not as a communication failure.
+  const empty = makeContext({ id: 2, vialId: '', isSmartVial: false });
   await assert.rejects(
-    () => proto.setBayRotationSpeed.call(spent.context, 2, 60),
+    () => proto.setBayRotationSpeed.call(empty.context, 2, 60),
     (error) => error.hapStatus === HAPStatus.RESOURCE_DOES_NOT_EXIST,
-    'a spent vial is refused',
+    'an empty bay is refused',
   );
-  assert.deepEqual(spent.calls, [], 'a spent bay is never re-armed and never written');
+  assert.deepEqual(empty.calls, [], 'an empty bay is never re-armed and never written');
 
   // A bay whose payload simply says nothing about a vial is unknown, not empty, and must go
   // through - refusing it locked out a bay holding a full vial.

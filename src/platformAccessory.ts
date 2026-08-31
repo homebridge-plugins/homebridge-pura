@@ -492,14 +492,17 @@ export class PuraPlatformAccessory {
    *
    * `vialId` is the one field that does distinguish them, verified by reading the same realtime
    * shape with the vial in and out: seated reports the vial's hardware id even with no fragrance
-   * block, empty reports an empty string. A spent vial reporting 0% is the other positive signal.
+   * block, empty reports an empty string.
+   *
+   * A remaining of 0% deliberately does *not* count. It is Pura's estimate from wearing time, not a
+   * measurement, and the device keeps diffusing straight through it - a Pura Mini was observed
+   * running a bay reporting 0%. Treating it as unusable showed that bay as off in HomeKit while it
+   * ran, and left no way to stop it: the tile reads off, so Home only ever offers to turn it on,
+   * which the same check then refuses.
    */
   private isBayUsable(bay: 1 | 2): boolean {
     const source = bay === 1 ? this.device.bay1 : this.device.bay2;
-    if (source?.vialId === '') {
-      return false;
-    }
-    return source?.remainingPercent !== 0;
+    return source?.vialId !== '';
   }
 
   /**

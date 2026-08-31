@@ -157,6 +157,10 @@ that range can be read as levels unambiguously.
 `bay.remaining.percent` is a 0-100 percentage. `bay.lowFragrance` flips to `true` at **10%** -
 observed on a bay crossing from 11 to 10.
 
+It is an estimate derived from `wearingTime`, not a measurement of what is in the vial, so it is not
+a statement about whether the bay can diffuse - the device runs a bay reporting 0% quite happily.
+`vialId` is the field to read for that.
+
 ## Timers
 
 Timer state is **not** exposed per bay. `bay.timer` is never populated, even while a timer runs.
@@ -259,15 +263,20 @@ A seated vial reports its hardware id **even in the realtime frames that omit th
 so `vialId` survives exactly the partial payloads that defeat everything else. An empty bay reports
 an empty string with every other field zeroed.
 
-So there are two positive empty signals, and only these two:
+So there is exactly one signal that a bay cannot diffuse:
 
 ```
-bay.vialId === ''            -> empty, no vial seated
-bay.remaining.percent === 0  -> seated but spent
+bay.vialId === ''   -> no vial seated
 ```
 
 Everything else — a missing fragrance block, `bay: null`, a bay dropped from a refresh — occurs
 routinely with a full vial in and must not be read as empty.
+
+**`remaining.percent === 0` is not one of them.** Remaining is Pura's estimate from `wearingTime`,
+not a measurement, and the device diffuses straight through zero: a Pura Mini was observed with
+`remaining.percent: 0`, `lowFragrance: true`, `active: true` and a live `activeAt`. Treating zero as
+unusable showed that bay as off in HomeKit while it ran, and left no way to stop it — a tile reading
+off is only ever offered "turn on", which the same check then refuses.
 
 `vialId` is also the right cache key for anything remembered per bay: a changed id is a new vial, so
 a remembered fragrance name must not carry across it.
