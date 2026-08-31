@@ -1,6 +1,6 @@
 # Release Notes
 
-## Unreleased
+## 1.7.1 - 2026-08-30
 - Draw the custom UI's icons inline instead of relying on the Homebridge UI's icon font. The plugin's settings page runs in an iframe and has no icon font of its own, and the host appears to inject only the glyphs it uses itself: `fa-eye` and `fa-spinner` rendered while `fa-user-circle` did not, leaving the Verify button showing a missing-glyph box. The icons are now self-contained SVG that inherit the button's colour, so they cannot regress when the host changes.
 
 ## 1.7.0 - 2026-08-30
