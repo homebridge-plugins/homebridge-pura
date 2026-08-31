@@ -4,10 +4,14 @@
  * These are the read-path behaviours that changed independently of any per-bay or per-fragrance
  * control surface: how numeric intensity is scaled, how long a standard-mode session stays active,
  * and how a realtime TIMER event is folded into the cached device record.
+ *
+ * Also covers per-bay control, where the recurring defect has been a guard applied to one write
+ * path but not its sibling: which bay reads as on, which bay a write lands on, and what happens
+ * when a bay has nothing to diffuse.
  */
 
 import assert from 'node:assert/strict';
-import { exit } from 'node:process';
+import { exit, stdout } from 'node:process';
 
 import {
   Accessory,
@@ -384,6 +388,189 @@ for (const key of ['controller', 'deviceActiveState']) {
     'a timer event must not synthesise deviceActiveState',
   );
 }
+
+// --- Bay usability ------------------------------------------------------------------------------
+// An empty bay cannot diffuse, and the plugin has to treat "no vial" and "the device has not said
+// yet" as different things - defaulting an unknown remaining to empty would disable working bays.
+{
+  const { PuraPlatformAccessory } = await import('../dist/platformAccessory.js');
+  const usable = (bay1) => PuraPlatformAccessory.prototype.isBayUsable.call({ device: { bay1 } }, 1);
+
+  assert.equal(usable(undefined), false, 'an absent bay is not usable');
+  assert.equal(usable({}), false, 'a bay with no fragrance block has no vial seated');
+  assert.equal(usable({ fragrance: { name: 'Vetiver' }, remainingPercent: 0 }), false, 'a spent vial is not usable');
+  assert.equal(usable({ fragrance: { name: 'Vetiver' }, remainingPercent: 1 }), true, '1% left still diffuses');
+  assert.equal(
+    usable({ fragrance: { name: 'Vetiver' }, remainingPercent: undefined }),
+    true,
+    'an unreported remaining is unknown, not empty',
+  );
+  assert.equal(usable({ fragrance: { id: 'abc' } }), true, 'a fragrance id alone is enough to be seated');
+}
+
+// --- Bay active state ---------------------------------------------------------------------------
+// Modes that run one bay at a time follow the single active bay. Oscillation modes genuinely run
+// both, so each bay reports its own state. Either way an unusable bay reads off.
+{
+  const { PuraPlatformAccessory } = await import('../dist/platformAccessory.js');
+  const { isBayActive, isBayUsable } = PuraPlatformAccessory.prototype;
+  const vial = { fragrance: { name: 'Vetiver' }, remainingPercent: 50 };
+  const activeIn = (diffusionMode, bay1, bay2, effectiveActiveBay, bay) =>
+    isBayActive.call({ device: { diffusionMode, bay1, bay2 }, isBayUsable }, bay, effectiveActiveBay);
+
+  // standard: exclusive, driven by the resolved active bay
+  const std = { ...vial, active: true };
+  assert.equal(activeIn('standard', std, std, 1, 1), true, 'standard follows the active bay');
+  assert.equal(activeIn('standard', std, std, 1, 2), false, 'standard keeps the other bay off');
+
+  // oscillation: concurrent, each bay reports itself
+  assert.equal(
+    activeIn('oscillation-multi-bay', { ...vial, active: true }, { ...vial, active: true }, 1, 2),
+    true,
+    'oscillation reports a second running bay regardless of the active bay',
+  );
+  assert.equal(
+    activeIn('oscillation-multi-bay', { ...vial, active: true }, { ...vial, active: false }, 1, 2),
+    false,
+    'oscillation still reports a stopped bay as off',
+  );
+
+  // an empty bay is off in either mode, even when the device claims it is running
+  const empty = { active: true };
+  assert.equal(activeIn('standard', empty, std, 1, 1), false, 'an empty bay reads off in standard mode');
+  assert.equal(activeIn('oscillation-multi-bay', empty, std, 1, 1), false, 'an empty bay reads off in oscillation mode');
+}
+
+// --- Intensity targeting ------------------------------------------------------------------------
+// Writes must land on the bay the caller named. Falling back to whichever bay happens to be present
+// wrote to the wrong bay while the caller logged success against the one it asked for.
+{
+  const { PuraPlatformAccessory } = await import('../dist/platformAccessory.js');
+  const { setIntensityAcrossAvailableBays, getAvailableBays, getBayLogLabel } = PuraPlatformAccessory.prototype;
+  const writes = [];
+  const warnings = [];
+  const ctx = {
+    device: { id: 'dev-1', bay1: { id: 1 } },
+    getAvailableBays,
+    getBayLogLabel,
+    getDiffuserLogLabel: () => 'Office Diffuser',
+    platform: { log: { warn: (message) => warnings.push(message) } },
+    puraApi: {
+      setIntensity: async (_id, bay, intensity) => {
+        writes.push([bay, intensity]);
+        return true;
+      },
+    },
+  };
+
+  assert.equal(await setIntensityAcrossAvailableBays.call(ctx, 1, 50, 'default', false), true);
+  assert.deepEqual(writes, [[1, 50]], 'the named bay is written');
+
+  writes.length = 0;
+  assert.equal(
+    await setIntensityAcrossAvailableBays.call(ctx, 2, 50, 'default', false),
+    false,
+    'a bay that is not present fails rather than retargeting',
+  );
+  assert.deepEqual(writes, [], 'nothing is written to the wrong bay');
+  assert.equal(warnings.length, 1, 'the skipped write is reported');
+}
+
+// --- Empty bay write refusal --------------------------------------------------------------------
+// Both bay write paths have to refuse an unusable bay. The ON handler did and the speed handler did
+// not, and the speed handler is the more damaging of the two: it re-arms the bay with setAlwaysOn
+// first, so a slider drag on an empty bay pinned the device to it and stopped the bay that was
+// actually diffusing.
+{
+  const { PuraPlatformAccessory } = await import('../dist/platformAccessory.js');
+  const proto = PuraPlatformAccessory.prototype;
+
+  const makeContext = (bay2) => {
+    const calls = [];
+    return {
+      calls,
+      context: {
+        device: { id: 'dev-1', diffusionMode: 'standard', bay1: { id: 1, active: true }, bay2 },
+        useFanService: true,
+        enableBayControl: true,
+        currentStateActive: true,
+        bayServices: { 1: undefined, 2: undefined },
+        isBayUsable: proto.isBayUsable,
+        isHapStatusError: proto.isHapStatusError,
+        describeIntensityLevel: proto.describeIntensityLevel,
+        summarizeBayDebugState: proto.summarizeBayDebugState,
+        mapRotationToIntensity: proto.mapRotationToIntensity,
+        mapIntensityToRotation: proto.mapIntensityToRotation,
+        getBayLogLabel: proto.getBayLogLabel,
+        getDiffuserLogLabel: () => 'Office Diffuser',
+        getEffectiveActiveBayNumber: () => 1,
+        getAvailableBays: proto.getAvailableBays,
+        setIntensityAcrossAvailableBays: proto.setIntensityAcrossAvailableBays,
+        setStoredBayIntensity: () => {},
+        clearPendingSecondaryBayIntensitySync: () => {},
+        cancelPendingPowerOnIntensityLog: () => {},
+        shouldResetAwayModeBeforeActivating: () => false,
+        isDeviceUnavailable: () => false,
+        hasNoScentVialsDetected: () => false,
+        applyCurrentState: () => {},
+        updateFaultState: () => {},
+        enqueueRotationWrite: (work) => work(),
+        accessory: { context: {} },
+        platform: {
+          log: {
+            info: () => {},
+            debug: () => {},
+            warn: () => {},
+            error: (...args) => calls.push(`error:${args[0]}`),
+          },
+          isDebugEnabled: () => false,
+          requestRefreshSoon: () => {},
+          api: { hap: { HapStatusError, HAPStatus } },
+        },
+        puraApi: {
+          setAlwaysOn: async (_id, bay) => {
+            calls.push(`alwaysOn:${bay}`);
+            return true;
+          },
+          setIntensity: async (_id, bay, intensity) => {
+            calls.push(`intensity:${bay}:${intensity}`);
+            return true;
+          },
+          setAwayMode: async () => true,
+        },
+      },
+    };
+  };
+
+  // Bay 2 holds no vial: refuse, and touch nothing.
+  const empty = makeContext(undefined);
+  await assert.rejects(
+    () => proto.setBayRotationSpeed.call(empty.context, 2, 60),
+    (error) => error.hapStatus === HAPStatus.RESOURCE_DOES_NOT_EXIST,
+    'an empty bay is refused as missing, not as a communication failure',
+  );
+  assert.deepEqual(empty.calls, [], 'an empty bay is never re-armed and never written');
+
+  // A spent vial is refused the same way.
+  const spent = makeContext({ id: 2, fragrance: { name: 'Volcano' }, remainingPercent: 0 });
+  await assert.rejects(
+    () => proto.setBayRotationSpeed.call(spent.context, 2, 60),
+    (error) => error.hapStatus === HAPStatus.RESOURCE_DOES_NOT_EXIST,
+    'a spent vial is refused too',
+  );
+  assert.deepEqual(spent.calls, [], 'a spent bay is never re-armed and never written');
+
+  // A usable bay still goes through, so the guard is not simply blocking everything.
+  const usable = makeContext({ id: 2, fragrance: { name: 'Volcano' }, remainingPercent: 40 });
+  await proto.setBayRotationSpeed.call(usable.context, 2, 60);
+  assert.deepEqual(
+    usable.calls,
+    ['alwaysOn:2', 'intensity:2:50'],
+    'a usable bay is re-armed and written at the mapped intensity (60 snaps to medium)',
+  );
+}
+
+stdout.write('All diffuser state checks passed.\n');
 
 // The webhook handler schedules a reconciling refresh; exit rather than let it fire.
 exit(0);

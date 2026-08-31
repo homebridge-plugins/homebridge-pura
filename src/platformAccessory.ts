@@ -753,9 +753,15 @@ export class PuraPlatformAccessory {
     if (availableBays.length === 0) {
       return false;
     }
-    const orderedBays = availableBays.includes(targetBay)
-      ? [targetBay, ...availableBays.filter((bay) => bay !== targetBay)]
-      : availableBays;
+    if (!availableBays.includes(targetBay)) {
+      // Falling back to whatever bay is present would send the write to the wrong bay while the
+      // caller logged success against the one it asked for. Better to fail visibly.
+      this.platform.log.warn(
+        `${this.getBayLogLabel(targetBay)} is not present on this diffuser; intensity write skipped.`,
+      );
+      return false;
+    }
+    const orderedBays: Array<1 | 2> = [targetBay, ...availableBays.filter((bay) => bay !== targetBay)];
     const [primaryBay, ...secondaryBays] = orderedBays;
 
     const primarySuccess = await this.puraApi.setIntensity(this.device.id, primaryBay, intensity, controller);
@@ -1226,6 +1232,19 @@ export class PuraPlatformAccessory {
           return;
         }
 
+        if (!this.isBayUsable(bay)) {
+          // Same refusal as the ON handler, and for a sharper reason: the re-arm below calls
+          // setAlwaysOn, so without this a slider drag on an empty bay pins the device to it and
+          // silently stops whichever bay was actually diffusing.
+          this.platform.log.warn(
+            `${bayLabel} has no fragrance to diffuse; install or replace the vial.`,
+          );
+          this.applyCurrentState();
+          this.updateFaultState();
+          throw new this.platform.api.hap.HapStatusError(
+            this.platform.api.hap.HAPStatus.RESOURCE_DOES_NOT_EXIST,
+          );
+        }
         if (this.isDeviceUnavailable()) {
           this.enforceOffVisualState();
           this.updateFaultState();
