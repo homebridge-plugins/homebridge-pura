@@ -171,9 +171,12 @@ export class PuraPlatformAccessory {
       return;
     }
 
-    const name = `${this.accessory.displayName} Nightlight Control`;
+    // Same reasoning as the auto-alternate switch: without ConfiguredName the Home app names this
+    // after the accessory, so it read as "Diffuser" alongside the diffuser's own tile. The prefix
+    // goes too, since Home already shows it nested under the accessory.
+    const name = 'Nightlight';
     this.nightlightService = existing || this.accessory.addService(this.platform.Service.Lightbulb, name, 'nightlight');
-    this.nightlightService.setCharacteristic(this.platform.Characteristic.Name, name);
+    this.setServiceName(this.nightlightService, name);
     this.nightlightService.getCharacteristic(this.platform.Characteristic.On)
       .onSet(this.setNightlightOn.bind(this))
       .onGet(this.getNightlightOn.bind(this));
