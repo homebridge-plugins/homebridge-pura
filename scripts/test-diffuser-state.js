@@ -415,6 +415,36 @@ for (const key of ['controller', 'deviceActiveState']) {
   );
 }
 
+// --- Bay existence ------------------------------------------------------------------------------
+// getConfiguredBayNumbers decides whether a bay's service is torn off the accessory, and Pura drops
+// bays from payloads transiently. Removing a service loses its name in Home and any automation
+// pointing at it, so a bay that has been seen once has to stay.
+{
+  const { PuraPlatformAccessory } = await import('../dist/platformAccessory.js');
+  const { getConfiguredBayNumbers } = PuraPlatformAccessory.prototype;
+  const ctx = { accessory: { context: {} }, device: {} };
+  const configured = (bay1, bay2) => {
+    ctx.device = { bay1, bay2 };
+    return getConfiguredBayNumbers.call(ctx);
+  };
+
+  assert.deepEqual(configured({ id: 1 }, { id: 2 }), [1, 2], 'both bays reported');
+  assert.deepEqual(configured({ id: 1 }, undefined), [1, 2], 'a dropped bay keeps its service');
+  assert.deepEqual(configured(undefined, undefined), [1, 2], 'so does a payload that drops both');
+
+  const single = { accessory: { context: {} }, device: {} };
+  assert.deepEqual(
+    getConfiguredBayNumbers.call({ ...single, device: { bay1: { id: 1 } } }),
+    [1],
+    'a single-bay diffuser never grows a second bay',
+  );
+  assert.deepEqual(
+    getConfiguredBayNumbers.call({ accessory: { context: {} }, device: {} }),
+    [1],
+    'a diffuser with nothing reported still gets one bay',
+  );
+}
+
 // --- Partial payload stickiness -----------------------------------------------------------------
 // Realtime frames omit the fragrance block and a reconciling refresh sometimes drops the bay
 // outright, both while a vial is seated. Bays are physical and do not come and go, so what the
@@ -517,6 +547,34 @@ for (const key of ['controller', 'deviceActiveState']) {
   assert.equal(activeIn('oscillation-multi-bay', empty, running, 1, 1), false, 'an empty bay reads off when alternating');
 }
 
+// --- Nothing diffusing --------------------------------------------------------------------------
+// With auto-alternate on, every bay in the rotation reports active:true whether or not anything is
+// coming out. Only activeAt says a bay is running, and it is cleared when diffusion stops - so no
+// stamp anywhere means the diffuser is idle, however many bays claim to be active.
+{
+  const { PuraPlatformAccessory } = await import('../dist/platformAccessory.js');
+  const { hasNoBayDiffusing } = PuraPlatformAccessory.prototype;
+  const idle = (diffusionMode, bay1, bay2) => hasNoBayDiffusing.call({ device: { diffusionMode, bay1, bay2 } });
+  const armed = { active: true, intensity: 50 };
+
+  assert.equal(
+    idle('oscillation-multi-bay', armed, null),
+    true,
+    'a bay armed for the rotation with no stamp is not diffusing - the Pura app showed it stopped',
+  );
+  assert.equal(idle('oscillation-multi-bay', armed, armed), true, 'two armed bays with no stamp is still idle');
+  assert.equal(
+    idle('oscillation-multi-bay', { ...armed, activeAt: 1788158575 }, armed),
+    false,
+    'a stamp anywhere means the diffuser is running',
+  );
+
+  // Scoped to auto-alternate: standard mode keeps its own long-running-session handling, where
+  // active is meaningful on its own.
+  assert.equal(idle('standard', armed, null), false, 'standard mode is left alone');
+  assert.equal(idle(undefined, armed, null), false, 'an unknown mode is left alone');
+}
+
 // --- Active bay resolution ----------------------------------------------------------------------
 // The device marks every bay in the rotation `active`, and stamps activeAt on the one currently
 // diffusing. Both observations from hardware have to resolve the same way.
@@ -524,8 +582,9 @@ for (const key of ['controller', 'deviceActiveState']) {
   const { PuraPlatformAccessory } = await import('../dist/platformAccessory.js');
   const { getActiveBayNumber } = PuraPlatformAccessory.prototype;
   const resolve = (bay1, bay2) => getActiveBayNumber.call({
-    device: { bay1, bay2 },
+    device: { diffusionMode: 'oscillation-multi-bay', bay1, bay2 },
     fillBayIntensityFromCache: (bay) => bay,
+    hasNoBayDiffusing: PuraPlatformAccessory.prototype.hasNoBayDiffusing,
   });
 
   assert.equal(
@@ -540,8 +599,8 @@ for (const key of ['controller', 'deviceActiveState']) {
   );
   assert.equal(
     resolve({ active: true, activeAt: undefined, intensity: 50 }, undefined),
-    1,
-    'a lone active bay is running even without activeAt - the vial in the other bay was pulled',
+    undefined,
+    'a lone active bay with no stamp is armed, not running - confirmed against the Pura app',
   );
   assert.equal(resolve({ active: false }, { active: false }), undefined, 'nothing running resolves to no bay');
 }

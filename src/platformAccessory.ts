@@ -101,7 +101,9 @@ export class PuraPlatformAccessory {
     private readonly accessory: PlatformAccessory,
     private readonly puraApi: PuraApi,
   ) {
-    this.device = accessory.context.device;
+    // Restore anything a partial startup payload left out before any service is built from it -
+    // a bay missing here would otherwise have its service torn out of the cached accessory.
+    this.device = this.retainKnownBays(accessory.context.device);
 
     const safeModel = this.device.type && this.device.type.length > 1 ? this.device.type : 'Pura Diffuser';
     const infoService = this.accessory.getService(this.platform.Service.AccessoryInformation)!;
@@ -276,15 +278,31 @@ export class PuraPlatformAccessory {
     );
   }
 
+  /**
+   * Which bays this diffuser has.
+   *
+   * Sticky, because Pura's payloads drop bays transiently and this decides whether a bay's service
+   * is torn off the accessory. Losing a service loses its name and any automation pointing at it,
+   * and a diffuser does not lose a bay - so once one has been seen it stays.
+   */
   private getConfiguredBayNumbers(): Array<1 | 2> {
-    const bays: Array<1 | 2> = [];
+    const context = this.accessory.context as Record<string, unknown>;
+    const remembered = Array.isArray(context.knownBays)
+      ? (context.knownBays as unknown[]).filter((bay): bay is 1 | 2 => bay === 1 || bay === 2)
+      : [];
+    const bays = new Set<1 | 2>(remembered);
     if (this.device.bay1) {
-      bays.push(1);
+      bays.add(1);
     }
     if (this.device.bay2) {
-      bays.push(2);
+      bays.add(2);
     }
-    return bays.length > 0 ? bays : [1];
+    if (bays.size === 0) {
+      return [1];
+    }
+    const resolved = [...bays].sort();
+    context.knownBays = resolved;
+    return resolved;
   }
 
   /**
@@ -688,7 +706,28 @@ export class PuraPlatformAccessory {
     }, 100);
   }
 
+  /**
+   * Whether the device is diffusing at all, when it is set to auto-alternate.
+   *
+   * In that mode every bay in the rotation reports `active: true` whether or not anything is coming
+   * out, and `activeAt` is stamped only on the bay actually running - so with the diffuser idle,
+   * `active` alone lit a tile for a bay the Pura app showed as stopped. The stamp is cleared when
+   * diffusion stops, so its absence across every bay means nothing is running.
+   *
+   * Deliberately scoped to auto-alternate. In `standard` mode `active` is meaningful on its own and
+   * carries the long-running-session handling, and there is no evidence to justify changing it.
+   */
+  private hasNoBayDiffusing(): boolean {
+    if (!isAutoAlternateMode(this.device.diffusionMode)) {
+      return false;
+    }
+    return this.device.bay1?.activeAt === undefined && this.device.bay2?.activeAt === undefined;
+  }
+
   private getActiveBay(): PuraBay | undefined {
+    if (this.hasNoBayDiffusing()) {
+      return undefined;
+    }
     const bay1 = this.fillBayIntensityFromCache(this.device.bay1);
     const bay2 = this.fillBayIntensityFromCache(this.device.bay2);
     if (bay1?.active && !bay2?.active) {
@@ -867,6 +906,9 @@ export class PuraPlatformAccessory {
   }
 
   private getActiveBayNumber(): 1 | 2 | undefined {
+    if (this.hasNoBayDiffusing()) {
+      return undefined;
+    }
     const bay1 = this.fillBayIntensityFromCache(this.device.bay1);
     const bay2 = this.fillBayIntensityFromCache(this.device.bay2);
     if (bay1?.active && !bay2?.active) {
