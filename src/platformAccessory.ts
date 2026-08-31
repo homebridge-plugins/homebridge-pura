@@ -308,8 +308,8 @@ export class PuraPlatformAccessory {
    * Name a bay after the fragrance in it, but only when that actually tells the bays apart.
    *
    * Running the same scent in both bays is an ordinary configuration, and naming both after it
-   * makes the tiles longer while carrying no more information than "Bay 1" and "Bay 2". An empty
-   * or unknown bay falls back the same way.
+   * alone would give two identical tiles - so those get the position too, as "Bay 1: Volcano". An
+   * empty or unknown bay falls back to the bare position.
    *
    * No diffuser prefix either: Home already shows these nested under the accessory, so repeating it
    * reads as "Hallway Diffuser > Hallway Diffuser Bay 1".
@@ -327,7 +327,11 @@ export class PuraPlatformAccessory {
     }
     const other = fragranceOf(bay === 1 ? 2 : 1);
     if (other && other.toLowerCase() === own.toLowerCase()) {
-      return positional;
+      // The scent no longer tells the bays apart, so the position has to - but dropping the scent
+      // entirely left Home unable to say what was loaded at all. Prefixing only here also keeps
+      // voice control clean: "turn on Volcano" stays an exact match whenever it is unambiguous, and
+      // is ambiguous anyway in exactly the case that gets the prefix.
+      return `${positional}: ${own}`;
     }
     return own;
   }

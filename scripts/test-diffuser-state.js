@@ -295,9 +295,13 @@ assert.equal(isAutoAlternateMode(DIFFUSION_MODE_SINGLE_BAY), false, 'switch off 
     return [nameFor.call(ctx, 1), nameFor.call(ctx, 2)];
   };
   assert.deepEqual(named('Vetiver', 'Salt'), ['Vetiver', 'Salt'], 'distinct scents name the bays');
-  assert.deepEqual(named('Coconut', 'Coconut'), ['Bay 1', 'Bay 2'], 'identical scents fall back to positional');
-  assert.deepEqual(named('vetiver', 'Vetiver'), ['Bay 1', 'Bay 2'], 'the comparison ignores case');
-  assert.deepEqual(named('Vetiver', undefined), ['Vetiver', 'Bay 2'], 'an empty bay is positional');
+  assert.deepEqual(
+    named('Coconut', 'Coconut'),
+    ['Bay 1: Coconut', 'Bay 2: Coconut'],
+    'identical scents take the position as well, rather than losing the scent entirely',
+  );
+  assert.deepEqual(named('vetiver', 'Vetiver'), ['Bay 1: vetiver', 'Bay 2: Vetiver'], 'the comparison ignores case');
+  assert.deepEqual(named('Vetiver', undefined), ['Vetiver', 'Bay 2'], 'a bay with no scent is bare positional');
   assert.deepEqual(named(undefined, undefined), ['Bay 1', 'Bay 2'], 'no fragrances at all is positional');
   assert.deepEqual(named('   ', 'Salt'), ['Bay 1', 'Salt'], 'a blank name is not a name');
 }
