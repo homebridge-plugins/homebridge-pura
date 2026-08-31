@@ -68,6 +68,12 @@ The device list response is keyed by device family rather than being a flat arra
 Confirmed by ha-pura, which exposes it as a switch named "Auto-alternate fragrances" and toggles
 between exactly these two strings.
 
+**Auto-alternate and bay selection are independent.** Toggling the mode does not change which bay
+is running, and selecting a single bay does not turn alternation off — a timer targeting one bay
+leaves `diffusionMode` at `oscillation-multi-bay`, and the Pura app behaves the same way. So while
+the mode is on, the device may be alternating across both bays *or* pinned to one; read each bay's
+own `active` rather than inferring it from the mode.
+
 **This is the single most important thing to branch on for multi-bay work.** Mutual exclusion
 between bays is correct in `standard` and wrong in `oscillation-multi-bay`. In oscillation mode a
 device genuinely reports two active bays at different levels, e.g. bay 1 at level 1 while bay 2 runs

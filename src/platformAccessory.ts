@@ -919,9 +919,12 @@ export class PuraPlatformAccessory {
         }
 
         // If another bay is still running - which only happens while alternating - turning this one
-        // off means "run just the other one" rather than "stop the diffuser". Pinning to the other
-        // bay leaves alternation, so the mode is set explicitly too: otherwise the auto-alternate
-        // switch would keep reading on while the device had quietly stopped alternating.
+        // off means "run just the other one" rather than "stop the diffuser".
+        //
+        // The diffusion mode is deliberately left alone. Auto-alternate and bay selection are
+        // independent on the device: selecting a single bay does not turn alternation off, as a
+        // timer targeting one bay demonstrates by leaving the mode at oscillation-multi-bay. Writing
+        // the mode here would change a setting the user did not touch.
         const otherRunningBay = this.getConfiguredBayNumbers()
           .find((candidate) => candidate !== bay && this.isBayActive(candidate, activeBay));
         if (otherRunningBay) {
@@ -931,12 +934,8 @@ export class PuraPlatformAccessory {
             this.applyCurrentState();
             return;
           }
-          await this.puraApi.setDiffusionMode(this.device.id, DIFFUSION_MODE_SINGLE_BAY);
-          this.device = { ...this.device, diffusionMode: DIFFUSION_MODE_SINGLE_BAY };
-          this.applyAutoAlternateState();
           this.platform.log.info(
-            `${bayLabel} turned off; ${this.getBayLogLabel(otherRunningBay)} continues and ` +
-            'auto-alternate is now off.',
+            `${bayLabel} turned off; ${this.getBayLogLabel(otherRunningBay)} continues.`,
           );
           this.applyCurrentState();
           this.platform.requestRefreshSoon(2500);
