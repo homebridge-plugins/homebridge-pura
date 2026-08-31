@@ -685,11 +685,19 @@ export class PuraApi {
       if (!raw || typeof raw !== 'object') {
         return `bay${bayNumber}=${this.describeRaw(raw)}`;
       }
-      const keys = Object.keys(raw as Record<string, unknown>);
-      if (keys.includes('fragrance')) {
+      const entries = Object.entries(raw as Record<string, unknown>);
+      if (entries.some(([key]) => key === 'fragrance')) {
         return undefined;
       }
-      return `bay${bayNumber}=present-without-fragrance keys=[${keys.join(',')}]`;
+      // Values, not just keys: the shape carries vialId / isSmartVial / code / msg, and whether a
+      // vial is seated has to be readable from what those hold, not from their presence.
+      const described = entries.map(([key, value]) => {
+        if (value === null || typeof value !== 'object') {
+          return `${key}=${String(value).slice(0, 40)}`;
+        }
+        return `${key}={${Object.keys(value as Record<string, unknown>).join(',')}}`;
+      });
+      return `bay${bayNumber}=no-fragrance ${described.join(' ')}`;
     };
     const notable = [describe(1), describe(2)].filter((entry): entry is string => entry !== undefined);
     if (notable.length > 0) {
