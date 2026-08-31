@@ -51,6 +51,16 @@ export interface PuraBay {
   fragrance?: PuraFragrance;
   remainingPercent?: number;
   lowFragrance?: boolean;
+  /**
+   * The seated vial's hardware id, or an empty string when the bay is empty.
+   *
+   * The only field Pura gives that positively distinguishes an empty bay from a payload that simply
+   * left the fragrance out - realtime frames routinely omit the fragrance block while a vial is
+   * seated, and `vialId` stays populated through that. Undefined when the payload does not mention
+   * the bay at all, which says nothing either way.
+   */
+  vialId?: string;
+  isSmartVial?: boolean;
 }
 
 export interface PuraTimer {

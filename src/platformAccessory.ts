@@ -487,13 +487,19 @@ export class PuraPlatformAccessory {
   /**
    * Whether a bay can diffuse.
    *
-   * Only a positive report of nothing left counts. Pura's payloads are routinely partial - realtime
-   * frames omit the fragrance block, and a reconciling refresh can drop a whole bay - so a missing
-   * fragrance or a missing bay says nothing about whether a vial is seated. Inferring "empty" from
-   * silence disabled a bay holding a full vial and refused to turn it on.
+   * Only a positive report counts. Pura's payloads are routinely partial - realtime frames omit the
+   * fragrance block while a vial is seated, and a refresh can drop a whole bay - so silence says
+   * nothing, and inferring "empty" from it disabled a bay holding a full vial.
+   *
+   * `vialId` is the one field that does distinguish them, verified by reading the same realtime
+   * shape with the vial in and out: seated reports the vial's hardware id even with no fragrance
+   * block, empty reports an empty string. A spent vial reporting 0% is the other positive signal.
    */
   private isBayUsable(bay: 1 | 2): boolean {
     const source = bay === 1 ? this.device.bay1 : this.device.bay2;
+    if (source?.vialId === '') {
+      return false;
+    }
     return source?.remainingPercent !== 0;
   }
 
@@ -3402,8 +3408,15 @@ export class PuraPlatformAccessory {
         continue;
       }
 
+      // An empty string is Pura positively saying the bay is empty, and a different id is a
+      // different vial. Merging cached fragrance into either would describe a vial that is not
+      // there - the whole point of the cache is to survive silence, not to contradict the device.
+      const emptied = incoming.vialId === '';
+      const sameVial = cached?.vialId === undefined
+        || incoming.vialId === undefined
+        || cached.vialId === incoming.vialId;
       const hasFragrance = Boolean(incoming.fragrance?.id || incoming.fragrance?.name);
-      const resolved = hasFragrance || !cached
+      const resolved = hasFragrance || emptied || !cached || !sameVial
         ? incoming
         : {
           ...incoming,

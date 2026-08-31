@@ -399,6 +399,15 @@ for (const key of ['controller', 'deviceActiveState']) {
   assert.equal(usable({ fragrance: { name: 'Vetiver' }, remainingPercent: 0 }), false, 'a spent vial is not usable');
   assert.equal(usable({ fragrance: { name: 'Vetiver' }, remainingPercent: 1 }), true, '1% left still diffuses');
 
+  // vialId is the one field that positively separates an empty bay from a quiet payload, verified
+  // by reading the same realtime shape with the vial in and out.
+  assert.equal(usable({ vialId: '', isSmartVial: false }), false, 'an empty vialId is Pura saying the bay is empty');
+  assert.equal(
+    usable({ vialId: 'E0020809D739EBF2', isSmartVial: true }),
+    true,
+    'a seated vial reports its id even when the fragrance block is absent',
+  );
+
   // Everything below is a partial payload observed from hardware while a full vial was seated.
   // Reading any of them as empty disabled a working bay and refused to turn it on.
   assert.equal(usable(undefined), true, 'a refresh that drops the bay says nothing about the vial');
@@ -476,8 +485,47 @@ for (const key of ['controller', 'deviceActiveState']) {
   assert.equal(apply({ bay2: { id: 2, fragrance: { name: 'Salt' }, remainingPercent: 90 } }).bay2.fragrance.name, 'Salt', 'a new vial wins');
   assert.equal(apply({ bay2: { id: 2 } }).bay2.fragrance.name, 'Salt', 'and becomes what is carried over');
 
-  // A positive zero is real information and the only empty signal there is.
+  // A positive zero is real information and must survive the merge.
   assert.equal(apply({ bay2: { id: 2, remainingPercent: 0 } }).bay2.remainingPercent, 0, 'a reported zero survives the merge');
+}
+
+// --- Vial identity vs the cache -------------------------------------------------------------------
+// The cache exists to survive silence, not to contradict the device. An empty vialId is Pura saying
+// the bay is empty, and a different id is a different vial - carrying the old fragrance into either
+// would describe a vial that is not there.
+{
+  const { PuraPlatformAccessory } = await import('../dist/platformAccessory.js');
+  const { retainKnownBays } = PuraPlatformAccessory.prototype;
+  const ctx = { accessory: { context: {} } };
+  const apply = (bay2) => retainKnownBays.call(ctx, { bay2 }).bay2;
+
+  apply({ id: 2, vialId: 'VIAL-A', fragrance: { name: 'Volcano' }, remainingPercent: 100 });
+
+  // Same vial, fragrance omitted: the realtime shape. Carry the name over.
+  const quiet = apply({ id: 2, vialId: 'VIAL-A' });
+  assert.equal(quiet.fragrance.name, 'Volcano', 'the same vial keeps its name through a quiet frame');
+  assert.equal(quiet.remainingPercent, 100, 'and its remaining');
+
+  // Vial pulled: do not resurrect Volcano.
+  const pulled = apply({ id: 2, vialId: '', isSmartVial: false });
+  assert.equal(pulled.fragrance, undefined, 'an emptied bay is not given the old fragrance back');
+  assert.equal(pulled.remainingPercent, undefined, 'nor its old remaining');
+
+  // A later refresh that drops the bay must not resurrect it either.
+  assert.equal(apply(undefined).fragrance, undefined, 'and the emptied state is what gets cached');
+
+  // A different vial with no fragrance yet: report the new vial, not the old scent.
+  const swapped = apply({ id: 2, vialId: 'VIAL-B' });
+  assert.equal(swapped.fragrance, undefined, 'a different vial does not inherit the previous name');
+
+  // A payload with no vialId at all cannot contradict the cache, so the merge still applies.
+  const noIdCtx = { accessory: { context: {} } };
+  retainKnownBays.call(noIdCtx, { bay2: { id: 2, fragrance: { name: 'Salt' }, remainingPercent: 80 } });
+  assert.equal(
+    retainKnownBays.call(noIdCtx, { bay2: { id: 2 } }).bay2.fragrance.name,
+    'Salt',
+    'a payload that does not mention vialId still gets the cached fragrance',
+  );
 
   // A bay never seen is not invented - a single-bay diffuser must not grow a second one.
   const fresh = { accessory: { context: {} } };

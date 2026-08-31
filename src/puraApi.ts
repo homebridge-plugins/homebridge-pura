@@ -803,6 +803,8 @@ export class PuraApi {
       fragrance: record.fragrance as PuraFragrance | undefined,
       remainingPercent: this.normalizePercentage(remaining?.percent),
       lowFragrance: this.normalizeBooleanish(record.lowFragrance),
+      vialId: typeof record.vialId === 'string' ? record.vialId : undefined,
+      isSmartVial: this.normalizeBooleanish(record.isSmartVial),
     };
   }
 
