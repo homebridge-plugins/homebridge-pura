@@ -202,6 +202,19 @@ export class PuraPlatformAccessory {
     return this.isNightlightControlEnabled();
   }
 
+  /**
+   * Name a service so the Home app shows it. Setting only `Name` is not enough for a service inside
+   * an accessory - Home falls back to the accessory's own name, which is why extra services all read
+   * as "Diffuser". `ConfiguredName` is the characteristic it actually reads, and it stays editable,
+   * so a name the user sets themselves still wins.
+   */
+  private setServiceName(service: Service, name: string) {
+    service.displayName = name;
+    service.setCharacteristic(this.platform.Characteristic.Name, name);
+    service.addOptionalCharacteristic(this.platform.Characteristic.ConfiguredName);
+    service.setCharacteristic(this.platform.Characteristic.ConfiguredName, name);
+  }
+
   private isAutoAlternateControlEnabled(): boolean {
     return Boolean((this.platform.config as PuraConfig).enableAutoAlternate ?? false);
   }
@@ -227,10 +240,13 @@ export class PuraPlatformAccessory {
       return;
     }
 
-    const name = `${this.getDiffuserLogLabel()} Auto-Alternate`;
+    // Named without the diffuser prefix: Home already shows it under the accessory, so repeating
+    // it reads as "Hallway Diffuser > Hallway Diffuser Auto-Alternate". The wording matches the
+    // Pura app's own label for the setting.
+    const name = 'Auto-Alternate Fragrances';
     this.autoAlternateService = existing
       || this.accessory.addService(this.platform.Service.Switch, name, 'auto-alternate');
-    this.autoAlternateService.setCharacteristic(this.platform.Characteristic.Name, name);
+    this.setServiceName(this.autoAlternateService, name);
     this.autoAlternateService.getCharacteristic(this.platform.Characteristic.On)
       .onSet(this.setAutoAlternate.bind(this))
       .onGet(this.getAutoAlternate.bind(this));
