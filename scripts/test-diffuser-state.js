@@ -18,7 +18,7 @@ import {
   uuid,
 } from '@homebridge/hap-nodejs';
 
-import { mapPuraNumericIntensityToHomeKit, PuraApi } from '../dist/puraApi.js';
+import { DEVICE_LIST_ENDPOINTS, mapPuraNumericIntensityToHomeKit, PuraApi } from '../dist/puraApi.js';
 import { buildTimerRealtimeDeviceUpdate, PuraPlatform } from '../dist/platform.js';
 
 const silentLog = { info() {}, debug() {}, warn() {}, error() {} };
@@ -137,6 +137,15 @@ assert.equal(
   assert.equal(authApi.getAuthHeader(), 'Bearer ID_TOKEN', 'requests must default to the ID token');
   assert.equal(authApi.getAuthHeader('access'), 'Bearer ACCESS_TOKEN', 'the access token stays available as a fallback');
 }
+
+// --- Device list endpoint order ----------------------------------------------------------------
+// pypura moved off v2/users/devices in August 2026 for reliability. v3 is tried first, but the
+// older paths stay behind it so a v3 failure degrades rather than losing every accessory.
+assert.equal(DEVICE_LIST_ENDPOINTS[0], 'v3/accounts/v2/devices', 'v3 must be tried first');
+assert.ok(
+  DEVICE_LIST_ENDPOINTS.includes('v2/users/devices'),
+  'the previous endpoint must remain as a fallback',
+);
 
 // --- Realtime timer events ---------------------------------------------------------------------
 const timerNow = 10_000;

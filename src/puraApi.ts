@@ -38,6 +38,25 @@ export function mapPuraNumericIntensityToHomeKit(intensity: unknown): 20 | 40 | 
   return 100;
 }
 
+/**
+ * Device list endpoints, tried in order.
+ *
+ * `v3/accounts/v2/devices` is what pypura moved to in August 2026, replacing `v2/users/devices` -
+ * the endpoint this plugin used until now - in a change it described as a fix for "compatibility
+ * and reliability when loading devices". Note the path still says v2 for the device representation:
+ * it is the v3 accounts service returning the same device shape, which is why pypura changed only
+ * the URL and no response parsing.
+ *
+ * The older paths are retained behind it so a v3 failure degrades to today's behaviour rather than
+ * losing every accessory.
+ */
+export const DEVICE_LIST_ENDPOINTS = [
+  'v3/accounts/v2/devices',
+  'v2/users/devices',
+  'users/devices',
+  'devices',
+];
+
 export class PuraApi {
   private userPool: CognitoUserPool;
   private cognitoUser: CognitoUser | null = null;
@@ -46,6 +65,7 @@ export class PuraApi {
   private readonly log: Logging;
   private readonly baseUrl: string;
   private lastDevicesFetchDegraded = false;
+  private lastDevicesEndpoint: string | null = null;
 
   constructor(log: Logging) {
     this.log = log;
@@ -291,7 +311,7 @@ export class PuraApi {
    */
   async getDevices(): Promise<PuraDevice[]> {
     this.lastDevicesFetchDegraded = false;
-    const endpoints = ['v2/users/devices', 'users/devices', 'devices'];
+    const endpoints = DEVICE_LIST_ENDPOINTS;
     let lastError: unknown;
 
     for (let i = 0; i < endpoints.length; i++) {
@@ -302,7 +322,12 @@ export class PuraApi {
           suppressTransportErrorLog: true,
           timeoutMs: 7000,
         }) as Record<string, unknown>;
-        return this.extractDevices(response);
+        const devices = this.extractDevices(response);
+        if (this.lastDevicesEndpoint !== endpoint) {
+          this.lastDevicesEndpoint = endpoint;
+          this.log.debug(`[Devices] Served by ${endpoint} (${devices.length} device(s)).`);
+        }
+        return devices;
       } catch (error) {
         lastError = error;
         const isPrimaryEndpoint = i === 0;

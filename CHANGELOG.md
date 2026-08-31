@@ -1,6 +1,7 @@
 # Release Notes
 
 ## Unreleased
+- Fetch the device list from `v3/accounts/v2/devices`, the endpoint pypura moved to in August 2026 to fix "compatibility and reliability when loading devices". The previous `v2/users/devices` path is retained as a fallback, and the endpoint that actually served the list is reported in debug output.
 - Authenticate API requests with the Cognito ID token. Pura rejects the access token even when it is freshly issued, so every request was answered with a 401, followed by a needless token refresh, a second 401, and only then a successful retry. Each call cost three round trips instead of one. The access token is retained as a fallback. (pypura authenticates the same way.)
 - Report numeric bay intensity on Pura's 1-10 scale. Every level from 1 to 10 previously fell into the same coarse bucket, so a diffuser running at maximum output reported "Subtle" in HomeKit. ([#35](https://github.com/homebridge-plugins/homebridge-pura/pull/35))
 - Keep standard-mode diffusion active for the whole session. Pura holds `activeAt` at the session's original start time and clears it to `0` on stop, so the previous 15-minute window reported long-running sessions as off. The window is widened rather than removed, so a stale timestamp still ages out instead of pinning the diffuser on. ([#35](https://github.com/homebridge-plugins/homebridge-pura/pull/35))
