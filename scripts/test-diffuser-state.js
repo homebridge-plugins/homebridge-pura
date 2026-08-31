@@ -275,6 +275,29 @@ assert.equal(runsBaysConcurrently(DIFFUSION_MODE_SINGLE_BAY), false, 'switch off
   ]);
 }
 
+// --- Bay naming ---------------------------------------------------------------------------------
+// A fragrance name is only used when it tells the bays apart. Running the same scent in both bays
+// is ordinary, and naming both after it is longer without being clearer.
+{
+  const { PuraPlatformAccessory } = await import('../dist/platformAccessory.js');
+  const nameFor = PuraPlatformAccessory.prototype.getBayServiceName;
+  const named = (f1, f2) => {
+    const ctx = {
+      device: {
+        bay1: f1 ? { fragrance: { name: f1 } } : {},
+        bay2: f2 ? { fragrance: { name: f2 } } : {},
+      },
+    };
+    return [nameFor.call(ctx, 1), nameFor.call(ctx, 2)];
+  };
+  assert.deepEqual(named('Vetiver', 'Salt'), ['Vetiver', 'Salt'], 'distinct scents name the bays');
+  assert.deepEqual(named('Coconut', 'Coconut'), ['Bay 1', 'Bay 2'], 'identical scents fall back to positional');
+  assert.deepEqual(named('vetiver', 'Vetiver'), ['Bay 1', 'Bay 2'], 'the comparison ignores case');
+  assert.deepEqual(named('Vetiver', undefined), ['Vetiver', 'Bay 2'], 'an empty bay is positional');
+  assert.deepEqual(named(undefined, undefined), ['Bay 1', 'Bay 2'], 'no fragrances at all is positional');
+  assert.deepEqual(named('   ', 'Salt'), ['Bay 1', 'Salt'], 'a blank name is not a name');
+}
+
 // --- Realtime timer events ---------------------------------------------------------------------
 const timerNow = 10_000;
 assert.deepEqual(buildTimerRealtimeDeviceUpdate({ bay: 1, intensity: 7, start: 1234 }, timerNow), {

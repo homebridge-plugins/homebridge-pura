@@ -16,6 +16,7 @@ import { PuraConfig, PuraDevice, PuraBay } from './puraTypes.js';
 export class PuraPlatformAccessory {
   private service!: Service;
   private bayServices: Partial<Record<1 | 2, Service>> = {};
+  private lastBayServiceNames: Partial<Record<1 | 2, string>> = {};
   private nightlightService?: Service;
   private autoAlternateService?: Service;
   private device: PuraDevice;
@@ -282,10 +283,64 @@ export class PuraPlatformAccessory {
     return bays.length > 0 ? bays : [1];
   }
 
+  /**
+   * Name a bay after the fragrance in it, but only when that actually tells the bays apart.
+   *
+   * Running the same scent in both bays is an ordinary configuration, and naming both after it
+   * makes the tiles longer while carrying no more information than "Bay 1" and "Bay 2". An empty
+   * or unknown bay falls back the same way.
+   *
+   * No diffuser prefix either: Home already shows these nested under the accessory, so repeating it
+   * reads as "Hallway Diffuser > Hallway Diffuser Bay 1".
+   */
   private getBayServiceName(bay: 1 | 2): string {
-    // No diffuser prefix: Home already shows these nested under the accessory, so repeating it
-    // reads as "Hallway Diffuser > Hallway Diffuser Bay 1".
-    return `Bay ${bay}`;
+    const positional = `Bay ${bay}`;
+    const fragranceOf = (candidate: 1 | 2) => {
+      const source = candidate === 1 ? this.device.bay1 : this.device.bay2;
+      const name = source?.fragrance?.name;
+      return typeof name === 'string' && name.trim() ? name.trim() : undefined;
+    };
+    const own = fragranceOf(bay);
+    if (!own) {
+      return positional;
+    }
+    const other = fragranceOf(bay === 1 ? 2 : 1);
+    if (other && other.toLowerCase() === own.toLowerCase()) {
+      return positional;
+    }
+    return own;
+  }
+
+  /**
+   * Re-apply bay names when the fragrance in a bay changes.
+   *
+   * configureDiffuserServices only runs at construction, so without this a name set at startup
+   * would never follow a vial swap. Whether the Home app honours a ConfiguredName *update* - as
+   * opposed to the initial value, which it does - is still unverified, so the rename is logged:
+   * that separates "the plugin renamed it" from "Home showed the new name".
+   */
+  private refreshBayServiceNames() {
+    if (!this.enableBayControl) {
+      return;
+    }
+    for (const bay of this.getConfiguredBayNumbers()) {
+      const service = this.bayServices[bay];
+      if (!service) {
+        continue;
+      }
+      const name = this.getBayServiceName(bay);
+      if (this.lastBayServiceNames[bay] === name) {
+        continue;
+      }
+      const previous = this.lastBayServiceNames[bay];
+      this.lastBayServiceNames[bay] = name;
+      this.setServiceName(service, name);
+      if (previous !== undefined) {
+        this.platform.log.info(
+          `${this.getDiffuserLogLabel()} renamed bay ${bay} from "${previous}" to "${name}".`,
+        );
+      }
+    }
   }
 
   private removeServiceIfPresent(service?: Service) {
@@ -1909,6 +1964,7 @@ export class PuraPlatformAccessory {
     this.logOnlineStateTransition(previousOnline, nextOnline);
     this.device = stabilizedDevice;
     this.configureAutoAlternateService();
+    this.refreshBayServiceNames();
     if (typeof stabilizedDevice.nightlight?.active === 'boolean') {
       this.pendingNightlightActive = stabilizedDevice.nightlight.active;
     }
