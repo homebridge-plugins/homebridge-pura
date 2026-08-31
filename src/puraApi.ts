@@ -531,6 +531,7 @@ export class PuraApi {
     const diffusionMode = typeof record.diffusionMode === 'string' ? record.diffusionMode : undefined;
     const bay1 = this.normalizeBay(record, record.bay1, 1);
     const bay2 = this.normalizeBay(record, record.bay2, 2);
+    this.logIncompleteBayShape(record, id);
     // In its oscillation modes Pura runs both bays concurrently, each at its own intensity, so
     // forcing a single active bay there discards half the device - and the tie-break below is
     // unstable, keeping a different bay depending on whether activeAt happens to be present in that
@@ -665,6 +666,35 @@ export class PuraApi {
       return 'Pura';
     }
     return modelValue;
+  }
+
+  /**
+   * Report the raw shape of any bay the payload describes incompletely.
+   *
+   * A bay that is missing, or present without its fragrance block, is the plugin's blind spot: it
+   * looks identical whether the vial has been pulled or Pura simply left it out of this payload, so
+   * an empty bay cannot currently be detected at all. If some other field distinguishes the two,
+   * this is what will show it - one vial pull with debug on settles it.
+   */
+  private logIncompleteBayShape(record: Record<string, unknown>, deviceId: string) {
+    const describe = (bayNumber: 1 | 2) => {
+      const raw = record[`bay${bayNumber}`];
+      if (raw === undefined) {
+        return `bay${bayNumber}=missing`;
+      }
+      if (!raw || typeof raw !== 'object') {
+        return `bay${bayNumber}=${this.describeRaw(raw)}`;
+      }
+      const keys = Object.keys(raw as Record<string, unknown>);
+      if (keys.includes('fragrance')) {
+        return undefined;
+      }
+      return `bay${bayNumber}=present-without-fragrance keys=[${keys.join(',')}]`;
+    };
+    const notable = [describe(1), describe(2)].filter((entry): entry is string => entry !== undefined);
+    if (notable.length > 0) {
+      this.log.debug(`[Bays] device=${deviceId} ${notable.join(' ')}`);
+    }
   }
 
   private normalizeBay(parent: Record<string, unknown>, value: unknown, bayNumber: number): PuraBay | undefined {
