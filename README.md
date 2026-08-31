@@ -72,13 +72,16 @@ Add the following platform to your `config.json`:
 
 ### Configuration Options
 
+Just the right amount of flexibility for the control freak in all of us. Tinker responsibly, though.
+Some changes may require recreating existing HomeKit scenes or automations for your Pura diffusers.
+
 - **username**: Your Pura email - *required*
 - **password**: Your Pura password - *required*
-- **forceNightlightOff**: Pura turns the nightlight on/off with the diffuser. If enabled, the plugin sends a nightlight-off command right after turning on a diffuser. (default: false)
-- **enableFanService (Enable Intensity Control)**: Replaces the on/off switch with a fan accessory to control intensity (Subtle, Medium, Strong). For multi-bay diffusers, HomeKit intensity changes are applied across available bays to keep auto-alternate behavior consistent. (default: false)
-- **enableNightlightAccessory**: Enables nightlight controls (On/Brightness/Color) for compatible diffusers. (default: false)
-- **enableBayControl**: Replaces the single diffuser tile with one tile per fragrance bay, so each bay can be turned on and set independently. Bays are named after the scent in them (see [Bay Names](#bay-names)). Only useful on multi-bay diffusers. (default: false)
-- **enableAutoAlternate**: Adds a switch for Pura's Auto-alternate fragrances setting on multi-bay diffusers, so it can be changed from HomeKit rather than the Pura app. On, the diffuser rotates between the bays over time; off, it stays on the one bay you pick. Either way only one bay diffuses at a time. (default: false)
+- **forceNightlightOff (Force Nightlight Off)**: No mood lighting, please. Pura normally syncs the nightlight with the diffuser. Turn this on to keep the nightlight off while the diffuser is running. (default: false)
+- **enableFanService (Enable Intensity Control)**: Because “on” and “off” aren’t enough choices. Replaces the on/off switch with a fan control for choosing Subtle, Medium, or Strong intensity. On multi-bay diffusers, intensity changes apply across available bays to keep auto-alternate working as expected. (default: false)
+- **enableBayControl (Enable Per-Bay Controls)**: For those who like to pick favorites. Gives each fragrance bay its own HomeKit control. With Intensity Control enabled, each bay appears as a fan; otherwise, it appears as a switch. On diffusers that only run one bay at a time, turning one bay on turns the other off. Bays are named after the scent in them, see [Bay Names](#bay-names). (default: false)
+- **enableNightlightAccessory (Enable Nightlight Controls)**: Set the vibe along with the scent. Adds HomeKit controls for the nightlight, including On/Off, Brightness, and Color, on compatible diffusers. (default: false)
+- **enableAutoAlternate (Enable Auto-Alternate Control)**: Can’t pick a favorite? Let Pura play referee. Adds a HomeKit switch for Pura’s Auto-Alternate setting on multi-bay diffusers. When on, Pura rotates between fragrance bays over time; when off, it sticks with the bay you choose. Either way, only one bay diffuses at a time. (default: false)
 
 ## Usage
 

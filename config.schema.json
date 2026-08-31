@@ -39,31 +39,31 @@
         "title": "Force Nightlight Off",
         "type": "boolean",
         "default": false,
-        "description": "Pura turns the nightlight on/off with the diffuser. If enabled, the plugin will send a nightlight off command right after turning on a diffuser."
+        "description": "No mood lighting, please. Pura normally syncs the nightlight with the diffuser. Turn this on to keep the nightlight off while the diffuser is running."
       },
       "enableFanService": {
         "title": "Enable Intensity Control",
         "type": "boolean",
         "default": false,
-        "description": "Replaces the on/off switch with a fan accessory to control intensity (Subtle, Medium, Strong). For multi-bay diffusers, HomeKit intensity changes are applied across available bays to keep auto-alternate behavior consistent. Changing this may require recreating HomeKit scenes or automations for all Pura diffusers in this plugin."
+        "description": "Because “on” and “off” aren’t enough choices. Replaces the on/off switch with a fan control for choosing Subtle, Medium, or Strong intensity. On multi-bay diffusers, intensity changes apply across available bays to keep auto-alternate working as expected."
       },
       "enableBayControl": {
         "title": "Enable Per-Bay Controls",
         "type": "boolean",
         "default": false,
-        "description": "Exposes separate controls per bay (Switches, or Fan controls when Intensity Control is enabled). Only one bay can run at a time; turning one bay on will turn the other bay off."
+        "description": "For those who like to pick favorites. Gives each fragrance bay its own HomeKit control. With Intensity Control enabled, each bay appears as a fan; otherwise, it appears as a switch. On diffusers that only run one bay at a time, turning one bay on turns the other off."
       },
       "enableNightlightAccessory": {
         "title": "Enable Nightlight Controls",
         "type": "boolean",
         "default": false,
-        "description": "Enables nightlight controls (On, Brightness, and Color) on the diffuser accessory (Single Tile) for compatible diffusers."
+        "description": "Set the vibe along with the scent. Adds HomeKit controls for the nightlight, including On/Off, Brightness, and Color, on compatible diffusers."
       },
       "enableAutoAlternate": {
         "title": "Enable Auto-Alternate Control",
         "type": "boolean",
         "default": false,
-        "description": "Adds a switch for Pura's Auto-alternate fragrances setting on multi-bay diffusers, so it can be changed from HomeKit rather than the Pura app. On, the diffuser rotates between the bays over time; off, it stays on the one bay you pick. Either way only one bay diffuses at a time."
+        "description": "Can’t pick a favorite? Let Pura play referee. Adds a HomeKit switch for Pura’s Auto-Alternate setting on multi-bay diffusers. When on, Pura rotates between fragrance bays over time; when off, it sticks with the bay you choose. Either way, only one bay diffuses at a time."
       }
     }
   },
