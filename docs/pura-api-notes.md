@@ -222,6 +222,29 @@ all that is needed to name it correctly.
 Nightlight support is inferred as "everything except Pura Plus / hardware major 22". This is
 permissive by design, so unknown hardware gets controls offered rather than withheld.
 
+## Payloads are partial, and silence is not information
+
+Neither transport reports a complete bay every time, and the gaps do **not** mean what they look
+like. All of the following were observed while a full 100% vial was physically seated:
+
+| Source | What arrives | What it is not |
+| --- | --- | --- |
+| Realtime `deviceRecord` | bay present with `intensity`, **no** `fragrance`, `remaining`, or `lowFragrance` | not an empty bay |
+| Reconciling REST refresh | bay key **absent entirely** from the record | not a removed bay |
+| REST at startup | bay complete, with fragrance and remaining | — |
+
+The reconciling refresh dropping a bay is the surprising one: the same endpoint returned that bay
+fully populated seconds earlier. Bay data has to be treated as sticky — carry the last thing the
+device actually said until it says something new — or a bay loses its name, reads off, and refuses
+to run every time one of these lands.
+
+**The only reliable signal that a bay is empty is `remaining.percent === 0`**, a positive statement.
+A pulled vial does also make the bay disappear from the payload, but absence is indistinguishable
+from the transient drops above, so it cannot be used.
+
+A bay carried forward from cache should be marked inactive: in every observation the dropped bay was
+not the one diffusing.
+
 ## HomeKit naming (not Pura, but equally expensive to re-derive)
 
 **The Home app does follow a `ConfiguredName` update on an existing service.** This was the open
