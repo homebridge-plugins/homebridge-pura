@@ -64,22 +64,35 @@ export class PuraApi {
   private refreshInFlight: Promise<PuraAuthTokens> | null = null;
   private readonly log: Logging;
   private readonly baseUrl: string;
+  private userPoolId: string;
+  private clientId: string;
   private lastDevicesFetchDegraded = false;
   private lastDevicesEndpoint: string | null = null;
 
   constructor(log: Logging) {
     this.log = log;
-    const userPoolId = DEFAULT_USER_POOL_ID;
-    const clientId = DEFAULT_CLIENT_ID;
+    this.userPoolId = DEFAULT_USER_POOL_ID;
+    this.clientId = DEFAULT_CLIENT_ID;
     this.baseUrl = DEFAULT_BASE_URL;
 
     this.userPool = new CognitoUserPool({
-      UserPoolId: userPoolId,
-      ClientId: clientId,
+      UserPoolId: this.userPoolId,
+      ClientId: this.clientId,
     });
   }
 
-  updateCognitoConfig(userPoolId: string, clientId: string): void {
+  /**
+   * Adopt Cognito IDs discovered from pypura. Returns whether anything actually changed.
+   *
+   * pypura publishes releases regularly without touching these IDs, so keying off its version
+   * alone discarded a working session and forced a full re-authentication for nothing.
+   */
+  updateCognitoConfig(userPoolId: string, clientId: string): boolean {
+    if (this.userPoolId === userPoolId && this.clientId === clientId) {
+      return false;
+    }
+    this.userPoolId = userPoolId;
+    this.clientId = clientId;
     this.userPool = new CognitoUserPool({
       UserPoolId: userPoolId,
       ClientId: clientId,
@@ -87,6 +100,7 @@ export class PuraApi {
     this.cognitoUser = null;
     this.session = null;
     this.refreshInFlight = null;
+    return true;
   }
 
   /**

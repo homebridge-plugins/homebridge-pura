@@ -145,8 +145,11 @@ still reported both bays active; only the REST refresh two seconds later showed 
 is the argument for keeping the reconciling refresh even though it is also what destroys exact
 intensity.
 
-The socket closes roughly every 15–25 minutes with code `1001 "Going away"`. The plugin reconnects
-within a few seconds. Cosmetic, but it briefly drops polling to the disconnected interval and back.
+The socket closes roughly **every ten minutes** with code `1001 "Going away"` and reconnects within a
+few seconds. Observed thirteen times across a 2.5 hour idle window, so it is routine rather than a
+fault — but it is frequent enough to matter: each cycle drops polling to the disconnected interval
+and back, and any refresh scheduled in between has to be moved onto the new cadence or it fires at
+the short interval anyway.
 
 ## Models
 

@@ -330,8 +330,14 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       return false;
     }
 
-    this.puraApi.updateCognitoConfig(latest.userPoolId, latest.clientId);
     this.latestCognitoVersion = latest.version;
+    if (!this.puraApi.updateCognitoConfig(latest.userPoolId, latest.clientId)) {
+      this.log.warn(
+        `pypura ${latest.version} reports the Cognito IDs already in use, so authentication will not ` +
+        'succeed by retrying. Check the username and password.',
+      );
+      return false;
+    }
     this.log.info(`Updated Cognito IDs from pypura ${latest.version}. Retrying authentication...`);
     return true;
   }
@@ -610,9 +616,14 @@ export class PuraPlatform implements DynamicPlatformPlugin {
           if (this.latestCognitoVersion === latest.version) {
             return;
           }
-          this.log.warn(`Detected new pypura version ${latest.version}; refreshing Cognito IDs...`);
-          this.puraApi.updateCognitoConfig(latest.userPoolId, latest.clientId);
           this.latestCognitoVersion = latest.version;
+          if (!this.puraApi.updateCognitoConfig(latest.userPoolId, latest.clientId)) {
+            this.log.debug(
+              `pypura ${latest.version} reports the Cognito IDs already in use; keeping the current session.`,
+            );
+            return;
+          }
+          this.log.warn(`Detected new Cognito IDs in pypura ${latest.version}; re-authenticating...`);
           try {
             await this.puraApi.authenticate(this.puraConfig.username, this.puraConfig.password);
             this.log.info('Re-authenticated with refreshed Cognito IDs.');
@@ -1002,6 +1013,14 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     const ageMs = Date.now() - this.lastRefreshAt;
     if (!this.refreshInFlight && ageMs > 60000) {
       this.scheduleNextRefresh(0);
+      return;
+    }
+    // Any pending refresh was scheduled against the previous interval. Leaving it in place means a
+    // reconnect still fires a poll seconds later at the disconnected cadence - and since the socket
+    // drops every few minutes, that roughly doubles the request rate of an idle device. An in-flight
+    // refresh needs no help: runRefreshCycle reschedules against the new base when it finishes.
+    if (!this.refreshInFlight) {
+      this.scheduleNextRefresh(this.getRefreshIntervalWithJitter());
     }
   }
 

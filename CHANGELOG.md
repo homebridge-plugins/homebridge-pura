@@ -1,6 +1,8 @@
 # Release Notes
 
 ## Unreleased
+- Stop a realtime reconnect firing an extra poll. Pura's socket closes every few minutes, and each close left a refresh scheduled at the disconnected 15s cadence which still fired after reconnecting. An idle diffuser was making roughly twice the API requests it needed.
+- Only re-authenticate when pypura's Cognito IDs actually change. The hourly check compared pypura's version string alone, so every unrelated release discarded a working session and forced a full re-authentication. Authentication recovery no longer retries with IDs that are already in use either, since that cannot succeed.
 - Fetch the device list from `v3/accounts/v2/devices`, the endpoint pypura moved to in August 2026 to fix "compatibility and reliability when loading devices". The previous `v2/users/devices` path is retained as a fallback, and the endpoint that actually served the list is reported in debug output.
 - Authenticate API requests with the Cognito ID token. Pura rejects the access token even when it is freshly issued, so every request was answered with a 401, followed by a needless token refresh, a second 401, and only then a successful retry. Each call cost three round trips instead of one. The access token is retained as a fallback. (pypura authenticates the same way.)
 - Report numeric bay intensity on Pura's 1-10 scale. Every level from 1 to 10 previously fell into the same coarse bucket, so a diffuser running at maximum output reported "Subtle" in HomeKit. ([#35](https://github.com/homebridge-plugins/homebridge-pura/pull/35))

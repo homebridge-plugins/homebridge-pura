@@ -167,6 +167,33 @@ assert.ok(
   assert.deepEqual(sent, [1], 'a 1-10 level passed as a percentage collapses - callers must convert');
 }
 
+// --- Cognito config changes -------------------------------------------------------------------
+// pypura publishes releases regularly without touching the Cognito IDs. Keying off its version
+// alone discarded a working session and forced a full re-authentication for nothing.
+{
+  const cognitoApi = new PuraApi(silentLog);
+  assert.equal(
+    cognitoApi.updateCognitoConfig('us-east-1_LaB718hYv', '4iekubat0jb5iljfbaalsiqf9j'),
+    false,
+    'adopting the IDs already in use must report no change',
+  );
+  assert.equal(
+    cognitoApi.updateCognitoConfig('us-east-1_Different', '4iekubat0jb5iljfbaalsiqf9j'),
+    true,
+    'a changed user pool must report a change',
+  );
+  assert.equal(
+    cognitoApi.updateCognitoConfig('us-east-1_Different', 'differentclientid'),
+    true,
+    'a changed client id must report a change',
+  );
+  assert.equal(
+    cognitoApi.updateCognitoConfig('us-east-1_Different', 'differentclientid'),
+    false,
+    'repeating the same update must report no change',
+  );
+}
+
 // --- Realtime timer events ---------------------------------------------------------------------
 const timerNow = 10_000;
 assert.deepEqual(buildTimerRealtimeDeviceUpdate({ bay: 1, intensity: 7, start: 1234 }, timerNow), {
