@@ -242,12 +242,35 @@ fully populated seconds earlier. Bay data has to be treated as sticky — carry 
 device actually said until it says something new — or a bay loses its name, reads off, and refuses
 to run every time one of these lands.
 
-**The only reliable signal that a bay is empty is `remaining.percent === 0`**, a positive statement.
-A pulled vial does also make the bay disappear from the payload, but absence is indistinguishable
-from the transient drops above, so it cannot be used.
-
 A bay carried forward from cache should be marked inactive: in every observation the dropped bay was
 not the one diffusing.
+
+### `vialId` is the empty-bay signal
+
+Absence never means empty, but `vialId` does. Verified as a controlled comparison — same bay, same
+transport, same fragrance-absent realtime shape — with the vial out and then re-seated:
+
+| | `vialId` | `isSmartVial` | `wearingTime` | `code` |
+| --- | --- | --- | ---: | --- |
+| vial seated | `"E00208…"` | `true` | non-zero | set |
+| vial pulled | `""` | `false` | `0` | `""` |
+
+A seated vial reports its hardware id **even in the realtime frames that omit the fragrance block**,
+so `vialId` survives exactly the partial payloads that defeat everything else. An empty bay reports
+an empty string with every other field zeroed.
+
+So there are two positive empty signals, and only these two:
+
+```
+bay.vialId === ''            -> empty, no vial seated
+bay.remaining.percent === 0  -> seated but spent
+```
+
+Everything else — a missing fragrance block, `bay: null`, a bay dropped from a refresh — occurs
+routinely with a full vial in and must not be read as empty.
+
+`vialId` is also the right cache key for anything remembered per bay: a changed id is a new vial, so
+a remembered fragrance name must not carry across it.
 
 ## HomeKit naming (not Pura, but equally expensive to re-derive)
 
