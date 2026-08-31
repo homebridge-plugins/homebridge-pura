@@ -113,22 +113,32 @@ The signal that a timer is running is `device.controller === "timer"`.
 ha-pura substitutes the schedule number when it reads `"schedule"`, and refuses intensity changes
 outright when it reads `"away"`.
 
-Realtime `TIMER` frames exist but carry **no payload**:
+Realtime `TIMER` frames carry a payload on `INSERT` and `MODIFY`, but **not** on `REMOVE`:
 
 ```
-recordType=TIMER eventType=REMOVE keys=[uid,deviceId,eventType,recordType,timestamp]
+INSERT  keys=[uid,deviceId,eventType,recordType,timestamp,timerRecord]
+        timerRecord={"bay":2,"start":...,"end":...,"intensity":5}
+MODIFY  same shape - fires when a running timer's intensity is changed
+REMOVE  keys=[uid,deviceId,eventType,recordType,timestamp]   (no timerRecord)
 ```
 
-No `timerRecord` field, unlike `DEVICE` frames which carry `deviceRecord`. Only `REMOVE` has been
-captured so far; whether `INSERT` carries a payload is unconfirmed. Timer expiry is best handled by
-falling through to a normal refresh, which is what currently happens and works.
+`start` and `end` are epoch seconds. `intensity` is a numeric level, same 1/3/5/7/10 scale as
+everywhere else.
+
+So `INSERT` and `MODIFY` can be applied optimistically — the bay named by the timer goes active at
+that intensity, with `activeAt` taken from `start`. `REMOVE` carries nothing to apply and is best
+handled by falling through to a normal refresh, which is what happens and works: the refresh two
+seconds later reports both bays stopped.
 
 ## Realtime frames
 
 Envelope: `{uid, deviceId, eventType, recordType, timestamp, <payload?>}`.
 
 - `DEVICE` / `MODIFY` carries `deviceRecord` and is the main state channel
-- `TIMER` carries no payload (above)
+- `TIMER` carries `timerRecord` on `INSERT` and `MODIFY`, nothing on `REMOVE` (above)
+
+A single user action often produces several frames in the same second — starting a timer emits a
+`TIMER/INSERT` followed by a `DEVICE/MODIFY`, and each schedules its own reconciling refresh.
 
 Realtime device frames can **lag actual state**. At a timer expiry, the accompanying `DEVICE/MODIFY`
 still reported both bays active; only the REST refresh two seconds later showed them stopped. This

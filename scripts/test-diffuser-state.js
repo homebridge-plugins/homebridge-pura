@@ -147,6 +147,26 @@ assert.ok(
   'the previous endpoint must remain as a fallback',
 );
 
+// --- Nightlight brightness units ---------------------------------------------------------------
+// setNightlight takes a 0-100 percentage and scales it to Pura's 1-10 level. Callers that pass a
+// level straight through silently divide the user's brightness by ten, which is what forced
+// nightlight-off used to do.
+{
+  const nightApi = new PuraApi(silentLog);
+  const sent = [];
+  nightApi.makeRequest = async (_method, _endpoint, body) => {
+    sent.push(body.brightness);
+    return { success: true };
+  };
+  for (const percent of [10, 20, 50, 80, 100]) {
+    await nightApi.setNightlight('dev-1', false, percent, 'ffffff', 'default');
+  }
+  assert.deepEqual(sent, [1, 2, 5, 8, 10], 'brightness percentages map onto Pura levels 1-10');
+  sent.length = 0;
+  await nightApi.setNightlight('dev-1', false, 8, 'ffffff', 'default');
+  assert.deepEqual(sent, [1], 'a 1-10 level passed as a percentage collapses - callers must convert');
+}
+
 // --- Realtime timer events ---------------------------------------------------------------------
 const timerNow = 10_000;
 assert.deepEqual(buildTimerRealtimeDeviceUpdate({ bay: 1, intensity: 7, start: 1234 }, timerNow), {

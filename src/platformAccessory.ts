@@ -2521,7 +2521,10 @@ export class PuraPlatformAccessory {
     try {
       await this.sleep(1500);
       const controller = this.device.controller || 'default';
-      const brightness = this.device.nightlight?.brightness ?? 1;
+      // setNightlight takes a 0-100 percentage and scales it down to Pura's 1-10 level. The device
+      // reports brightness already on the 1-10 scale, so it has to be converted first - passing the
+      // level straight through made every forced off divide the user's brightness by ten.
+      const brightness = this.nightlightLevelToPercent(this.device.nightlight?.brightness);
       const color = this.device.nightlight?.color ?? 'ffffff';
       const success = await this.puraApi.setNightlight(this.device.id, false, brightness, color, controller);
       if (success) {
