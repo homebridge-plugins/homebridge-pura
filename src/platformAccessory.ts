@@ -762,7 +762,29 @@ export class PuraPlatformAccessory {
     (this.accessory.context as Record<string, unknown>)[key] = Math.max(1, Math.min(100, Math.round(intensity)));
   }
 
+  /** A pending write for this bay that the device has not confirmed yet, if it is still fresh. */
+  private getPendingBayIntensity(bay: 1 | 2): number | undefined {
+    const pending = this.pendingIntensityIntent;
+    if (!pending || pending.bay !== bay) {
+      return undefined;
+    }
+    const ageMs = Date.now() - pending.at;
+    if (ageMs < 0 || ageMs > pending.ttlMs) {
+      return undefined;
+    }
+    return pending.intensity;
+  }
+
   private getBayIntensityValue(bay: 1 | 2): number | undefined {
+    // A just-written intensity has to win over the device's last-known value until the device
+    // confirms it. Without this, applyCurrentState pushed the stale value straight back onto the
+    // slider - and because HomeKit follows a speed change on an idle fan with Active=1, the ON
+    // handler then read that stale value off the service and wrote it, discarding what was asked
+    // for. Setting bay 1 to 100 while it was off ended up writing 30.
+    const pending = this.getPendingBayIntensity(bay);
+    if (pending !== undefined) {
+      return Math.max(1, Math.min(100, Math.round(pending)));
+    }
     const payload = this.getBayPayload(bay);
     if (payload && Number.isFinite(payload.intensity) && payload.intensity > 0) {
       return Math.max(1, Math.min(100, Math.round(payload.intensity)));
@@ -985,7 +1007,10 @@ export class PuraPlatformAccessory {
       );
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
-    const isActive = this.getEffectiveActiveBayNumber() === bay;
+    // Must match what applyCurrentState pushes. Deriving this from "the one active bay" made reads
+    // disagree with pushes while alternating: HomeKit was told both bays were on, then answered 0
+    // for whichever one lost the tie-break the next time it asked.
+    const isActive = this.isBayActive(bay, this.getEffectiveActiveBayNumber());
     const value = this.getBayCharacteristicState(isActive);
     this.platform.log.debug(`Get Characteristic Active for ${bayLabel} ->`, value);
     return value;
