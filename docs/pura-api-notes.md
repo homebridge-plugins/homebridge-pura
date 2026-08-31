@@ -203,6 +203,30 @@ all that is needed to name it correctly.
 Nightlight support is inferred as "everything except Pura Plus / hardware major 22". This is
 permissive by design, so unknown hardware gets controls offered rather than withheld.
 
+## HomeKit naming (not Pura, but equally expensive to re-derive)
+
+**The Home app does follow a `ConfiguredName` update on an existing service.** This was the open
+question behind naming bays after their fragrance, and it was not safe to assume either way — Home
+caches service names and is widely reported to ignore later changes, particularly once a user has
+renamed something themselves.
+
+Verified on a Pura 4 with two bay tiles:
+
+1. Both bays held the same scent, so both tiles correctly showed `Bay 1` / `Bay 2` (a shared name
+   does not distinguish the bays, so the plugin falls back to positional).
+2. Pulling the vial from bay 2 made bay 1's scent distinguishing. Bay 1 renamed to
+   `Coconut Milk Mango` and **Home picked it up**.
+3. Inserting a different vial in bay 2 renamed that tile to `Volcano`, again reflected in Home.
+
+So a fragrance-derived name can be kept current across a vial swap and does not go stale. Two
+caveats worth keeping in mind:
+
+- `Name` alone is not enough. Home ignores `Name` for services nested inside an accessory; the
+  rename only lands because `ConfiguredName` is set alongside it.
+- This was observed on services the plugin had created in that same install. A user who renames a
+  tile themselves in Home may well pin it, which the plugin cannot detect. Renames are logged
+  (`renamed bay N from "X" to "Y"`) so a divergence is at least visible in the log.
+
 ## Known rough edges
 
 Things confirmed to be wrong or incoherent, left in place because fixing them changes visible
