@@ -79,6 +79,7 @@ export function isAutoAlternateMode(diffusionMode: string | undefined): boolean 
 }
 
 export class PuraApi {
+  private readonly lastBayIdentityLog = new Map<string, string>();
   private userPool: CognitoUserPool;
   private cognitoUser: CognitoUser | null = null;
   private session: CognitoUserSession | null = null;
@@ -531,7 +532,7 @@ export class PuraApi {
     const diffusionMode = typeof record.diffusionMode === 'string' ? record.diffusionMode : undefined;
     const bay1 = this.normalizeBay(record, record.bay1, 1);
     const bay2 = this.normalizeBay(record, record.bay2, 2);
-    this.logIncompleteBayShape(record, id);
+    this.logBayIdentity(record, id);
     // In its oscillation modes Pura runs both bays concurrently, each at its own intensity, so
     // forcing a single active bay there discards half the device - and the tie-break below is
     // unstable, keeping a different bay depending on whether activeAt happens to be present in that
@@ -669,47 +670,39 @@ export class PuraApi {
   }
 
   /**
-   * Report the raw shape of any bay the payload describes incompletely.
+   * Report each bay's vial identity, so an empty bay can be told from a quiet payload.
    *
-   * A bay that is missing, or present without its fragrance block, is the plugin's blind spot: it
-   * looks identical whether the vial has been pulled or Pura simply left it out of this payload, so
-   * an empty bay cannot currently be detected at all. If some other field distinguishes the two,
-   * this is what will show it - one vial pull with debug on settles it.
+   * A bay with the vial pulled arrives as a zeroed record - `vialId=""`, `isSmartVial=false`,
+   * `wearingTime=0` - or as a plain `null`. The zeroed shape looks like a real signal, but proving
+   * it needs the same fields read back with a vial seated, which is why this reports both cases
+   * rather than only the incomplete one.
+   *
+   * Deduplicated per bay: only a change is logged, so a steady device stays quiet.
    */
-  private logIncompleteBayShape(record: Record<string, unknown>, deviceId: string) {
-    const describe = (bayNumber: 1 | 2) => {
+  private logBayIdentity(record: Record<string, unknown>, deviceId: string) {
+    for (const bayNumber of [1, 2] as const) {
       const raw = record[`bay${bayNumber}`];
-      if (raw === undefined) {
-        return `bay${bayNumber}=missing`;
+      let summary: string;
+      if (raw === undefined || raw === null || typeof raw !== 'object') {
+        summary = this.describeRaw(raw);
+      } else {
+        const bay = raw as Record<string, unknown>;
+        const fragrance = bay.fragrance as Record<string, unknown> | undefined;
+        const fields = ['vialId', 'isSmartVial', 'wearingTime', 'code', 'msg']
+          .filter((key) => key in bay)
+          .map((key) => `${key}=${JSON.stringify(bay[key])}`);
+        summary = [
+          `fragrance=${fragrance ? JSON.stringify(fragrance.name ?? fragrance.id ?? true) : 'absent'}`,
+          ...fields,
+        ].join(' ');
       }
-      if (!raw || typeof raw !== 'object') {
-        return `bay${bayNumber}=${this.describeRaw(raw)}`;
+      const cacheKey = `${deviceId}:${bayNumber}`;
+      if (this.lastBayIdentityLog.get(cacheKey) === summary) {
+        continue;
       }
-      const entries = Object.entries(raw as Record<string, unknown>);
-      if (entries.some(([key]) => key === 'fragrance')) {
-        return undefined;
-      }
-      // Values, not just keys: the shape carries vialId / isSmartVial / code / msg, and whether a
-      // vial is seated has to be readable from what those hold, not from their presence.
-      const described = entries.map(([key, value]) => {
-        if (value === null || typeof value !== 'object') {
-          return `${key}=${String(value).slice(0, 40)}`;
-        }
-        return `${key}={${Object.keys(value as Record<string, unknown>).join(',')}}`;
-      });
-      return `bay${bayNumber}=no-fragrance ${described.join(' ')}`;
-    };
-    const notable = [describe(1), describe(2)].filter((entry): entry is string => entry !== undefined);
-    if (notable.length === 0) {
-      return;
+      this.lastBayIdentityLog.set(cacheKey, summary);
+      this.log.debug(`[Bays] device=${deviceId} bay${bayNumber} ${summary}`);
     }
-    // When a bay comes through as null there is nothing in it to inspect, so widen to the record it
-    // sits in: if bay presence is reported anywhere else - a count, a vials array, a status block -
-    // this is what will show the field to look at.
-    const context = notable.some((entry) => entry.endsWith('=null') || entry.endsWith('=undefined'))
-      ? ` record=[${Object.keys(record).join(',')}]`
-      : '';
-    this.log.debug(`[Bays] device=${deviceId} ${notable.join(' ')}${context}`);
   }
 
   private normalizeBay(parent: Record<string, unknown>, value: unknown, bayNumber: number): PuraBay | undefined {
