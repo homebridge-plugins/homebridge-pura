@@ -1,7 +1,12 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
 
 import type { PuraPlatform } from './platform.js';
-import { PuraApi } from './puraApi.js';
+import {
+  DIFFUSION_MODE_ALTERNATING,
+  DIFFUSION_MODE_SINGLE_BAY,
+  PuraApi,
+  isAutoAlternateMode,
+} from './puraApi.js';
 import { PuraConfig, PuraDevice, PuraBay } from './puraTypes.js';
 
 /**
@@ -9,10 +14,14 @@ import { PuraConfig, PuraDevice, PuraBay } from './puraTypes.js';
  * One diffuser service per device, with optional Nightlight Control service.
  */
 export class PuraPlatformAccessory {
-  private service: Service;
+  private service!: Service;
+  private bayServices: Partial<Record<1 | 2, Service>> = {};
+  private lastBayServiceNames: Partial<Record<1 | 2, string>> = {};
   private nightlightService?: Service;
+  private autoAlternateService?: Service;
   private device: PuraDevice;
   private useFanService: boolean;
+  private enableBayControl: boolean;
   private enableBoundNightlightService: boolean;
 
   private currentStateActive = false;
@@ -66,6 +75,9 @@ export class PuraPlatformAccessory {
   };
   private pendingPowerOnIntensityLogTimer?: ReturnType<typeof setTimeout>;
   private lastDiffuserActivatedAt?: number;
+  private activeBayNumber?: 1 | 2;
+  /** Last activeAt seen per bay, used to spot a fresh diffusion session. */
+  private lastBayActiveAt: Partial<Record<1 | 2, number>> = {};
   private lastSuccessfulOnWriteAt?: number;
   private lastSetOnCommandAt?: number;
   private lastRotationWriteAt?: number;
@@ -79,6 +91,8 @@ export class PuraPlatformAccessory {
   private pendingSecondaryBaySyncTimer?: ReturnType<typeof setTimeout>;
   private lastUnavailableCommandWarnAt = 0;
   private lastNoScentVialsWarnAt = 0;
+  private lastBayUpdateDebugKey?: string;
+  private lastBayVisualStateDebugKey?: string;
   private rotationWriteQueue: Promise<void> = Promise.resolve();
 
   constructor(
@@ -86,7 +100,9 @@ export class PuraPlatformAccessory {
     private readonly accessory: PlatformAccessory,
     private readonly puraApi: PuraApi,
   ) {
-    this.device = accessory.context.device;
+    // Restore anything a partial startup payload left out before any service is built from it -
+    // a bay missing here would otherwise have its service torn out of the cached accessory.
+    this.device = this.retainKnownBays(accessory.context.device);
 
     const safeModel = this.device.type && this.device.type.length > 1 ? this.device.type : 'Pura Diffuser';
     const infoService = this.accessory.getService(this.platform.Service.AccessoryInformation)!;
@@ -112,42 +128,14 @@ export class PuraPlatformAccessory {
       (this.platform.config as PuraConfig).enableFanService ??
       (this.platform.config as PuraConfig).useFanService,
     );
+    this.enableBayControl = Boolean((this.platform.config as PuraConfig).enableBayControl);
     // Nightlight controls can be exposed on this diffuser accessory when configured in bound mode.
     this.enableBoundNightlightService = this.shouldUseBoundNightlightService();
-    const fanService = this.accessory.getService(this.platform.Service.Fanv2);
-    const switchService = this.accessory.getService(this.platform.Service.Switch);
-    if (this.useFanService) {
-      if (switchService) {
-        this.accessory.removeService(switchService);
-      }
-      this.service = fanService || this.accessory.addService(this.platform.Service.Fanv2);
-    } else {
-      if (fanService) {
-        this.accessory.removeService(fanService);
-      }
-      this.service = switchService || this.accessory.addService(this.platform.Service.Switch);
-    }
-
-    this.service.setCharacteristic(this.platform.Characteristic.Name, accessory.displayName);
-
-    const activeCharacteristic = this.useFanService
-      ? this.platform.Characteristic.Active
-      : this.platform.Characteristic.On;
-    this.service.getCharacteristic(activeCharacteristic)
-      .onSet(this.setOn.bind(this))
-      .onGet(this.getOn.bind(this));
-    if (this.useFanService) {
-      this.service.getCharacteristic(this.platform.Characteristic.RotationSpeed)
-        .setProps({
-          minValue: 0,
-          maxValue: 100,
-          minStep: 1,
-        })
-        .onSet(this.setRotationSpeed.bind(this))
-        .onGet(this.getRotationSpeed.bind(this));
-    }
+    this.configureDiffuserServices();
 
     this.configureNightlightService();
+    this.configureAutoAlternateService();
+    this.removeFragranceLevelServices();
     this.updateCurrentState();
     this.updateFaultState();
     this.logRecommendationHints(this.device);
@@ -163,9 +151,12 @@ export class PuraPlatformAccessory {
       return;
     }
 
-    const name = `${this.accessory.displayName} Nightlight Control`;
+    // Same reasoning as the auto-alternate switch: without ConfiguredName the Home app names this
+    // after the accessory, so it read as "Diffuser" alongside the diffuser's own tile. The prefix
+    // goes too, since Home already shows it nested under the accessory.
+    const name = 'Nightlight';
     this.nightlightService = existing || this.accessory.addService(this.platform.Service.Lightbulb, name, 'nightlight');
-    this.nightlightService.setCharacteristic(this.platform.Characteristic.Name, name);
+    this.setServiceName(this.nightlightService, name);
     this.nightlightService.getCharacteristic(this.platform.Characteristic.On)
       .onSet(this.setNightlightOn.bind(this))
       .onGet(this.getNightlightOn.bind(this));
@@ -194,11 +185,375 @@ export class PuraPlatformAccessory {
     return this.isNightlightControlEnabled();
   }
 
+  /**
+   * Name a service so the Home app shows it. Setting only `Name` is not enough for a service inside
+   * an accessory - Home falls back to the accessory's own name, which is why extra services all read
+   * as "Diffuser". `ConfiguredName` is the characteristic it actually reads, and it stays editable,
+   * so a name the user sets themselves still wins.
+   */
+  private setServiceName(service: Service, name: string) {
+    service.displayName = name;
+    service.setCharacteristic(this.platform.Characteristic.Name, name);
+    service.addOptionalCharacteristic(this.platform.Characteristic.ConfiguredName);
+    service.setCharacteristic(this.platform.Characteristic.ConfiguredName, name);
+  }
+
+  private isAutoAlternateControlEnabled(): boolean {
+    return Boolean((this.platform.config as PuraConfig).enableAutoAlternate ?? false);
+  }
+
+  /** Only multi-bay hardware has anything to alternate between. */
+  private supportsAutoAlternate(): boolean {
+    const raw = this.device.__raw as Record<string, unknown> | undefined;
+    return Boolean((this.device.bay1 && this.device.bay2) || (raw?.bay1 && raw?.bay2));
+  }
+
+  /**
+   * Exposes Pura's "Auto-alternate fragrances" setting as a switch. The plugin previously only
+   * detected this being off and asked the user to go and change it in the Pura app; the API can set
+   * it directly, and it is the setting that decides whether both bays run at once.
+   */
+  private configureAutoAlternateService() {
+    const existing = this.accessory.getServiceById(this.platform.Service.Switch, 'auto-alternate');
+    if (!this.isAutoAlternateControlEnabled() || !this.supportsAutoAlternate()) {
+      if (existing) {
+        this.accessory.removeService(existing);
+      }
+      this.autoAlternateService = undefined;
+      return;
+    }
+
+    // Named without the diffuser prefix: Home already shows it under the accessory, so repeating
+    // it reads as "Hallway Diffuser > Hallway Diffuser Auto-Alternate". The wording matches the
+    // Pura app's own label for the setting.
+    const name = 'Auto-Alternate Fragrances';
+    this.autoAlternateService = existing
+      || this.accessory.addService(this.platform.Service.Switch, name, 'auto-alternate');
+    this.setServiceName(this.autoAlternateService, name);
+    this.autoAlternateService.getCharacteristic(this.platform.Characteristic.On)
+      .onSet(this.setAutoAlternate.bind(this))
+      .onGet(this.getAutoAlternate.bind(this));
+    this.applyAutoAlternateState();
+  }
+
+  private applyAutoAlternateState() {
+    this.autoAlternateService?.updateCharacteristic(
+      this.platform.Characteristic.On,
+      isAutoAlternateMode(this.device.diffusionMode),
+    );
+  }
+
+  private async getAutoAlternate(): Promise<CharacteristicValue> {
+    if (this.isDeviceUnavailable()) {
+      throw new this.platform.api.hap.HapStatusError(
+        this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+      );
+    }
+    return isAutoAlternateMode(this.device.diffusionMode);
+  }
+
+  private async setAutoAlternate(value: CharacteristicValue) {
+    const enabled = Boolean(value);
+    const mode = enabled ? DIFFUSION_MODE_ALTERNATING : DIFFUSION_MODE_SINGLE_BAY;
+    if (this.isDeviceUnavailable()) {
+      this.logUnavailableCommandWarning();
+      throw new this.platform.api.hap.HapStatusError(
+        this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+      );
+    }
+    if (!await this.puraApi.setDiffusionMode(this.device.id, mode)) {
+      this.applyAutoAlternateState();
+      throw new this.platform.api.hap.HapStatusError(
+        this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+      );
+    }
+    // Reflect it immediately rather than waiting for the poll, then reconcile. The mode changes
+    // how bay state is interpreted, so a stale value here misreads the whole device.
+    this.device = { ...this.device, diffusionMode: mode };
+    this.applyAutoAlternateState();
+    this.platform.requestRefreshSoon(2000);
+    this.platform.log.info(
+      `${this.getDiffuserLogLabel()} auto-alternate fragrances turned ${enabled ? 'on' : 'off'}.`,
+    );
+  }
+
+  /**
+   * Which bays this diffuser has.
+   *
+   * Sticky, because Pura's payloads drop bays transiently and this decides whether a bay's service
+   * is torn off the accessory. Losing a service loses its name and any automation pointing at it,
+   * and a diffuser does not lose a bay - so once one has been seen it stays.
+   */
+  private getConfiguredBayNumbers(): Array<1 | 2> {
+    const context = this.accessory.context as Record<string, unknown>;
+    const remembered = Array.isArray(context.knownBays)
+      ? (context.knownBays as unknown[]).filter((bay): bay is 1 | 2 => bay === 1 || bay === 2)
+      : [];
+    const bays = new Set<1 | 2>(remembered);
+    if (this.device.bay1) {
+      bays.add(1);
+    }
+    if (this.device.bay2) {
+      bays.add(2);
+    }
+    if (bays.size === 0) {
+      return [1];
+    }
+    const resolved = [...bays].sort();
+    context.knownBays = resolved;
+    return resolved;
+  }
+
+  /**
+   * Name a bay after the fragrance in it, but only when that actually tells the bays apart.
+   *
+   * Running the same scent in both bays is an ordinary configuration, and naming both after it
+   * alone would give two identical tiles - so those get the position too, as "Bay 1: Volcano". An
+   * empty or unknown bay falls back to the bare position.
+   *
+   * No diffuser prefix either: Home already shows these nested under the accessory, so repeating it
+   * reads as "Hallway Diffuser > Hallway Diffuser Bay 1".
+   */
+  private getBayServiceName(bay: 1 | 2): string {
+    const positional = `Bay ${bay}`;
+    const fragranceOf = (candidate: 1 | 2) => {
+      const source = candidate === 1 ? this.device.bay1 : this.device.bay2;
+      const name = source?.fragrance?.name;
+      return typeof name === 'string' && name.trim() ? name.trim() : undefined;
+    };
+    const own = fragranceOf(bay);
+    if (!own) {
+      return positional;
+    }
+    const other = fragranceOf(bay === 1 ? 2 : 1);
+    if (other && other.toLowerCase() === own.toLowerCase()) {
+      // The scent no longer tells the bays apart, so the position has to - but dropping the scent
+      // entirely left Home unable to say what was loaded at all. Prefixing only here also keeps
+      // voice control clean: "turn on Volcano" stays an exact match whenever it is unambiguous, and
+      // is ambiguous anyway in exactly the case that gets the prefix.
+      return `${positional}: ${own}`;
+    }
+    return own;
+  }
+
+  /**
+   * Re-apply bay names when the fragrance in a bay changes.
+   *
+   * configureDiffuserServices only runs at construction, so without this a name set at startup
+   * would never follow a vial swap. Whether the Home app honours a ConfiguredName *update* - as
+   * opposed to the initial value, which it does - is still unverified, so the rename is logged:
+   * that separates "the plugin renamed it" from "Home showed the new name".
+   */
+  private refreshBayServiceNames() {
+    if (!this.enableBayControl) {
+      return;
+    }
+    for (const bay of this.getConfiguredBayNumbers()) {
+      const service = this.bayServices[bay];
+      if (!service) {
+        continue;
+      }
+      const name = this.getBayServiceName(bay);
+      if (this.lastBayServiceNames[bay] === name) {
+        continue;
+      }
+      const previous = this.lastBayServiceNames[bay];
+      this.lastBayServiceNames[bay] = name;
+      this.setServiceName(service, name);
+      if (previous !== undefined) {
+        this.platform.log.info(
+          `${this.getDiffuserLogLabel()} renamed bay ${bay} from "${previous}" to "${name}".`,
+        );
+      }
+    }
+  }
+
+  private removeServiceIfPresent(service?: Service) {
+    if (service) {
+      this.accessory.removeService(service);
+    }
+  }
+
+  private configureDiffuserServices() {
+    const defaultFanService = this.accessory.getService(this.platform.Service.Fanv2);
+    const defaultSwitchService = this.accessory.getService(this.platform.Service.Switch);
+    const bay1FanService = this.accessory.getServiceById(this.platform.Service.Fanv2, 'bay-1');
+    const bay2FanService = this.accessory.getServiceById(this.platform.Service.Fanv2, 'bay-2');
+    const bay1SwitchService = this.accessory.getServiceById(this.platform.Service.Switch, 'bay-1');
+    const bay2SwitchService = this.accessory.getServiceById(this.platform.Service.Switch, 'bay-2');
+
+    if (!this.enableBayControl) {
+      this.removeServiceIfPresent(bay1FanService);
+      this.removeServiceIfPresent(bay2FanService);
+      this.removeServiceIfPresent(bay1SwitchService);
+      this.removeServiceIfPresent(bay2SwitchService);
+      this.bayServices = {};
+
+      if (this.useFanService) {
+        this.removeServiceIfPresent(defaultSwitchService);
+        this.service = defaultFanService || this.accessory.addService(this.platform.Service.Fanv2);
+      } else {
+        this.removeServiceIfPresent(defaultFanService);
+        this.service = defaultSwitchService || this.accessory.addService(this.platform.Service.Switch);
+      }
+
+      this.service.setCharacteristic(this.platform.Characteristic.Name, this.accessory.displayName);
+      const activeCharacteristic = this.useFanService
+        ? this.platform.Characteristic.Active
+        : this.platform.Characteristic.On;
+      this.service.getCharacteristic(activeCharacteristic)
+        .onSet(this.setOn.bind(this))
+        .onGet(this.getOn.bind(this));
+      if (this.useFanService) {
+        this.service.getCharacteristic(this.platform.Characteristic.RotationSpeed)
+          .setProps({
+            minValue: 0,
+            maxValue: 100,
+            minStep: 1,
+          })
+          .onSet(this.setRotationSpeed.bind(this))
+          .onGet(this.getRotationSpeed.bind(this));
+      }
+      return;
+    }
+
+    // Bay mode: remove legacy single-control services and configure one service per bay.
+    this.removeServiceIfPresent(defaultFanService);
+    this.removeServiceIfPresent(defaultSwitchService);
+    const configuredBays = this.getConfiguredBayNumbers();
+
+    if (this.useFanService) {
+      this.removeServiceIfPresent(bay1SwitchService);
+      this.removeServiceIfPresent(bay2SwitchService);
+      for (const bay of configuredBays) {
+        const subtype = `bay-${bay}`;
+        const name = this.getBayServiceName(bay);
+        const existing = this.accessory.getServiceById(this.platform.Service.Fanv2, subtype);
+        const service = existing || this.accessory.addService(this.platform.Service.Fanv2, name, subtype);
+        this.setServiceName(service, name);
+        service.getCharacteristic(this.platform.Characteristic.Active)
+          .onSet((value) => this.setBayOn(bay, value))
+          .onGet(() => this.getBayOn(bay));
+        service.getCharacteristic(this.platform.Characteristic.RotationSpeed)
+          .setProps({
+            minValue: 0,
+            maxValue: 100,
+            minStep: 1,
+          })
+          .onSet((value) => this.setBayRotationSpeed(bay, value))
+          .onGet(() => this.getBayRotationSpeed(bay));
+        this.bayServices[bay] = service;
+      }
+      if (!configuredBays.includes(1)) {
+        this.removeServiceIfPresent(this.accessory.getServiceById(this.platform.Service.Fanv2, 'bay-1'));
+        delete this.bayServices[1];
+      }
+      if (!configuredBays.includes(2)) {
+        this.removeServiceIfPresent(this.accessory.getServiceById(this.platform.Service.Fanv2, 'bay-2'));
+        delete this.bayServices[2];
+      }
+    } else {
+      this.removeServiceIfPresent(bay1FanService);
+      this.removeServiceIfPresent(bay2FanService);
+      for (const bay of configuredBays) {
+        const subtype = `bay-${bay}`;
+        const name = this.getBayServiceName(bay);
+        const existing = this.accessory.getServiceById(this.platform.Service.Switch, subtype);
+        const service = existing || this.accessory.addService(this.platform.Service.Switch, name, subtype);
+        this.setServiceName(service, name);
+        service.getCharacteristic(this.platform.Characteristic.On)
+          .onSet((value) => this.setBayOn(bay, value))
+          .onGet(() => this.getBayOn(bay));
+        this.bayServices[bay] = service;
+      }
+      if (!configuredBays.includes(1)) {
+        this.removeServiceIfPresent(this.accessory.getServiceById(this.platform.Service.Switch, 'bay-1'));
+        delete this.bayServices[1];
+      }
+      if (!configuredBays.includes(2)) {
+        this.removeServiceIfPresent(this.accessory.getServiceById(this.platform.Service.Switch, 'bay-2'));
+        delete this.bayServices[2];
+      }
+    }
+
+    // Keep primary service reference for shared helper paths.
+    this.service = this.bayServices[1] ?? this.bayServices[2]!;
+  }
+
+  private getControlServices(): Service[] {
+    if (!this.enableBayControl) {
+      return [this.service];
+    }
+    return [this.bayServices[1], this.bayServices[2]].filter((service): service is Service => Boolean(service));
+  }
+
+  /**
+   * Whether a bay can diffuse.
+   *
+   * Only a positive report counts. Pura's payloads are routinely partial - realtime frames omit the
+   * fragrance block while a vial is seated, and a refresh can drop a whole bay - so silence says
+   * nothing, and inferring "empty" from it disabled a bay holding a full vial.
+   *
+   * `vialId` is the one field that does distinguish them, verified by reading the same realtime
+   * shape with the vial in and out: seated reports the vial's hardware id even with no fragrance
+   * block, empty reports an empty string.
+   *
+   * A remaining of 0% deliberately does *not* count. It is Pura's estimate from wearing time, not a
+   * measurement, and the device keeps diffusing straight through it - a Pura Mini was observed
+   * running a bay reporting 0%. Treating it as unusable showed that bay as off in HomeKit while it
+   * ran, and left no way to stop it: the tile reads off, so Home only ever offers to turn it on,
+   * which the same check then refuses.
+   */
+  private isBayUsable(bay: 1 | 2): boolean {
+    const source = bay === 1 ? this.device.bay1 : this.device.bay2;
+    return source?.vialId !== '';
+  }
+
+  /**
+   * Strip the fragrance-level services tried during 1.8.0's alphas.
+   *
+   * Showing how much fragrance a bay has left was attempted three ways and abandoned: the Home app
+   * renders nothing for FilterMaintenance, and it shows one Battery per accessory, so two bays
+   * reported the same figure on both tiles. Reaching the one place Home does show filter state
+   * would mean presenting each bay as an air purifier, which a diffuser is not.
+   *
+   * Remaining and low-fragrance are still parsed - a bay reporting 0% is one of the two signals
+   * that it cannot diffuse - they are just not published as their own service.
+   *
+   * Only alpha builds ever created these, so this can go once 1.8.0 has been out a while.
+   */
+  private removeFragranceLevelServices() {
+    const stale = [
+      [this.platform.Service.Battery, 'fragrance'],
+      [this.platform.Service.Battery, 'bay-1-fragrance'],
+      [this.platform.Service.Battery, 'bay-2-fragrance'],
+      [this.platform.Service.FilterMaintenance, 'bay-1-fragrance'],
+      [this.platform.Service.FilterMaintenance, 'bay-2-fragrance'],
+    ] as const;
+    for (const [type, subtype] of stale) {
+      const service = this.accessory.getServiceById(type, subtype);
+      if (service) {
+        this.accessory.removeService(service);
+      }
+    }
+  }
+
+
   private updateCurrentState() {
     const activeBay = this.getActiveBay();
     this.currentStateActive = Boolean(activeBay);
+    const bay1 = this.fillBayIntensityFromCache(this.device.bay1);
+    const bay2 = this.fillBayIntensityFromCache(this.device.bay2);
+    if (bay1 && Number.isFinite(bay1.intensity) && bay1.intensity > 0) {
+      this.setStoredBayIntensity(1, bay1.intensity);
+    }
+    if (bay2 && Number.isFinite(bay2.intensity) && bay2.intensity > 0) {
+      this.setStoredBayIntensity(2, bay2.intensity);
+    }
+    this.activeBayNumber = activeBay ? this.getActiveBayNumber() : undefined;
     if (activeBay) {
-      this.accessory.context.lastBay = activeBay === this.device.bay1 ? 1 : 2;
+      const activeBayNumber = this.getActiveBayNumber();
+      this.accessory.context.lastBay = activeBayNumber ?? 1;
       if (Number.isFinite(activeBay.intensity) && activeBay.intensity > 0) {
         this.accessory.context.lastIntensity = activeBay.intensity;
       }
@@ -292,13 +647,15 @@ export class PuraPlatformAccessory {
   }
 
   private updateFaultState() {
-    if (!this.service.testCharacteristic(this.platform.Characteristic.StatusFault)) {
-      return;
-    }
     const nextFault = (this.hasNoScentVialsDetected() || this.isDeviceUnavailable())
       ? this.platform.Characteristic.StatusFault.GENERAL_FAULT
       : this.platform.Characteristic.StatusFault.NO_FAULT;
-    this.service.updateCharacteristic(this.platform.Characteristic.StatusFault, nextFault);
+    for (const service of this.getControlServices()) {
+      if (!service.testCharacteristic(this.platform.Characteristic.StatusFault)) {
+        continue;
+      }
+      service.updateCharacteristic(this.platform.Characteristic.StatusFault, nextFault);
+    }
   }
 
   private enforceOffVisualState() {
@@ -311,7 +668,28 @@ export class PuraPlatformAccessory {
     }, 100);
   }
 
+  /**
+   * Whether the device is diffusing at all, when it is set to auto-alternate.
+   *
+   * In that mode every bay in the rotation reports `active: true` whether or not anything is coming
+   * out, and `activeAt` is stamped only on the bay actually running - so with the diffuser idle,
+   * `active` alone lit a tile for a bay the Pura app showed as stopped. The stamp is cleared when
+   * diffusion stops, so its absence across every bay means nothing is running.
+   *
+   * Deliberately scoped to auto-alternate. In `standard` mode `active` is meaningful on its own and
+   * carries the long-running-session handling, and there is no evidence to justify changing it.
+   */
+  private hasNoBayDiffusing(): boolean {
+    if (!isAutoAlternateMode(this.device.diffusionMode)) {
+      return false;
+    }
+    return this.device.bay1?.activeAt === undefined && this.device.bay2?.activeAt === undefined;
+  }
+
   private getActiveBay(): PuraBay | undefined {
+    if (this.hasNoBayDiffusing()) {
+      return undefined;
+    }
     const bay1 = this.fillBayIntensityFromCache(this.device.bay1);
     const bay2 = this.fillBayIntensityFromCache(this.device.bay2);
     if (bay1?.active && !bay2?.active) {
@@ -384,9 +762,15 @@ export class PuraPlatformAccessory {
     if (availableBays.length === 0) {
       return false;
     }
-    const orderedBays = availableBays.includes(targetBay)
-      ? [targetBay, ...availableBays.filter((bay) => bay !== targetBay)]
-      : availableBays;
+    if (!availableBays.includes(targetBay)) {
+      // Falling back to whatever bay is present would send the write to the wrong bay while the
+      // caller logged success against the one it asked for. Better to fail visibly.
+      this.platform.log.warn(
+        `${this.getBayLogLabel(targetBay)} is not present on this diffuser; intensity write skipped.`,
+      );
+      return false;
+    }
+    const orderedBays: Array<1 | 2> = [targetBay, ...availableBays.filter((bay) => bay !== targetBay)];
     const [primaryBay, ...secondaryBays] = orderedBays;
 
     const primarySuccess = await this.puraApi.setIntensity(this.device.id, primaryBay, intensity, controller);
@@ -481,6 +865,498 @@ export class PuraPlatformAccessory {
       clearTimeout(this.pendingSecondaryBaySyncTimer);
       this.pendingSecondaryBaySyncTimer = undefined;
     }
+  }
+
+  private getActiveBayNumber(): 1 | 2 | undefined {
+    if (this.hasNoBayDiffusing()) {
+      return undefined;
+    }
+    const bay1 = this.fillBayIntensityFromCache(this.device.bay1);
+    const bay2 = this.fillBayIntensityFromCache(this.device.bay2);
+    if (bay1?.active && !bay2?.active) {
+      return 1;
+    }
+    if (bay2?.active && !bay1?.active) {
+      return 2;
+    }
+    if (bay1?.active && bay2?.active) {
+      const bay1ActiveAt = bay1.activeAt ?? 0;
+      const bay2ActiveAt = bay2.activeAt ?? 0;
+      if (bay1ActiveAt !== bay2ActiveAt) {
+        return bay1ActiveAt > bay2ActiveAt ? 1 : 2;
+      }
+      return bay1.intensity >= bay2.intensity ? 1 : 2;
+    }
+    return undefined;
+  }
+
+  private getEffectiveActiveBayNumber(): 1 | 2 | undefined {
+    const activeBay = this.getActiveBayNumber();
+    if (activeBay) {
+      return activeBay;
+    }
+    if (!this.currentStateActive) {
+      return undefined;
+    }
+    const pendingBay = this.pendingIntensityIntent?.bay;
+    if (pendingBay === 1 || pendingBay === 2) {
+      return pendingBay;
+    }
+    const lastBay = this.accessory.context.lastBay;
+    return lastBay === 1 || lastBay === 2 ? lastBay : undefined;
+  }
+
+  private getBayPayload(bay: 1 | 2): PuraBay | undefined {
+    return bay === 1 ? this.device.bay1 : this.device.bay2;
+  }
+
+  private getStoredBayIntensity(bay: 1 | 2): number | undefined {
+    const key = bay === 1 ? 'lastIntensityBay1' : 'lastIntensityBay2';
+    const value = Number((this.accessory.context as Record<string, unknown>)[key]);
+    if (!Number.isFinite(value) || value <= 0) {
+      return undefined;
+    }
+    return Math.max(1, Math.min(100, Math.round(value)));
+  }
+
+  private setStoredBayIntensity(bay: 1 | 2, intensity: number) {
+    const key = bay === 1 ? 'lastIntensityBay1' : 'lastIntensityBay2';
+    (this.accessory.context as Record<string, unknown>)[key] = Math.max(1, Math.min(100, Math.round(intensity)));
+  }
+
+  /** A pending write for this bay that the device has not confirmed yet, if it is still fresh. */
+  private getPendingBayIntensity(bay: 1 | 2): number | undefined {
+    const pending = this.pendingIntensityIntent;
+    if (!pending || pending.bay !== bay) {
+      return undefined;
+    }
+    const ageMs = Date.now() - pending.at;
+    if (ageMs < 0 || ageMs > pending.ttlMs) {
+      return undefined;
+    }
+    return pending.intensity;
+  }
+
+  private getBayIntensityValue(bay: 1 | 2): number | undefined {
+    // A just-written intensity has to win over the device's last-known value until the device
+    // confirms it. Without this, applyCurrentState pushed the stale value straight back onto the
+    // slider - and because HomeKit follows a speed change on an idle fan with Active=1, the ON
+    // handler then read that stale value off the service and wrote it, discarding what was asked
+    // for. Setting bay 1 to 100 while it was off ended up writing 30.
+    const pending = this.getPendingBayIntensity(bay);
+    if (pending !== undefined) {
+      return Math.max(1, Math.min(100, Math.round(pending)));
+    }
+    const payload = this.getBayPayload(bay);
+    if (payload && Number.isFinite(payload.intensity) && payload.intensity > 0) {
+      return Math.max(1, Math.min(100, Math.round(payload.intensity)));
+    }
+    return this.getStoredBayIntensity(bay);
+  }
+
+  private getBayLogLabel(bay: 1 | 2): string {
+    return `${this.getDiffuserLogLabel()} Bay ${bay}`;
+  }
+
+  private getBayCharacteristicState(isOn: boolean): CharacteristicValue {
+    if (this.useFanService) {
+      return isOn
+        ? this.platform.Characteristic.Active.ACTIVE
+        : this.platform.Characteristic.Active.INACTIVE;
+    }
+    return isOn;
+  }
+
+  private summarizeBayDebugState(): string {
+    const summarize = (bay: 1 | 2) => {
+      const payload = this.getBayPayload(bay);
+      return `bay${bay}{active=${Boolean(payload?.active)},intensity=${payload?.intensity ?? 'none'},activeAt=${payload?.activeAt ?? 'none'}}`;
+    };
+    const pendingBay = this.pendingIntensityIntent?.bay;
+    return `effective=${this.getEffectiveActiveBayNumber() ?? 'none'},currentStateActive=${this.currentStateActive},` +
+      `pendingBay=${pendingBay ?? 'none'},pendingIntensity=${this.pendingIntensityIntent?.intensity ?? 'none'},` +
+      `${summarize(1)},${summarize(2)}`;
+  }
+
+  async setBayOn(bay: 1 | 2, value: CharacteristicValue) {
+    await this.enqueueRotationWrite(async () => {
+      const bayLabel = this.getBayLogLabel(bay);
+      const isOn = this.useFanService
+        ? value === this.platform.Characteristic.Active.ACTIVE
+        : Boolean(value);
+      this.lastSetOnCommandAt = Date.now();
+      this.platform.log.debug(`Set Characteristic Active for ${bayLabel} ->`, value);
+      if (this.platform.isDebugEnabled()) {
+        this.platform.log.debug(
+          `[BayControl] setBayOn request for ${bayLabel}: ` +
+          `requested=${isOn} raw=${value} effectiveActiveBay=${this.getEffectiveActiveBayNumber() ?? 'none'} ` +
+          `currentStateActive=${this.currentStateActive}`,
+        );
+      }
+
+      try {
+        if (isOn) {
+          if (!this.isBayUsable(bay)) {
+            // No vial, or a spent one. Reported as a fault rather than "no response" - the bay is
+            // reachable and working, it just has nothing to diffuse.
+            this.platform.log.warn(
+              `${bayLabel} has no fragrance to diffuse; install or replace the vial.`,
+            );
+            this.applyCurrentState();
+            this.updateFaultState();
+            throw new this.platform.api.hap.HapStatusError(
+              this.platform.api.hap.HAPStatus.RESOURCE_DOES_NOT_EXIST,
+            );
+          }
+          this.platform.recordIntent(this.device.id, true);
+          if (this.isDeviceUnavailable()) {
+            this.enforceOffVisualState();
+            this.updateFaultState();
+            this.logUnavailableCommandWarning();
+            throw new this.platform.api.hap.HapStatusError(
+              this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+            );
+          }
+          if (this.hasNoScentVialsDetected()) {
+            this.enforceOffVisualState();
+            this.updateFaultState();
+            this.logNoScentVialsWarning();
+            return;
+          }
+
+          const bayService = this.bayServices[bay];
+          const mappedFromService = this.useFanService && bayService
+            ? this.mapRotationToIntensity(Number(
+              bayService.getCharacteristic(this.platform.Characteristic.RotationSpeed).value,
+            ))
+            : 0;
+          const payloadIntensity = this.getBayIntensityValue(bay);
+          const fallbackIntensity = this.useFanService ? 100 : 60;
+          const targetIntensity = Math.max(
+            1,
+            Math.min(100, mappedFromService > 0 ? mappedFromService : (payloadIntensity ?? fallbackIntensity)),
+          );
+          if (this.platform.isDebugEnabled()) {
+            this.platform.log.debug(
+              `[BayControl] ON intensity selection for ${bayLabel}: ` +
+              `mappedFromService=${mappedFromService || 'none'} payloadIntensity=${payloadIntensity ?? 'none'} ` +
+              `fallback=${fallbackIntensity} target=${targetIntensity}`,
+            );
+          }
+
+          if (this.shouldResetAwayModeBeforeActivating()) {
+            await this.puraApi.setAwayMode(this.device.id, false);
+          }
+          const controller = this.device.controller || 'default';
+          const alwaysOn = await this.puraApi.setAlwaysOn(this.device.id, bay);
+          const success = alwaysOn && await this.setIntensityAcrossAvailableBays(bay, targetIntensity, controller, false);
+          if (!success) {
+            this.platform.log.error(`Failed to turn on ${bayLabel}`);
+            this.applyCurrentState();
+            return;
+          }
+
+          this.currentStateActive = true;
+          const activatedAt = Date.now();
+          this.lastSuccessfulOnWriteAt = activatedAt;
+          this.lastDiffuserActivatedAt = activatedAt;
+          this.pendingPowerOnIntensityIntent = undefined;
+          this.accessory.context.lastIntensity = targetIntensity;
+          this.setStoredBayIntensity(bay, targetIntensity);
+          this.accessory.context.lastBay = bay;
+          this.pendingIntensityIntent = {
+            at: Date.now(),
+            ttlMs: 15000,
+            intensity: targetIntensity,
+            bay,
+          };
+          this.cancelPendingPowerOnIntensityLog();
+          if (this.platform.isDebugEnabled()) {
+            this.platform.log.debug(
+              `[BayControl] Applied ON for ${bayLabel}: targetIntensity=${targetIntensity}, ` +
+              `effectiveActiveBay=${this.getEffectiveActiveBayNumber() ?? 'none'}, ${this.summarizeBayDebugState()}`,
+            );
+          }
+          this.platform.log.info(`${bayLabel} turned on.`);
+          if (this.useFanService) {
+            this.platform.log.info(
+              `${bayLabel} intensity set to ${targetIntensity} (${this.describeIntensityLevel(targetIntensity)}).`,
+            );
+          }
+          this.applyCurrentState();
+          if ((this.platform.config as PuraConfig).forceNightlightOff && this.supportsNightlightControl()) {
+            await this.ensureNightlightOff();
+          }
+          return;
+        }
+
+        const activeBay = this.getEffectiveActiveBayNumber();
+        // While alternating, both bays are genuinely running, so "is this the one active bay" is
+        // the wrong question - it would ignore an OFF for whichever bay lost the tie-break.
+        const thisBayRunning = this.currentStateActive && this.isBayActive(bay, activeBay);
+        if (!thisBayRunning) {
+          // Ignored, so no intent is recorded - see recordIntent above.
+          if (this.platform.isDebugEnabled()) {
+            this.platform.log.debug(
+              `[BayControl] Ignoring OFF for ${bayLabel}: ` +
+              `currentStateActive=${this.currentStateActive} effectiveActiveBay=${activeBay ?? 'none'}`,
+            );
+          }
+          this.applyCurrentState();
+          return;
+        }
+        if (this.isDeviceUnavailable()) {
+          this.enforceOffVisualState();
+          this.updateFaultState();
+          this.logUnavailableCommandWarning();
+          throw new this.platform.api.hap.HapStatusError(
+            this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+          );
+        }
+
+        // If another bay is still running - which only happens while alternating - turning this one
+        // off means "run just the other one" rather than "stop the diffuser".
+        //
+        // The diffusion mode is deliberately left alone. Auto-alternate and bay selection are
+        // independent on the device: selecting a single bay does not turn alternation off, as a
+        // timer targeting one bay demonstrates by leaving the mode at oscillation-multi-bay. Writing
+        // the mode here would change a setting the user did not touch.
+        const otherRunningBay = this.getConfiguredBayNumbers()
+          .find((candidate) => candidate !== bay && this.isBayActive(candidate, activeBay));
+        if (otherRunningBay) {
+          this.platform.recordIntent(this.device.id, true);
+          if (!await this.puraApi.setAlwaysOn(this.device.id, otherRunningBay)) {
+            this.platform.log.error(`Failed to turn off ${bayLabel}`);
+            this.applyCurrentState();
+            return;
+          }
+          this.platform.log.info(
+            `${bayLabel} turned off; ${this.getBayLogLabel(otherRunningBay)} continues.`,
+          );
+          this.applyCurrentState();
+          this.platform.requestRefreshSoon(2500);
+          return;
+        }
+
+        this.platform.recordIntent(this.device.id, false);
+        const success = await this.puraApi.stopAll(this.device.id);
+        if (!success) {
+          this.platform.log.error(`Failed to turn off ${bayLabel}`);
+          this.applyCurrentState();
+          return;
+        }
+
+        this.currentStateActive = false;
+        this.lastSuccessfulOnWriteAt = undefined;
+        this.pendingNightlightIntent = undefined;
+        this.recentNightlightHold = undefined;
+        this.pendingIntensityIntent = undefined;
+        this.pendingPowerOnIntensityIntent = undefined;
+        this.clearPendingSecondaryBayIntensitySync();
+        this.cancelPendingPowerOnIntensityLog();
+        if (this.platform.isDebugEnabled()) {
+          this.platform.log.debug(
+            `[BayControl] Applied OFF for ${bayLabel}: ${this.summarizeBayDebugState()}`,
+          );
+        }
+        this.platform.log.info(`${bayLabel} turned off.`);
+        this.applyCurrentState();
+        this.platform.requestRefreshSoon(2500);
+      } catch (error) {
+        if (this.isHapStatusError(error)) {
+          throw error;
+        }
+        this.platform.log.error(`Error setting On state for ${bayLabel}:`, error);
+        this.applyCurrentState();
+      }
+    });
+  }
+
+  async getBayOn(bay: 1 | 2): Promise<CharacteristicValue> {
+    const bayLabel = this.getBayLogLabel(bay);
+    if (this.isDeviceUnavailable()) {
+      this.updateFaultState();
+      this.platform.log.debug(
+        `Get Characteristic Active for ${bayLabel} -> unavailable (service communication failure)`,
+      );
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+    // Must match what applyCurrentState pushes. Deriving this from "the one active bay" made reads
+    // disagree with pushes while alternating: HomeKit was told both bays were on, then answered 0
+    // for whichever one lost the tie-break the next time it asked.
+    const isActive = this.isBayActive(bay, this.getEffectiveActiveBayNumber());
+    const value = this.getBayCharacteristicState(isActive);
+    this.platform.log.debug(`Get Characteristic Active for ${bayLabel} ->`, value);
+    return value;
+  }
+
+  async setBayRotationSpeed(bay: 1 | 2, value: CharacteristicValue) {
+    await this.enqueueRotationWrite(async () => {
+      if (!this.useFanService) {
+        return;
+      }
+      const bayLabel = this.getBayLogLabel(bay);
+      try {
+        this.lastRotationWriteAt = Date.now();
+        const speed = Math.max(0, Math.min(100, Number(value) || 0));
+        const mappedIntensity = this.mapRotationToIntensity(speed);
+        const snappedSpeed = mappedIntensity <= 0 ? 0 : this.mapIntensityToRotation(mappedIntensity);
+        this.bayServices[bay]?.updateCharacteristic(this.platform.Characteristic.RotationSpeed, snappedSpeed);
+        if (this.platform.isDebugEnabled()) {
+          this.platform.log.debug(
+            `[BayControl] setBayRotationSpeed for ${bayLabel}: raw=${value} normalized=${speed} ` +
+            `mapped=${mappedIntensity} snapped=${snappedSpeed} ` +
+            `effectiveActiveBay=${this.getEffectiveActiveBayNumber() ?? 'none'} currentStateActive=${this.currentStateActive}`,
+          );
+        }
+
+        if (speed <= 0) {
+          const activeBay = this.getEffectiveActiveBayNumber();
+          if (!this.currentStateActive || activeBay !== bay) {
+            if (this.platform.isDebugEnabled()) {
+              this.platform.log.debug(
+                `[BayControl] Ignoring RotationSpeed=0 OFF for ${bayLabel}: ` +
+                `currentStateActive=${this.currentStateActive} effectiveActiveBay=${activeBay ?? 'none'}`,
+              );
+            }
+            this.applyCurrentState();
+            return;
+          }
+          const success = await this.puraApi.stopAll(this.device.id);
+          if (!success) {
+            this.platform.log.warn(
+              `Failed to turn off ${bayLabel} via RotationSpeed=0; preserving current state.`,
+            );
+            this.applyCurrentState();
+            return;
+          }
+          this.currentStateActive = false;
+          this.lastSuccessfulOnWriteAt = undefined;
+          this.pendingNightlightIntent = undefined;
+          this.recentNightlightHold = undefined;
+          this.pendingIntensityIntent = undefined;
+          this.pendingPowerOnIntensityIntent = undefined;
+          this.clearPendingSecondaryBayIntensitySync();
+          this.cancelPendingPowerOnIntensityLog();
+          this.platform.log.info(`${bayLabel} turned off.`);
+          this.applyCurrentState();
+          this.platform.requestRefreshSoon(2500);
+          return;
+        }
+
+        if (!this.isBayUsable(bay)) {
+          // Same refusal as the ON handler, and for a sharper reason: the re-arm below calls
+          // setAlwaysOn, so without this a slider drag on an empty bay pins the device to it and
+          // silently stops whichever bay was actually diffusing.
+          this.platform.log.warn(
+            `${bayLabel} has no fragrance to diffuse; install or replace the vial.`,
+          );
+          this.applyCurrentState();
+          this.updateFaultState();
+          throw new this.platform.api.hap.HapStatusError(
+            this.platform.api.hap.HAPStatus.RESOURCE_DOES_NOT_EXIST,
+          );
+        }
+        if (this.isDeviceUnavailable()) {
+          this.enforceOffVisualState();
+          this.updateFaultState();
+          this.logUnavailableCommandWarning();
+          throw new this.platform.api.hap.HapStatusError(
+            this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+          );
+        }
+        if (this.hasNoScentVialsDetected()) {
+          this.enforceOffVisualState();
+          this.updateFaultState();
+          this.logNoScentVialsWarning();
+          return;
+        }
+
+        const controller = this.device.controller || 'default';
+        const activeBay = this.getEffectiveActiveBayNumber();
+        if (!this.currentStateActive || activeBay !== bay) {
+          if (this.platform.isDebugEnabled()) {
+            this.platform.log.debug(
+              `[BayControl] Re-arming ${bayLabel} before intensity write: ` +
+              `currentStateActive=${this.currentStateActive} effectiveActiveBay=${activeBay ?? 'none'}`,
+            );
+          }
+          if (this.shouldResetAwayModeBeforeActivating()) {
+            await this.puraApi.setAwayMode(this.device.id, false);
+          }
+          const alwaysOn = await this.puraApi.setAlwaysOn(this.device.id, bay);
+          if (!alwaysOn) {
+            this.platform.log.warn(`${bayLabel} could not be re-armed while setting intensity.`);
+            this.applyCurrentState();
+            return;
+          }
+          this.currentStateActive = true;
+          const activatedAt = Date.now();
+          this.lastSuccessfulOnWriteAt = activatedAt;
+          this.lastDiffuserActivatedAt = activatedAt;
+        }
+
+        const previousPendingIntent = this.pendingIntensityIntent;
+        this.pendingIntensityIntent = {
+          at: Date.now(),
+          ttlMs: 15000,
+          intensity: mappedIntensity,
+          bay,
+        };
+        const success = await this.setIntensityAcrossAvailableBays(bay, mappedIntensity, controller, false);
+        if (!success) {
+          this.pendingIntensityIntent = previousPendingIntent;
+          this.platform.log.warn(
+            `${bayLabel} intensity write failed (raw=${value}, snapped=${snappedSpeed}). Keeping last known state.`,
+          );
+          this.applyCurrentState();
+          return;
+        }
+
+        this.accessory.context.lastBay = bay;
+        this.accessory.context.lastIntensity = mappedIntensity;
+        this.setStoredBayIntensity(bay, mappedIntensity);
+        this.pendingIntensityIntent = {
+          at: Date.now(),
+          ttlMs: 15000,
+          intensity: mappedIntensity,
+          bay,
+        };
+        this.recentIntensityHold = { until: Date.now() + 15000, level: mappedIntensity };
+        this.cancelPendingPowerOnIntensityLog();
+        if (this.platform.isDebugEnabled()) {
+          this.platform.log.debug(
+            `[BayControl] Applied intensity for ${bayLabel}: mapped=${mappedIntensity}, ` +
+            `effectiveActiveBay=${this.getEffectiveActiveBayNumber() ?? 'none'}, ${this.summarizeBayDebugState()}`,
+          );
+        }
+        this.platform.log.info(
+          `${bayLabel} intensity set to ${mappedIntensity} (${this.describeIntensityLevel(mappedIntensity)}).`,
+        );
+        this.applyCurrentState();
+      } catch (error) {
+        if (this.isHapStatusError(error)) {
+          throw error;
+        }
+        this.platform.log.error(`Error setting RotationSpeed for ${bayLabel}:`, error);
+        this.applyCurrentState();
+      }
+    });
+  }
+
+  async getBayRotationSpeed(bay: 1 | 2): Promise<CharacteristicValue> {
+    if (!this.useFanService) {
+      return 0;
+    }
+    if (this.isDeviceUnavailable()) {
+      this.updateFaultState();
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+    const intensity = this.getBayIntensityValue(bay);
+    if (typeof intensity !== 'number') {
+      return 0;
+    }
+    return this.mapIntensityToRotation(intensity);
   }
 
   async setOn(value: CharacteristicValue) {
@@ -1209,15 +2085,21 @@ export class PuraPlatformAccessory {
 
   updateDevice(device: PuraDevice) {
     const previousDiffuserActive = this.currentStateActive;
+    const previousActiveBayNumber = this.activeBayNumber;
     const nightlightStabilizedDevice = this.clampNightlightDuringHold(
       this.stabilizeNightlightDuringIntentWindow(device),
     );
-    const stabilizedDevice = this.stabilizeIntensityDuringIntentWindow(nightlightStabilizedDevice);
+    const stabilizedDevice = this.retainKnownBays(
+      this.stabilizeIntensityDuringIntentWindow(nightlightStabilizedDevice),
+    );
     const previousNightlight = this.device.nightlight;
     const previousOnline = this.normalizeOnlineState(this.device.online);
     const nextOnline = this.normalizeOnlineState(stabilizedDevice.online);
     this.logOnlineStateTransition(previousOnline, nextOnline);
     this.device = stabilizedDevice;
+    this.configureAutoAlternateService();
+    this.refreshBayServiceNames();
+    this.removeFragranceLevelServices();
     if (typeof stabilizedDevice.nightlight?.active === 'boolean') {
       this.pendingNightlightActive = stabilizedDevice.nightlight.active;
     }
@@ -1239,13 +2121,66 @@ export class PuraPlatformAccessory {
     }
     this.logNightlightProfileRoundTrip(previousNightlight, stabilizedDevice.nightlight);
     this.updateCurrentState();
-    if (!previousDiffuserActive && this.currentStateActive) {
+    // After updateCurrentState, not before: currentStateActive and the effective bay are resolved
+    // there, so logging earlier printed the previous update's values next to this update's bays -
+    // a diagnostic that reads as a contradiction while nothing is actually wrong.
+    if (this.enableBayControl && this.platform.isDebugEnabled()) {
+      const key = this.summarizeBayDebugState();
+      if (key !== this.lastBayUpdateDebugKey) {
+        this.lastBayUpdateDebugKey = key;
+        this.platform.log.debug(`[BayControl] Device update for ${this.getDiffuserLogLabel()}: ${key}`);
+      }
+    }
+    // Pura re-syncs the nightlight whenever diffusion starts on a bay - which includes switching
+    // from one bay to the other while already running, as a timer or the auto-alternate cycle does.
+    // Arming only on an off->on transition missed those, so the nightlight came on and stayed on.
+    const diffuserJustActivated = !previousDiffuserActive && this.currentStateActive;
+    const activeBayJustChanged = this.currentStateActive
+      && previousActiveBayNumber !== undefined
+      && this.activeBayNumber !== undefined
+      && previousActiveBayNumber !== this.activeBayNumber;
+    // A session started from the Pura app on the bay already showing as active is neither of the
+    // above - nothing about the plugin's view changes except that the bay gets a fresh activeAt
+    // stamp. That is the only signal, and without it the nightlight came on and stayed on.
+    const sessionJustStarted = this.consumeNewBayActivation();
+    if (diffuserJustActivated || activeBayJustChanged || sessionJustStarted) {
       this.lastDiffuserActivatedAt = Date.now();
     }
     if (previousDiffuserActive && !this.currentStateActive) {
       this.cancelPendingPowerOnIntensityLog();
     }
     void this.maybeForceNightlightOff();
+  }
+
+  /**
+   * Whether any bay has been stamped with a newer activeAt than last time, meaning the device has
+   * started diffusing afresh. Records what it saw, so a given stamp only reports once.
+   */
+  private consumeNewBayActivation(): boolean {
+    let started = false;
+    for (const bay of [1, 2] as const) {
+      const source = bay === 1 ? this.device.bay1 : this.device.bay2;
+      if (!source) {
+        // The payload says nothing about this bay; keep what was last known.
+        continue;
+      }
+      // A bay reported without activeAt is idle, which has to be recorded as its own value -
+      // otherwise the idle-to-running edge looks like a first sighting and never fires.
+      const activeAt = typeof source.activeAt === 'number' && Number.isFinite(source.activeAt)
+        ? source.activeAt
+        : 0;
+      const previous = this.lastBayActiveAt[bay];
+      if (previous === undefined) {
+        // First sighting is whatever the device was already doing, not a new session.
+        this.lastBayActiveAt[bay] = activeAt;
+        continue;
+      }
+      if (activeAt > previous) {
+        started = true;
+        this.lastBayActiveAt[bay] = activeAt;
+      }
+    }
+    return started;
   }
 
   private logInferredOfflineTransition() {
@@ -1279,6 +2214,13 @@ export class PuraPlatformAccessory {
               'For best results, please disable it in the Pura app.',
         );
       }
+    }
+
+    // With the auto-alternate switch exposed there is nothing to nag about: the setting is right
+    // there in HomeKit rather than buried in the Pura app.
+    if (this.isAutoAlternateControlEnabled() && this.supportsAutoAlternate()) {
+      this.lastAutoAlternativeOffState = null;
+      return;
     }
 
     const autoAlternativeLikelyOff = this.isAutoAlternativeLikelyOff(device);
@@ -1626,6 +2568,9 @@ export class PuraPlatformAccessory {
   }
 
   private getCurrentStateValue(): CharacteristicValue {
+    if (this.enableBayControl) {
+      return this.getBayCharacteristicState(this.currentStateActive);
+    }
     if (this.useFanService) {
       return this.currentStateActive
         ? this.platform.Characteristic.Active.ACTIVE
@@ -1635,6 +2580,20 @@ export class PuraPlatformAccessory {
   }
 
   private isHomeKitShowingActive(): boolean {
+    if (this.enableBayControl) {
+      return this.getControlServices().some((service) => {
+        const activeCharacteristic = this.useFanService
+          ? this.platform.Characteristic.Active
+          : this.platform.Characteristic.On;
+        const currentValue = service.getCharacteristic(activeCharacteristic).value;
+        if (this.useFanService) {
+          return currentValue === this.platform.Characteristic.Active.ACTIVE
+            || currentValue === 1
+            || currentValue === true;
+        }
+        return Boolean(currentValue);
+      });
+    }
     const activeCharacteristic = this.useFanService
       ? this.platform.Characteristic.Active
       : this.platform.Characteristic.On;
@@ -1693,7 +2652,57 @@ export class PuraPlatformAccessory {
     return true;
   }
 
+  /**
+   * Whether a bay should read as on in HomeKit.
+   *
+   * One bay diffuses at a time, in both diffusion modes. Auto-alternate rotates between them rather
+   * than running them together, and the device signals the rotation by reporting both bays `active`
+   * while moving `activeAt` onto whichever one is currently running - which is what
+   * getActiveBayNumber already resolves. Trusting each bay's own `active` flag instead lit both
+   * tiles in HomeKit while the Pura app showed a single running bay.
+   */
+  private isBayActive(bay: 1 | 2, effectiveActiveBay: 1 | 2 | undefined): boolean {
+    return this.isBayUsable(bay) && effectiveActiveBay === bay;
+  }
+
   private applyCurrentState() {
+    if (this.enableBayControl) {
+      const activeBay = this.getEffectiveActiveBayNumber();
+      for (const bay of this.getConfiguredBayNumbers()) {
+        const service = this.bayServices[bay];
+        if (!service) {
+          continue;
+        }
+        const isActive = this.isBayActive(bay, activeBay);
+        const value = this.getBayCharacteristicState(isActive);
+        const activeCharacteristic = this.useFanService
+          ? this.platform.Characteristic.Active
+          : this.platform.Characteristic.On;
+        service.updateCharacteristic(activeCharacteristic, value);
+        if (this.useFanService && service.testCharacteristic(this.platform.Characteristic.RotationSpeed)) {
+          const intensity = this.getBayIntensityValue(bay);
+          const speed = typeof intensity === 'number'
+            ? this.mapIntensityToRotation(intensity)
+            : 0;
+          service.updateCharacteristic(this.platform.Characteristic.RotationSpeed, speed);
+        }
+      }
+      if (this.platform.isDebugEnabled()) {
+        const visualKey = `${activeBay ?? 'none'}:${this.getBayIntensityValue(1) ?? 'none'}:${this.getBayIntensityValue(2) ?? 'none'}`;
+        if (visualKey !== this.lastBayVisualStateDebugKey) {
+          this.lastBayVisualStateDebugKey = visualKey;
+          const bay1Intensity = this.getBayIntensityValue(1);
+          const bay2Intensity = this.getBayIntensityValue(2);
+          this.platform.log.debug(
+            `[BayControl] Applied HomeKit visual state for ${this.getDiffuserLogLabel()}: ` +
+            `activeBay=${activeBay ?? 'none'} ` +
+            `bay1Speed=${bay1Intensity !== undefined ? this.mapIntensityToRotation(bay1Intensity) : 0} ` +
+            `bay2Speed=${bay2Intensity !== undefined ? this.mapIntensityToRotation(bay2Intensity) : 0}`,
+          );
+        }
+      }
+      return;
+    }
     const value = this.getCurrentStateValue();
     const activeCharacteristic = this.useFanService
       ? this.platform.Characteristic.Active
@@ -2319,6 +3328,65 @@ export class PuraPlatformAccessory {
     }
 
     return undefined;
+  }
+
+  /**
+   * Carry what is already known about a bay across a payload that does not mention it.
+   *
+   * Pura's payloads are routinely partial. Realtime device frames report a bay's intensity but omit
+   * its fragrance block entirely, and a reconciling REST refresh sometimes drops the bay altogether
+   * - both observed while a full vial was physically seated. Every one of those made the bay look
+   * gone: the tile lost its fragrance name, read off, and refused to turn on.
+   *
+   * Bays are physical and do not come and go, so once the device has described one, that stands
+   * until it says something new. A bay missing from a payload is carried forward as idle, which is
+   * the conservative read and matches every observation - the dropped bay has never been the one
+   * actually diffusing.
+   *
+   * The cache lives in accessory context so it survives a restart, which is exactly when the plugin
+   * is least able to tell a quiet payload from a real change.
+   */
+  private retainKnownBays(device: PuraDevice): PuraDevice {
+    const merged: Partial<Record<'bay1' | 'bay2', PuraBay>> = {};
+    let changed = false;
+    for (const bay of [1, 2] as const) {
+      const key = bay === 1 ? 'bay1' : 'bay2';
+      const cacheKey = bay === 1 ? 'lastKnownBay1' : 'lastKnownBay2';
+      const context = this.accessory.context as Record<string, unknown>;
+      const incoming = device[key];
+      const cached = context[cacheKey] as PuraBay | undefined;
+
+      if (!incoming) {
+        if (cached) {
+          merged[key] = { ...cached, active: false, activeAt: undefined };
+          changed = true;
+        }
+        continue;
+      }
+
+      // An empty string is Pura positively saying the bay is empty, and a different id is a
+      // different vial. Merging cached fragrance into either would describe a vial that is not
+      // there - the whole point of the cache is to survive silence, not to contradict the device.
+      const emptied = incoming.vialId === '';
+      const sameVial = cached?.vialId === undefined
+        || incoming.vialId === undefined
+        || cached.vialId === incoming.vialId;
+      const hasFragrance = Boolean(incoming.fragrance?.id || incoming.fragrance?.name);
+      const resolved = hasFragrance || emptied || !cached || !sameVial
+        ? incoming
+        : {
+          ...incoming,
+          fragrance: cached.fragrance,
+          remainingPercent: incoming.remainingPercent ?? cached.remainingPercent,
+          lowFragrance: incoming.lowFragrance ?? cached.lowFragrance,
+        };
+      if (resolved !== incoming) {
+        merged[key] = resolved;
+        changed = true;
+      }
+      context[cacheKey] = { ...resolved, active: false, activeAt: undefined };
+    }
+    return changed ? { ...device, ...merged } : device;
   }
 
   private fillBayIntensityFromCache(bay?: PuraBay): PuraBay | undefined {

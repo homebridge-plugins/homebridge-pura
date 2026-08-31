@@ -1,5 +1,9 @@
 # Release Notes
 
+## Unreleased
+- Add an opt-in **Auto-Alternate Control** switch for multi-bay diffusers, exposing Pura's "Auto-alternate fragrances" setting in HomeKit. The plugin previously only detected this being off and asked you to change it in the Pura app; it can now be set directly. Off by default, and the log recommendation is dropped when the switch is enabled. Enable with `enableAutoAlternate`.
+- Stop discarding a running bay in oscillation modes. Pura runs both bays concurrently at independent intensities when Auto-alternate is on, but the plugin forced a single active bay whenever a payload reported both — throwing half the device away before any accessory could see it, and keeping a different half depending on whether `activeAt` happened to be present. Modes that genuinely run one bay at a time are unaffected.
+
 ## 1.7.1 - 2026-08-30
 - Draw the custom UI's icons inline instead of relying on the Homebridge UI's icon font. The plugin's settings page runs in an iframe and has no icon font of its own, and the host appears to inject only the glyphs it uses itself: `fa-eye` and `fa-spinner` rendered while `fa-user-circle` did not, leaving the Verify button showing a missing-glyph box. The icons are now self-contained SVG that inherit the button's colour, so they cannot regress when the host changes.
 

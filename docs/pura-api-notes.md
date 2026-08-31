@@ -62,16 +62,45 @@ The device list response is keyed by device family rather than being a flat arra
 
 | `diffusionMode` | Pura app | Bay behaviour |
 | --- | --- | --- |
-| `oscillation-multi-bay` | Auto-alternate **on** | Both bays active, alternating, **independent intensities** |
-| `standard` | Auto-alternate **off** | One bay at a time |
+| `oscillation-multi-bay` | Auto-alternate **on** | Both bays in rotation, **independent intensities**, one diffusing at a time |
+| `standard` | Auto-alternate **off** | A single pinned bay |
 
 Confirmed by ha-pura, which exposes it as a switch named "Auto-alternate fragrances" and toggles
 between exactly these two strings.
 
-**This is the single most important thing to branch on for multi-bay work.** Mutual exclusion
-between bays is correct in `standard` and wrong in `oscillation-multi-bay`. In oscillation mode a
-device genuinely reports two active bays at different levels, e.g. bay 1 at level 1 while bay 2 runs
-at level 10.
+**Auto-alternate is about rotation over time, not concurrency.** Only one bay diffuses at a time in
+*either* mode — verified against the Pura app, which showed a single running bay while the record
+reported two. Alternating means the device puts both bays in the rotation and swaps between them
+periodically.
+
+### `active` and `activeAt` mean different things
+
+This is the trap, and it is easy to get backwards:
+
+- **`bay.active`** means the bay is *in the rotation*. In auto-alternate mode both bays carry it.
+- **`bay.activeAt`** is stamped on the bay that is *currently diffusing*, and moves when the device
+  swaps.
+
+So `active` alone does not identify the running bay, and it does not even establish that the
+diffuser is running. The rule that fits every observation:
+
+```
+no activeAt on any bay -> nothing is diffusing, however many bays report active
+otherwise              -> the bay with the latest activeAt is the one running
+```
+
+A bay reporting `active: true` with no `activeAt` is **armed for the rotation, not diffusing** —
+verified against the Pura app, which showed the diffuser stopped while the record had a lone
+`active: true` bay. The stamp is cleared when diffusion stops, so its absence everywhere is a
+reliable idle signal.
+
+Do not put a recency bound on `activeAt`. It holds the session's start time, so a bay running a long
+session carries a stamp many minutes old; a five-minute window would read it as stopped.
+
+**Auto-alternate and bay selection are independent.** Toggling the mode does not change which bay
+is running, and selecting a single bay does not turn alternation off — a timer targeting one bay
+leaves `diffusionMode` at `oscillation-multi-bay`, and the Pura app behaves the same way. Pulling a
+vial does not touch the toggle either.
 
 ## Intensity
 
@@ -127,6 +156,10 @@ that range can be read as levels unambiguously.
 
 `bay.remaining.percent` is a 0-100 percentage. `bay.lowFragrance` flips to `true` at **10%** -
 observed on a bay crossing from 11 to 10.
+
+It is an estimate derived from `wearingTime`, not a measurement of what is in the vial, so it is not
+a statement about whether the bay can diffuse - the device runs a bay reporting 0% quite happily.
+`vialId` is the field to read for that.
 
 ## Timers
 
@@ -197,17 +230,112 @@ all that is needed to name it correctly.
 Nightlight support is inferred as "everything except Pura Plus / hardware major 22". This is
 permissive by design, so unknown hardware gets controls offered rather than withheld.
 
+## Payloads are partial, and silence is not information
+
+Neither transport reports a complete bay every time, and the gaps do **not** mean what they look
+like. All of the following were observed while a full 100% vial was physically seated:
+
+| Source | What arrives | What it is not |
+| --- | --- | --- |
+| Realtime `deviceRecord` | bay present with `intensity`, **no** `fragrance`, `remaining`, or `lowFragrance` | not an empty bay |
+| Reconciling REST refresh | bay key **absent entirely** from the record | not a removed bay |
+| REST at startup | bay complete, with fragrance and remaining | — |
+
+The reconciling refresh dropping a bay is the surprising one: the same endpoint returned that bay
+fully populated seconds earlier. Bay data has to be treated as sticky — carry the last thing the
+device actually said until it says something new — or a bay loses its name, reads off, and refuses
+to run every time one of these lands.
+
+A bay carried forward from cache should be marked inactive: in every observation the dropped bay was
+not the one diffusing.
+
+### `vialId` is the empty-bay signal
+
+Absence never means empty, but `vialId` does. Verified as a controlled comparison — same bay, same
+transport, same fragrance-absent realtime shape — with the vial out and then re-seated:
+
+| | `vialId` | `isSmartVial` | `wearingTime` | `code` |
+| --- | --- | --- | ---: | --- |
+| vial seated | `"E00208…"` | `true` | non-zero | set |
+| vial pulled | `""` | `false` | `0` | `""` |
+
+A seated vial reports its hardware id **even in the realtime frames that omit the fragrance block**,
+so `vialId` survives exactly the partial payloads that defeat everything else. An empty bay reports
+an empty string with every other field zeroed.
+
+So there is exactly one signal that a bay cannot diffuse:
+
+```
+bay.vialId === ''   -> no vial seated
+```
+
+Everything else — a missing fragrance block, `bay: null`, a bay dropped from a refresh — occurs
+routinely with a full vial in and must not be read as empty.
+
+**`remaining.percent === 0` is not one of them.** Remaining is Pura's estimate from `wearingTime`,
+not a measurement, and the device diffuses straight through zero: a Pura Mini was observed with
+`remaining.percent: 0`, `lowFragrance: true`, `active: true` and a live `activeAt`. The Pura app
+shows that bay as **"Replace"** and goes on diffusing it — zero is Pura's advice to the owner, not a
+statement that the bay cannot run. Treating zero as
+unusable showed that bay as off in HomeKit while it ran, and left no way to stop it — a tile reading
+off is only ever offered "turn on", which the same check then refuses.
+
+`vialId` is also the right cache key for anything remembered per bay: a changed id is a new vial, so
+a remembered fragrance name must not carry across it.
+
+## Fragrance remaining cannot be shown in the Home app
+
+Tried three ways during 1.8.0's alphas and abandoned. Recorded so nobody spends the time again:
+
+| Service | What Home does |
+| --- | --- |
+| `FilterMaintenance` (per bay, linked to the bay's control) | Renders **nothing**. Home surfaces filter state only inside an air purifier. Eve and Controller for HomeKit do show it. |
+| `Battery` (per bay) | Renders **one** figure for the whole accessory — both bay tiles showed the same number, whichever service Home picked. |
+| `Battery` (one, lowest seated bay) | Works, but says nothing about *which* bay. |
+| `AirPurifier` for each bay | Not attempted. It is the one place Home shows filter state, but it makes a diffuser an "air purifier" to Home and Siri and drags in a required Auto/Manual control with no per-bay meaning — and it may still show only a replace flag rather than a percentage. |
+
+The remaining option that does render per bay is putting the percentage in the service name
+(`Volcano 24%`), which works — `ConfiguredName` updates propagate, see below — but degrades Siri
+matching and fights a user who renames a tile.
+
+`remaining.percent` and `lowFragrance` are still parsed: a bay reporting 0% is one of the two signals
+that it cannot diffuse. They are simply not published as a HomeKit service.
+
+## HomeKit naming (not Pura, but equally expensive to re-derive)
+
+**The Home app does follow a `ConfiguredName` update on an existing service.** This was the open
+question behind naming bays after their fragrance, and it was not safe to assume either way — Home
+caches service names and is widely reported to ignore later changes, particularly once a user has
+renamed something themselves.
+
+Verified on a Pura 4 with two bay tiles:
+
+1. Both bays held the same scent, so both tiles correctly showed `Bay 1` / `Bay 2` (a shared name
+   does not distinguish the bays, so the plugin falls back to positional).
+2. Pulling the vial from bay 2 made bay 1's scent distinguishing. Bay 1 renamed to
+   `Coconut Milk Mango` and **Home picked it up**.
+3. Inserting a different vial in bay 2 renamed that tile to `Volcano`, again reflected in Home.
+
+So a fragrance-derived name can be kept current across a vial swap and does not go stale. Two
+caveats worth keeping in mind:
+
+- `Name` alone is not enough. Home ignores `Name` for services nested inside an accessory; the
+  rename only lands because `ConfiguredName` is set alongside it.
+- This was observed on services the plugin had created in that same install. A user who renames a
+  tile themselves in Home may well pin it, which the plugin cannot detect. Renames are logged
+  (`renamed bay N from "X" to "Y"`) so a divergence is at least visible in the log.
+
 ## Known rough edges
 
 Things confirmed to be wrong or incoherent, left in place because fixing them changes visible
-behaviour and belongs with the multi-bay work:
+behaviour:
 
-- **`normalizeDeviceRecord` forces bay exclusivity.** When both bays report active it zeroes one,
-  chosen by `activeAt` and then by intensity. In oscillation mode this discards a genuinely running
-  bay — and worse, it is *unstable*: the same physical state picks a different bay depending on
-  whether `activeAt` happens to be present, so HomeKit's idea of "the active bay" flips between
-  refreshes.
-- **`exactIntensity` survives that collapse.** A zeroed bay keeps reporting an exact level, so it
-  reads `active: false, intensity: 0, exactIntensity: 60`.
+- **`normalizeDeviceRecord` still collapses bays in `standard` mode.** When both bays report active
+  it zeroes one, chosen by `activeAt` and then by intensity, which also discards that bay's
+  intensity. Disabled in auto-alternate mode, where per-bay intensities have to survive. Harmless
+  today because per-bay reads fall back to the cached intensity, but it is a lossy step that only
+  exists to prop up the single-accessory view.
+- **`exactIntensity` survives that collapse**, so a zeroed bay reads
+  `active: false, intensity: 0, exactIntensity: 60`.
 - **`bay.id`** is Pura's internal record id (a large integer), not the bay number.
 - **`device.awayMode`** is typed `boolean` but arrives as an object, e.g. `{away, enabled}`.

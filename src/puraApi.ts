@@ -58,7 +58,28 @@ export const DEVICE_LIST_ENDPOINTS = [
   'v2/users/devices',
 ];
 
+/** Pura's diffusion modes. `oscillation-multi-bay` is the app's "Auto-alternate fragrances" on. */
+export const DIFFUSION_MODE_ALTERNATING = 'oscillation-multi-bay';
+export const DIFFUSION_MODE_SINGLE_BAY = 'standard';
+
+/**
+ * Whether the diffuser is set to auto-alternate between bays.
+ *
+ * `oscillation-multi-bay` is the Pura app's "Auto-alternate fragrances" setting; `standard` pins a
+ * single bay. Matching the oscillation family rather than "anything that is not standard" keeps an
+ * unrecognised mode on the conservative path.
+ *
+ * This is about rotation over time, not concurrency: hardware shows one bay diffusing at a time in
+ * both modes. Alternating just means the device reports both bays as `active` (in the rotation) and
+ * moves `activeAt` onto whichever one is currently running. Reading it as "both bays diffuse at
+ * once" is what put two lit tiles in HomeKit while the Pura app showed a single running bay.
+ */
+export function isAutoAlternateMode(diffusionMode: string | undefined): boolean {
+  return typeof diffusionMode === 'string' && diffusionMode.toLowerCase().startsWith('oscillation');
+}
+
 export class PuraApi {
+  private readonly lastBayIdentityLog = new Map<string, string>();
   private userPool: CognitoUserPool;
   private cognitoUser: CognitoUser | null = null;
   private session: CognitoUserSession | null = null;
@@ -508,9 +529,17 @@ export class PuraApi {
     const defaultNightlight = (record.deviceDefaults as Record<string, unknown> | undefined)?.nightlight;
     const nightlight = (record.nightlight ?? defaultNightlight) as PuraNightlight | undefined;
 
+    const diffusionMode = typeof record.diffusionMode === 'string' ? record.diffusionMode : undefined;
     const bay1 = this.normalizeBay(record, record.bay1, 1);
     const bay2 = this.normalizeBay(record, record.bay2, 2);
-    if (bay1 && bay2 && bay1.active && bay2.active) {
+    this.logBayIdentity(record, id);
+    // In its oscillation modes Pura runs both bays concurrently, each at its own intensity, so
+    // forcing a single active bay there discards half the device - and the tie-break below is
+    // unstable, keeping a different bay depending on whether activeAt happens to be present in that
+    // payload. Standard mode genuinely runs one bay at a time and does occasionally report both as
+    // active, so the collapse is still right for it. Unrecognised modes keep the safer old
+    // behaviour rather than assuming concurrency.
+    if (!isAutoAlternateMode(diffusionMode) && bay1 && bay2 && bay1.active && bay2.active) {
       const bay1Stamp = bay1.activeAt ?? 0;
       const bay2Stamp = bay2.activeAt ?? 0;
       const keepBay = bay1Stamp === bay2Stamp
@@ -533,7 +562,7 @@ export class PuraApi {
       type: this.normalizeModel(this.resolveModelLabel(type, deviceVersion, hwVersion)),
       version: deviceVersion ?? '',
       controller: typeof record.controller === 'string' ? record.controller : undefined,
-      diffusionMode: typeof record.diffusionMode === 'string' ? record.diffusionMode : undefined,
+      diffusionMode,
       state: {
         battery: (record.batteryRemaining || record.battery) as number | undefined,
         firmwareVersion,
@@ -640,6 +669,42 @@ export class PuraApi {
     return modelValue;
   }
 
+  /**
+   * Report each bay's vial identity, so an empty bay can be told from a quiet payload.
+   *
+   * A bay with the vial pulled arrives as a zeroed record - `vialId=""`, `isSmartVial=false`,
+   * `wearingTime=0` - or as a plain `null`. The zeroed shape looks like a real signal, but proving
+   * it needs the same fields read back with a vial seated, which is why this reports both cases
+   * rather than only the incomplete one.
+   *
+   * Deduplicated per bay: only a change is logged, so a steady device stays quiet.
+   */
+  private logBayIdentity(record: Record<string, unknown>, deviceId: string) {
+    for (const bayNumber of [1, 2] as const) {
+      const raw = record[`bay${bayNumber}`];
+      let summary: string;
+      if (raw === undefined || raw === null || typeof raw !== 'object') {
+        summary = this.describeRaw(raw);
+      } else {
+        const bay = raw as Record<string, unknown>;
+        const fragrance = bay.fragrance as Record<string, unknown> | undefined;
+        const fields = ['vialId', 'isSmartVial', 'wearingTime', 'code', 'msg']
+          .filter((key) => key in bay)
+          .map((key) => `${key}=${JSON.stringify(bay[key])}`);
+        summary = [
+          `fragrance=${fragrance ? JSON.stringify(fragrance.name ?? fragrance.id ?? true) : 'absent'}`,
+          ...fields,
+        ].join(' ');
+      }
+      const cacheKey = `${deviceId}:${bayNumber}`;
+      if (this.lastBayIdentityLog.get(cacheKey) === summary) {
+        continue;
+      }
+      this.lastBayIdentityLog.set(cacheKey, summary);
+      this.log.debug(`[Bays] device=${deviceId} bay${bayNumber} ${summary}`);
+    }
+  }
+
   private normalizeBay(parent: Record<string, unknown>, value: unknown, bayNumber: number): PuraBay | undefined {
     if (!value || typeof value !== 'object') {
       return undefined;
@@ -726,7 +791,9 @@ export class PuraApi {
     );
 
     return {
-      id: typeof record.id === 'number' ? record.id : bayNumber,
+      // The bay number, not Pura's internal record id - bay identity is about position.
+      // The raw record id is still reachable through __raw if it is ever needed.
+      id: bayNumber,
       name: typeof record.name === 'string' ? record.name : undefined,
       active: Boolean(active),
       intensity: Math.max(0, Math.min(100, normalizedIntensity)),
@@ -736,6 +803,8 @@ export class PuraApi {
       fragrance: record.fragrance as PuraFragrance | undefined,
       remainingPercent: this.normalizePercentage(remaining?.percent),
       lowFragrance: this.normalizeBooleanish(record.lowFragrance),
+      vialId: typeof record.vialId === 'string' ? record.vialId : undefined,
+      isSmartVial: this.normalizeBooleanish(record.isSmartVial),
     };
   }
 
@@ -959,6 +1028,28 @@ export class PuraApi {
       apiIntensity,
       controller: 'default',
     };
+  }
+
+  /**
+   * Set the diffusion mode - the app's "Auto-alternate fragrances" setting. This decides whether
+   * the device runs both bays concurrently or one at a time, so it also decides whether bay
+   * exclusivity applies.
+   */
+  async setDiffusionMode(deviceId: string, mode: string): Promise<boolean> {
+    try {
+      const response = await this.makeRequest(
+        'POST',
+        `v3/diffusion/${deviceId}/mode`,
+        { mode },
+        { timeoutMs: 3500 },
+      ) as { success?: boolean };
+      const success = response.success === true;
+      this.log.debug(`Pura diffusion mode response: device=${deviceId} mode=${mode} success=${success}`);
+      return success;
+    } catch (error) {
+      this.log.error(`Failed to set diffusion mode for device ${deviceId}:`, error);
+      return false;
+    }
   }
 
   /**
