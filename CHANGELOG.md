@@ -1,8 +1,30 @@
 # Release Notes
 
-## Unreleased
-- Add an opt-in **Auto-Alternate Control** switch for multi-bay diffusers, exposing Pura's "Auto-alternate fragrances" setting in HomeKit. The plugin previously only detected this being off and asked you to change it in the Pura app; it can now be set directly. Off by default, and the log recommendation is dropped when the switch is enabled. Enable with `enableAutoAlternate`.
-- Stop discarding a running bay in oscillation modes. Pura runs both bays concurrently at independent intensities when Auto-alternate is on, but the plugin forced a single active bay whenever a payload reported both — throwing half the device away before any accessory could see it, and keeping a different half depending on whether `activeAt` happened to be present. Modes that genuinely run one bay at a time are unaffected.
+## 1.8.0 - 2026-08-31
+
+Multi-bay support. Both new features are opt-in and off by default, so an existing setup is
+unchanged until you turn one on.
+
+### Added
+- **Per-Bay Controls** (`enableBayControl`). Each fragrance bay gets its own HomeKit tile, so you can pick which scent is running rather than just turning the diffuser on. Bays appear as fans when Intensity Control is enabled and switches otherwise, and each keeps its own intensity. On diffusers that run one bay at a time, turning one bay on turns the other off.
+- **Auto-Alternate Control** (`enableAutoAlternate`). A switch for Pura's "Auto-alternate fragrances" setting on multi-bay diffusers. The plugin previously only detected this being off and asked you to change it in the Pura app. Toggling it does not disturb which bay is running, and selecting a bay does not turn it off.
+- Bay tiles are named after the fragrance in them and follow a vial swap. The bay number is added only when both bays hold the same scent, which would otherwise give two identical tiles. See [Bay Names](README.md#bay-names) for the rules and the one caveat: renaming a bay tile yourself is overwritten the next time that bay's fragrance changes.
+- A bay with no vial in it reads as off and refuses to run, reported as a missing resource rather than a communication failure so it does not show up as "No Response". Detected from `vialId`, the only field Pura gives that separates an empty bay from a payload that simply omitted the fragrance.
+
+### Fixed
+- Stop discarding a running bay when Auto-alternate is on. The plugin forced a single active bay whenever a payload reported both, throwing half the device away before any accessory could see it, and keeping a different half depending on whether `activeAt` happened to be present.
+- Report a bay as running only when it is. With Auto-alternate on, every bay in the rotation reports itself active whether or not anything is coming out, which lit both tiles for a single running bay. The bay carrying `activeAt` is the one diffusing.
+- Stop reading Pura's partial payloads as an empty bay. Realtime frames omit the fragrance block and a refresh sometimes drops a whole bay, both while a full vial is seated. Bay state is now carried forward until the device says otherwise, so a bay no longer loses its name, read as off, and refused to turn on.
+- Keep a bay's tile when a payload drops the bay. Bay presence was read from each payload, so a dropped bay had its service removed from the accessory, taking its name in the Home app and anything pointing at it.
+- Refuse an empty bay on the intensity path as well as the power path. The intensity path re-arms a bay before writing, so dragging the slider on an empty bay pinned the diffuser to it and silently stopped the bay that was running.
+- Never send a bay write to a different bay. A write aimed at a bay the payload did not mention fell back to whichever bay was present, while the caller logged success against the one it asked for.
+- Treat a bay reporting 0% remaining as usable. Remaining is Pura's estimate from wearing time, not a measurement, and the diffuser goes on running a bay the Pura app labels "Replace". Marking it unusable showed the bay as off while it ran and left no way to stop it.
+- Turn the nightlight off when diffusion starts on a bay, not just when the diffuser switches on. A timer, the alternation cycle, or starting a bay from the Pura app all re-sync the nightlight, and `forceNightlightOff` missed every one of them.
+- Give the nightlight and auto-alternate services their own names, so the Home app stops showing them as another "Diffuser" tile.
+
+### Notes
+- Showing how much fragrance is left was attempted and dropped. The Home app renders nothing for a filter-maintenance service and shows one battery per accessory, so per-bay levels are not something it can display. `docs/pura-api-notes.md` records what each approach does.
+- Timer control is still out of scope. Realtime timer events are applied, but timers cannot be set from HomeKit.
 
 ## 1.7.1 - 2026-08-30
 - Draw the custom UI's icons inline instead of relying on the Homebridge UI's icon font. The plugin's settings page runs in an iframe and has no icon font of its own, and the host appears to inject only the glyphs it uses itself: `fa-eye` and `fa-spinner` rendered while `fa-user-circle` did not, leaving the Verify button showing a missing-glyph box. The icons are now self-contained SVG that inherit the button's colour, so they cannot regress when the host changes.
