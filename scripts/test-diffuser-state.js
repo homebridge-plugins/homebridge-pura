@@ -26,7 +26,7 @@ import {
   DEVICE_LIST_ENDPOINTS,
   mapPuraNumericIntensityToHomeKit,
   PuraApi,
-  runsBaysConcurrently,
+  isAutoAlternateMode,
   DIFFUSION_MODE_ALTERNATING,
   DIFFUSION_MODE_SINGLE_BAY,
 } from '../dist/puraApi.js';
@@ -218,10 +218,10 @@ for (const retired of ['users/devices', 'devices']) {
 // Pura runs both bays at once in oscillation-multi-bay, each at its own intensity. Forcing a single
 // active bay discarded half the device, and picked a different half depending on whether activeAt
 // happened to be present. Standard mode really is one-at-a-time, so the collapse stays there.
-assert.equal(runsBaysConcurrently('oscillation-multi-bay'), true);
-assert.equal(runsBaysConcurrently('standard'), false);
-assert.equal(runsBaysConcurrently(undefined), false, 'an unknown mode must take the conservative path');
-assert.equal(runsBaysConcurrently('some-future-mode'), false);
+assert.equal(isAutoAlternateMode('oscillation-multi-bay'), true);
+assert.equal(isAutoAlternateMode('standard'), false);
+assert.equal(isAutoAlternateMode(undefined), false, 'an unknown mode must take the conservative path');
+assert.equal(isAutoAlternateMode('some-future-mode'), false);
 
 {
   const bothRunning = {
@@ -262,8 +262,8 @@ assert.equal(runsBaysConcurrently('some-future-mode'), false);
 // --- Auto-alternate control --------------------------------------------------------------------
 // The switch writes Pura's diffusion mode, which is the same setting that decides whether both bays
 // run at once - so the two must agree on what the strings mean.
-assert.equal(runsBaysConcurrently(DIFFUSION_MODE_ALTERNATING), true, 'switch on means concurrent bays');
-assert.equal(runsBaysConcurrently(DIFFUSION_MODE_SINGLE_BAY), false, 'switch off means one bay at a time');
+assert.equal(isAutoAlternateMode(DIFFUSION_MODE_ALTERNATING), true, 'switch on means the device alternates');
+assert.equal(isAutoAlternateMode(DIFFUSION_MODE_SINGLE_BAY), false, 'switch off means a single pinned bay');
 {
   const modeApi = new PuraApi(silentLog);
   const posted = [];
@@ -417,28 +417,59 @@ for (const key of ['controller', 'deviceActiveState']) {
   const vial = { fragrance: { name: 'Vetiver' }, remainingPercent: 50 };
   const activeIn = (diffusionMode, bay1, bay2, effectiveActiveBay, bay) =>
     isBayActive.call({ device: { diffusionMode, bay1, bay2 }, isBayUsable }, bay, effectiveActiveBay);
+  const running = { ...vial, active: true };
 
-  // standard: exclusive, driven by the resolved active bay
-  const std = { ...vial, active: true };
-  assert.equal(activeIn('standard', std, std, 1, 1), true, 'standard follows the active bay');
-  assert.equal(activeIn('standard', std, std, 1, 2), false, 'standard keeps the other bay off');
-
-  // oscillation: concurrent, each bay reports itself
+  // Exactly one bay diffuses, in either mode.
+  assert.equal(activeIn('standard', running, running, 1, 1), true, 'standard follows the active bay');
+  assert.equal(activeIn('standard', running, running, 1, 2), false, 'standard keeps the other bay off');
   assert.equal(
-    activeIn('oscillation-multi-bay', { ...vial, active: true }, { ...vial, active: true }, 1, 2),
+    activeIn('oscillation-multi-bay', running, running, 2, 2),
     true,
-    'oscillation reports a second running bay regardless of the active bay',
+    'auto-alternate lights the bay that is currently running',
   );
   assert.equal(
-    activeIn('oscillation-multi-bay', { ...vial, active: true }, { ...vial, active: false }, 1, 2),
+    activeIn('oscillation-multi-bay', running, running, 2, 1),
     false,
-    'oscillation still reports a stopped bay as off',
+    'auto-alternate leaves the bay that is only in the rotation off - both report active:true, ' +
+    'and following that flag lit two tiles while the Pura app showed one running bay',
   );
 
-  // an empty bay is off in either mode, even when the device claims it is running
+  // Nothing running at all.
+  assert.equal(activeIn('oscillation-multi-bay', running, running, undefined, 1), false, 'no active bay means off');
+
+  // An empty bay is off in either mode, even when the device claims it is the active one.
   const empty = { active: true };
-  assert.equal(activeIn('standard', empty, std, 1, 1), false, 'an empty bay reads off in standard mode');
-  assert.equal(activeIn('oscillation-multi-bay', empty, std, 1, 1), false, 'an empty bay reads off in oscillation mode');
+  assert.equal(activeIn('standard', empty, running, 1, 1), false, 'an empty bay reads off in standard mode');
+  assert.equal(activeIn('oscillation-multi-bay', empty, running, 1, 1), false, 'an empty bay reads off when alternating');
+}
+
+// --- Active bay resolution ----------------------------------------------------------------------
+// The device marks every bay in the rotation `active`, and stamps activeAt on the one currently
+// diffusing. Both observations from hardware have to resolve the same way.
+{
+  const { PuraPlatformAccessory } = await import('../dist/platformAccessory.js');
+  const { getActiveBayNumber } = PuraPlatformAccessory.prototype;
+  const resolve = (bay1, bay2) => getActiveBayNumber.call({
+    device: { bay1, bay2 },
+    fillBayIntensityFromCache: (bay) => bay,
+  });
+
+  assert.equal(
+    resolve({ active: true, activeAt: undefined, intensity: 50 }, { active: true, activeAt: 1788157375, intensity: 100 }),
+    2,
+    'when both are in the rotation, activeAt picks the bay that is running',
+  );
+  assert.equal(
+    resolve({ active: true, activeAt: 1788157193, intensity: 30 }, { active: true, activeAt: undefined, intensity: 100 }),
+    1,
+    'and it wins over the higher intensity',
+  );
+  assert.equal(
+    resolve({ active: true, activeAt: undefined, intensity: 50 }, undefined),
+    1,
+    'a lone active bay is running even without activeAt - the vial in the other bay was pulled',
+  );
+  assert.equal(resolve({ active: false }, { active: false }), undefined, 'nothing running resolves to no bay');
 }
 
 // --- Intensity targeting ------------------------------------------------------------------------

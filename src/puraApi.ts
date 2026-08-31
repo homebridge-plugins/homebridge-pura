@@ -63,13 +63,18 @@ export const DIFFUSION_MODE_ALTERNATING = 'oscillation-multi-bay';
 export const DIFFUSION_MODE_SINGLE_BAY = 'standard';
 
 /**
- * Whether a diffusion mode runs both bays at once.
+ * Whether the diffuser is set to auto-alternate between bays.
  *
- * `oscillation-multi-bay` is the Pura app's "Auto-alternate fragrances" setting; `standard` runs one
- * bay at a time. Matching the oscillation family rather than "anything that is not standard" keeps
- * an unrecognised mode on the conservative path.
+ * `oscillation-multi-bay` is the Pura app's "Auto-alternate fragrances" setting; `standard` pins a
+ * single bay. Matching the oscillation family rather than "anything that is not standard" keeps an
+ * unrecognised mode on the conservative path.
+ *
+ * This is about rotation over time, not concurrency: hardware shows one bay diffusing at a time in
+ * both modes. Alternating just means the device reports both bays as `active` (in the rotation) and
+ * moves `activeAt` onto whichever one is currently running. Reading it as "both bays diffuse at
+ * once" is what put two lit tiles in HomeKit while the Pura app showed a single running bay.
  */
-export function runsBaysConcurrently(diffusionMode: string | undefined): boolean {
+export function isAutoAlternateMode(diffusionMode: string | undefined): boolean {
   return typeof diffusionMode === 'string' && diffusionMode.toLowerCase().startsWith('oscillation');
 }
 
@@ -532,7 +537,7 @@ export class PuraApi {
     // payload. Standard mode genuinely runs one bay at a time and does occasionally report both as
     // active, so the collapse is still right for it. Unrecognised modes keep the safer old
     // behaviour rather than assuming concurrency.
-    if (!runsBaysConcurrently(diffusionMode) && bay1 && bay2 && bay1.active && bay2.active) {
+    if (!isAutoAlternateMode(diffusionMode) && bay1 && bay2 && bay1.active && bay2.active) {
       const bay1Stamp = bay1.activeAt ?? 0;
       const bay2Stamp = bay2.activeAt ?? 0;
       const keepBay = bay1Stamp === bay2Stamp

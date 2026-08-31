@@ -5,7 +5,7 @@ import {
   DIFFUSION_MODE_ALTERNATING,
   DIFFUSION_MODE_SINGLE_BAY,
   PuraApi,
-  runsBaysConcurrently,
+  isAutoAlternateMode,
 } from './puraApi.js';
 import { PuraConfig, PuraDevice, PuraBay } from './puraTypes.js';
 
@@ -236,7 +236,7 @@ export class PuraPlatformAccessory {
   private applyAutoAlternateState() {
     this.autoAlternateService?.updateCharacteristic(
       this.platform.Characteristic.On,
-      runsBaysConcurrently(this.device.diffusionMode),
+      isAutoAlternateMode(this.device.diffusionMode),
     );
   }
 
@@ -246,7 +246,7 @@ export class PuraPlatformAccessory {
         this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
       );
     }
-    return runsBaysConcurrently(this.device.diffusionMode);
+    return isAutoAlternateMode(this.device.diffusionMode);
   }
 
   private async setAutoAlternate(value: CharacteristicValue) {
@@ -507,6 +507,14 @@ export class PuraPlatformAccessory {
       const service = existing
         || this.accessory.addService(this.platform.Service.FilterMaintenance, name, subtype);
       this.setServiceName(service, name);
+      // HAP models filter maintenance as a linked service of the thing it belongs to, so hang it off
+      // the control this bay already has. Whether the Home app renders it at all is a separate
+      // question - it is known to surface filter state only inside an air purifier - but an
+      // unlinked service has no chance, and other HomeKit clients read the link.
+      const parent = this.bayServices[bay] ?? this.service;
+      if (parent && !parent.linkedServices.includes(service)) {
+        parent.addLinkedService(service);
+      }
       service.getCharacteristic(this.platform.Characteristic.FilterChangeIndication)
         .onGet(() => this.getFragranceChangeIndication(bay));
       service.addOptionalCharacteristic(this.platform.Characteristic.FilterLifeLevel);
@@ -2603,20 +2611,14 @@ export class PuraPlatformAccessory {
   /**
    * Whether a bay should read as on in HomeKit.
    *
-   * Modes that run one bay at a time keep the existing single-active-bay logic, which also carries
-   * the pending-intent handling that stops a HomeKit write flapping. Oscillation modes genuinely run
-   * both bays, so each reports its own state - deriving them from one "active bay" left the other
-   * tile permanently off no matter what the device was doing.
+   * One bay diffuses at a time, in both diffusion modes. Auto-alternate rotates between them rather
+   * than running them together, and the device signals the rotation by reporting both bays `active`
+   * while moving `activeAt` onto whichever one is currently running - which is what
+   * getActiveBayNumber already resolves. Trusting each bay's own `active` flag instead lit both
+   * tiles in HomeKit while the Pura app showed a single running bay.
    */
   private isBayActive(bay: 1 | 2, effectiveActiveBay: 1 | 2 | undefined): boolean {
-    if (!this.isBayUsable(bay)) {
-      return false;
-    }
-    if (!runsBaysConcurrently(this.device.diffusionMode)) {
-      return effectiveActiveBay === bay;
-    }
-    const source = bay === 1 ? this.device.bay1 : this.device.bay2;
-    return Boolean(source?.active);
+    return this.isBayUsable(bay) && effectiveActiveBay === bay;
   }
 
   private applyCurrentState() {
