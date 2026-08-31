@@ -72,6 +72,7 @@ export class PuraPlatformAccessory {
   };
   private pendingPowerOnIntensityLogTimer?: ReturnType<typeof setTimeout>;
   private lastDiffuserActivatedAt?: number;
+  private activeBayNumber?: 1 | 2;
   private lastSuccessfulOnWriteAt?: number;
   private lastSetOnCommandAt?: number;
   private lastRotationWriteAt?: number;
@@ -280,6 +281,9 @@ export class PuraPlatformAccessory {
   private updateCurrentState() {
     const activeBay = this.getActiveBay();
     this.currentStateActive = Boolean(activeBay);
+    this.activeBayNumber = activeBay
+      ? (activeBay === this.device.bay1 ? 1 : 2)
+      : undefined;
     if (activeBay) {
       this.accessory.context.lastBay = activeBay === this.device.bay1 ? 1 : 2;
       if (Number.isFinite(activeBay.intensity) && activeBay.intensity > 0) {
@@ -1292,6 +1296,7 @@ export class PuraPlatformAccessory {
 
   updateDevice(device: PuraDevice) {
     const previousDiffuserActive = this.currentStateActive;
+    const previousActiveBayNumber = this.activeBayNumber;
     const nightlightStabilizedDevice = this.clampNightlightDuringHold(
       this.stabilizeNightlightDuringIntentWindow(device),
     );
@@ -1323,7 +1328,15 @@ export class PuraPlatformAccessory {
     }
     this.logNightlightProfileRoundTrip(previousNightlight, stabilizedDevice.nightlight);
     this.updateCurrentState();
-    if (!previousDiffuserActive && this.currentStateActive) {
+    // Pura re-syncs the nightlight whenever diffusion starts on a bay - which includes switching
+    // from one bay to the other while already running, as a timer or the auto-alternate cycle does.
+    // Arming only on an off->on transition missed those, so the nightlight came on and stayed on.
+    const diffuserJustActivated = !previousDiffuserActive && this.currentStateActive;
+    const activeBayJustChanged = this.currentStateActive
+      && previousActiveBayNumber !== undefined
+      && this.activeBayNumber !== undefined
+      && previousActiveBayNumber !== this.activeBayNumber;
+    if (diffuserJustActivated || activeBayJustChanged) {
       this.lastDiffuserActivatedAt = Date.now();
     }
     if (previousDiffuserActive && !this.currentStateActive) {
