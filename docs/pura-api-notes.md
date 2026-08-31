@@ -81,17 +81,21 @@ This is the trap, and it is easy to get backwards:
 - **`bay.activeAt`** is stamped on the bay that is *currently diffusing*, and moves when the device
   swaps.
 
-So `active` alone does not identify the running bay. The rule that fits every observation:
+So `active` alone does not identify the running bay, and it does not even establish that the
+diffuser is running. The rule that fits every observation:
 
 ```
-both bays active  -> the one with the later activeAt is running
-one bay active    -> that bay is running, activeAt or not
-neither active    -> nothing is running
+no activeAt on any bay -> nothing is diffusing, however many bays report active
+otherwise              -> the bay with the latest activeAt is the one running
 ```
 
-The "one bay active" case matters: after a vial is pulled the surviving bay can report
-`active: true` with **no** `activeAt` while genuinely diffusing, so requiring `activeAt` reads it as
-off.
+A bay reporting `active: true` with no `activeAt` is **armed for the rotation, not diffusing** —
+verified against the Pura app, which showed the diffuser stopped while the record had a lone
+`active: true` bay. The stamp is cleared when diffusion stops, so its absence everywhere is a
+reliable idle signal.
+
+Do not put a recency bound on `activeAt`. It holds the session's start time, so a bay running a long
+session carries a stamp many minutes old; a five-minute window would read it as stopped.
 
 **Auto-alternate and bay selection are independent.** Toggling the mode does not change which bay
 is running, and selecting a single bay does not turn alternation off — a timer targeting one bay
