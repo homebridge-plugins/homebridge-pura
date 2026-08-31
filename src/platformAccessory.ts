@@ -17,6 +17,7 @@ export class PuraPlatformAccessory {
   private service!: Service;
   private bayServices: Partial<Record<1 | 2, Service>> = {};
   private lastBayServiceNames: Partial<Record<1 | 2, string>> = {};
+  private fragranceLevelServices: Partial<Record<1 | 2, Service>> = {};
   private nightlightService?: Service;
   private autoAlternateService?: Service;
   private device: PuraDevice;
@@ -131,6 +132,7 @@ export class PuraPlatformAccessory {
 
     this.configureNightlightService();
     this.configureAutoAlternateService();
+    this.configureFragranceLevelServices();
     this.updateCurrentState();
     this.updateFaultState();
     this.logRecommendationHints(this.device);
@@ -460,6 +462,93 @@ export class PuraPlatformAccessory {
       return [this.service];
     }
     return [this.bayServices[1], this.bayServices[2]].filter((service): service is Service => Boolean(service));
+  }
+
+  /** Whether a bay can diffuse: a vial is present and has something left in it. */
+  private isBayUsable(bay: 1 | 2): boolean {
+    const source = bay === 1 ? this.device.bay1 : this.device.bay2;
+    if (!source) {
+      return false;
+    }
+    // No fragrance block at all means no vial seated - that is how an empty bay arrives.
+    if (!source.fragrance?.id && !source.fragrance?.name) {
+      return false;
+    }
+    // A seated but spent vial reports 0; undefined just means the device has not said yet, which
+    // is not the same thing and must not be treated as empty.
+    return source.remainingPercent === undefined || source.remainingPercent > 0;
+  }
+
+  private isFragranceLevelEnabled(): boolean {
+    return Boolean((this.platform.config as PuraConfig).enableFragranceLevel ?? false);
+  }
+
+  /**
+   * Publish each bay's remaining fragrance as a FilterMaintenance service.
+   *
+   * A scent vial is a consumable replaced on a cycle, which is what FilterMaintenance models, and
+   * FilterChangeIndication lines up with Pura's own low-fragrance flag - it flips at 10%. A Battery
+   * service would render a tidier percentage but sets StatusLowBattery, so iOS would raise
+   * low-battery warnings for a vial on a mains-powered diffuser on every refill cycle.
+   */
+  private configureFragranceLevelServices() {
+    for (const bay of [1, 2] as const) {
+      const subtype = `bay-${bay}-fragrance`;
+      const existing = this.accessory.getServiceById(this.platform.Service.FilterMaintenance, subtype);
+      const source = bay === 1 ? this.device.bay1 : this.device.bay2;
+      if (!this.isFragranceLevelEnabled() || !source) {
+        if (existing) {
+          this.accessory.removeService(existing);
+        }
+        delete this.fragranceLevelServices[bay];
+        continue;
+      }
+      const name = `${this.getBayServiceName(bay)} Fragrance`;
+      const service = existing
+        || this.accessory.addService(this.platform.Service.FilterMaintenance, name, subtype);
+      this.setServiceName(service, name);
+      service.getCharacteristic(this.platform.Characteristic.FilterChangeIndication)
+        .onGet(() => this.getFragranceChangeIndication(bay));
+      service.addOptionalCharacteristic(this.platform.Characteristic.FilterLifeLevel);
+      service.getCharacteristic(this.platform.Characteristic.FilterLifeLevel)
+        .onGet(() => this.getFragranceLifeLevel(bay));
+      this.fragranceLevelServices[bay] = service;
+    }
+    this.applyFragranceLevelState();
+  }
+
+  private applyFragranceLevelState() {
+    for (const bay of [1, 2] as const) {
+      const service = this.fragranceLevelServices[bay];
+      if (!service) {
+        continue;
+      }
+      service.updateCharacteristic(
+        this.platform.Characteristic.FilterChangeIndication,
+        this.getFragranceChangeIndication(bay),
+      );
+      const level = this.getFragranceLifeLevel(bay);
+      if (level !== undefined) {
+        service.updateCharacteristic(this.platform.Characteristic.FilterLifeLevel, level);
+      }
+    }
+  }
+
+  private getFragranceChangeIndication(bay: 1 | 2): CharacteristicValue {
+    const source = bay === 1 ? this.device.bay1 : this.device.bay2;
+    const needsChanging = !this.isBayUsable(bay) || source?.lowFragrance === true;
+    return needsChanging
+      ? this.platform.Characteristic.FilterChangeIndication.CHANGE_FILTER
+      : this.platform.Characteristic.FilterChangeIndication.FILTER_OK;
+  }
+
+  private getFragranceLifeLevel(bay: 1 | 2): number {
+    const source = bay === 1 ? this.device.bay1 : this.device.bay2;
+    const remaining = source?.remainingPercent;
+    if (remaining === undefined || !Number.isFinite(remaining)) {
+      return 0;
+    }
+    return Math.max(0, Math.min(100, Math.round(remaining)));
   }
 
   private updateCurrentState() {
@@ -889,6 +978,18 @@ export class PuraPlatformAccessory {
 
       try {
         if (isOn) {
+          if (!this.isBayUsable(bay)) {
+            // No vial, or a spent one. Reported as a fault rather than "no response" - the bay is
+            // reachable and working, it just has nothing to diffuse.
+            this.platform.log.warn(
+              `${bayLabel} has no fragrance to diffuse; install or replace the vial.`,
+            );
+            this.applyCurrentState();
+            this.updateFaultState();
+            throw new this.platform.api.hap.HapStatusError(
+              this.platform.api.hap.HAPStatus.RESOURCE_DOES_NOT_EXIST,
+            );
+          }
           this.platform.recordIntent(this.device.id, true);
           if (this.isDeviceUnavailable()) {
             this.enforceOffVisualState();
@@ -1965,6 +2066,7 @@ export class PuraPlatformAccessory {
     this.device = stabilizedDevice;
     this.configureAutoAlternateService();
     this.refreshBayServiceNames();
+    this.configureFragranceLevelServices();
     if (typeof stabilizedDevice.nightlight?.active === 'boolean') {
       this.pendingNightlightActive = stabilizedDevice.nightlight.active;
     }
@@ -2488,6 +2590,9 @@ export class PuraPlatformAccessory {
    * tile permanently off no matter what the device was doing.
    */
   private isBayActive(bay: 1 | 2, effectiveActiveBay: 1 | 2 | undefined): boolean {
+    if (!this.isBayUsable(bay)) {
+      return false;
+    }
     if (!runsBaysConcurrently(this.device.diffusionMode)) {
       return effectiveActiveBay === bay;
     }

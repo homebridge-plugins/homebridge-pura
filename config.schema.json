@@ -59,6 +59,12 @@
         "default": false,
         "description": "Enables nightlight controls (On, Brightness, and Color) on the diffuser accessory (Single Tile) for compatible diffusers."
       },
+      "enableFragranceLevel": {
+        "title": "Show Fragrance Remaining",
+        "type": "boolean",
+        "default": false,
+        "description": "Reports how much fragrance each bay has left, as a filter-life service in HomeKit. Flags a bay for replacement when Pura marks it low, which happens at 10%."
+      },
       "enableAutoAlternate": {
         "title": "Enable Auto-Alternate Control",
         "type": "boolean",
