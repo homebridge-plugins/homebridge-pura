@@ -9,6 +9,7 @@ By default this plugin exposes a single on/off switch per diffuser. It’s desig
 You can optionally enable:
 - Intensity Control: fan-style accessory with Subtle/Medium/Strong intensity levels.
 - Nightlight Control: supports on/off, Brightness (snapped to Pura's 10-step brightness levels), and color for compatible diffusers.
+- Auto-Alternate Control: a switch for Pura's Auto-alternate fragrances setting on multi-bay diffusers.
 
 ## Supported Diffusers
 This plugin is designed for the following diffusers. Every model gets an on/off
@@ -73,6 +74,7 @@ Add the following platform to your `config.json`:
 - **forceNightlightOff**: Pura turns the nightlight on/off with the diffuser. If enabled, the plugin sends a nightlight-off command right after turning on a diffuser. (default: false)
 - **enableFanService (Enable Intensity Control)**: Replaces the on/off switch with a fan accessory to control intensity (Subtle, Medium, Strong). For multi-bay diffusers, HomeKit intensity changes are applied across available bays to keep auto-alternate behavior consistent. (default: false)
 - **enableNightlightAccessory**: Enables nightlight controls (On/Brightness/Color) for compatible diffusers. (default: false)
+- **enableAutoAlternate**: Adds a switch for Pura's Auto-alternate fragrances setting on multi-bay diffusers, so it can be changed from HomeKit rather than the Pura app. On runs both bays, alternating between them; off runs one bay at a time. (default: false)
 
 ## Usage
 

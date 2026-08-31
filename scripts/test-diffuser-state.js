@@ -23,6 +23,8 @@ import {
   mapPuraNumericIntensityToHomeKit,
   PuraApi,
   runsBaysConcurrently,
+  DIFFUSION_MODE_ALTERNATING,
+  DIFFUSION_MODE_SINGLE_BAY,
 } from '../dist/puraApi.js';
 import { buildTimerRealtimeDeviceUpdate, PuraPlatform } from '../dist/platform.js';
 
@@ -251,6 +253,26 @@ assert.equal(runsBaysConcurrently('some-future-mode'), false);
   });
   assert.equal(withRecordIds.bay1.id, 1, 'bay1.id is the bay number');
   assert.equal(withRecordIds.bay2.id, 2, 'bay2.id is the bay number');
+}
+
+// --- Auto-alternate control --------------------------------------------------------------------
+// The switch writes Pura's diffusion mode, which is the same setting that decides whether both bays
+// run at once - so the two must agree on what the strings mean.
+assert.equal(runsBaysConcurrently(DIFFUSION_MODE_ALTERNATING), true, 'switch on means concurrent bays');
+assert.equal(runsBaysConcurrently(DIFFUSION_MODE_SINGLE_BAY), false, 'switch off means one bay at a time');
+{
+  const modeApi = new PuraApi(silentLog);
+  const posted = [];
+  modeApi.makeRequest = async (method, endpoint, body) => {
+    posted.push({ method, endpoint, mode: body.mode });
+    return { success: true };
+  };
+  assert.equal(await modeApi.setDiffusionMode('dev-1', DIFFUSION_MODE_ALTERNATING), true);
+  assert.equal(await modeApi.setDiffusionMode('dev-1', DIFFUSION_MODE_SINGLE_BAY), true);
+  assert.deepEqual(posted, [
+    { method: 'POST', endpoint: 'v3/diffusion/dev-1/mode', mode: 'oscillation-multi-bay' },
+    { method: 'POST', endpoint: 'v3/diffusion/dev-1/mode', mode: 'standard' },
+  ]);
 }
 
 // --- Realtime timer events ---------------------------------------------------------------------

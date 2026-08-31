@@ -246,11 +246,19 @@
           </div>
         </div>
 
-        <div class="form-check form-switch ms-1">
+        <div class="form-check form-switch ms-1 mb-4">
           <input class="form-check-input" id="enableNightlightAccessory" type="checkbox" role="switch" aria-describedby="nightlightAccessoryHelp" />
           <label class="form-check-label" for="enableNightlightAccessory">Enable Nightlight Controls</label>
           <div id="nightlightAccessoryHelp" class="form-text">
             Enables nightlight controls (On, Brightness, and Color) for compatible diffusers.
+          </div>
+        </div>
+
+        <div class="form-check form-switch ms-1">
+          <input class="form-check-input" id="enableAutoAlternate" type="checkbox" role="switch" aria-describedby="autoAlternateHelp" />
+          <label class="form-check-label" for="enableAutoAlternate">Enable Auto-Alternate Control</label>
+          <div id="autoAlternateHelp" class="form-text">
+            Adds a switch for Pura's Auto-alternate fragrances setting on multi-bay diffusers, so it can be changed from HomeKit rather than the Pura app. On runs both bays, alternating between them; off runs one bay at a time.
           </div>
         </div>
 
@@ -298,6 +306,7 @@
         forceNightlightOff: document.getElementById('forceNightlightOff'),
         enableFanService: document.getElementById('enableFanService'),
         enableNightlightAccessory: document.getElementById('enableNightlightAccessory'),
+        enableAutoAlternate: document.getElementById('enableAutoAlternate'),
         testBtn: document.getElementById('testBtn'),
         testHint: document.getElementById('testHint'),
         status: statusEl,
@@ -466,6 +475,7 @@
           forceNightlightOff: false,
           enableFanService: false,
           enableNightlightAccessory: false,
+          enableAutoAlternate: false,
         };
       };
 
@@ -478,6 +488,7 @@
           forceNightlightOff: !!els.forceNightlightOff.checked,
           enableFanService: !!els.enableFanService.checked,
           enableNightlightAccessory: !!els.enableNightlightAccessory.checked,
+          enableAutoAlternate: !!els.enableAutoAlternate.checked,
         };
         await homebridge.updatePluginConfig([config]);
       };
@@ -510,6 +521,7 @@
         els.forceNightlightOff.checked = !!current.forceNightlightOff;
         els.enableFanService.checked = !!(current.enableFanService ?? current.useFanService);
         els.enableNightlightAccessory.checked = !!current.enableNightlightAccessory;
+        els.enableAutoAlternate.checked = !!current.enableAutoAlternate;
         initialCredentialKey = getCredentialKey();
 
         setUiStatus('');
@@ -518,6 +530,7 @@
           els.name,
           els.forceNightlightOff,
           els.enableFanService,
+          els.enableAutoAlternate,
         ]) {
           field.addEventListener('change', async () => {
             await syncConfig();

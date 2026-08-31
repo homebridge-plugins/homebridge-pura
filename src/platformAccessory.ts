@@ -1,7 +1,12 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
 
 import type { PuraPlatform } from './platform.js';
-import { PuraApi } from './puraApi.js';
+import {
+  DIFFUSION_MODE_ALTERNATING,
+  DIFFUSION_MODE_SINGLE_BAY,
+  PuraApi,
+  runsBaysConcurrently,
+} from './puraApi.js';
 import { PuraConfig, PuraDevice, PuraBay } from './puraTypes.js';
 
 /**
@@ -11,6 +16,7 @@ import { PuraConfig, PuraDevice, PuraBay } from './puraTypes.js';
 export class PuraPlatformAccessory {
   private service: Service;
   private nightlightService?: Service;
+  private autoAlternateService?: Service;
   private device: PuraDevice;
   private useFanService: boolean;
   private enableBoundNightlightService: boolean;
@@ -148,6 +154,7 @@ export class PuraPlatformAccessory {
     }
 
     this.configureNightlightService();
+    this.configureAutoAlternateService();
     this.updateCurrentState();
     this.updateFaultState();
     this.logRecommendationHints(this.device);
@@ -192,6 +199,82 @@ export class PuraPlatformAccessory {
 
   private shouldUseBoundNightlightService(): boolean {
     return this.isNightlightControlEnabled();
+  }
+
+  private isAutoAlternateControlEnabled(): boolean {
+    return Boolean((this.platform.config as PuraConfig).enableAutoAlternate ?? false);
+  }
+
+  /** Only multi-bay hardware has anything to alternate between. */
+  private supportsAutoAlternate(): boolean {
+    const raw = this.device.__raw as Record<string, unknown> | undefined;
+    return Boolean((this.device.bay1 && this.device.bay2) || (raw?.bay1 && raw?.bay2));
+  }
+
+  /**
+   * Exposes Pura's "Auto-alternate fragrances" setting as a switch. The plugin previously only
+   * detected this being off and asked the user to go and change it in the Pura app; the API can set
+   * it directly, and it is the setting that decides whether both bays run at once.
+   */
+  private configureAutoAlternateService() {
+    const existing = this.accessory.getServiceById(this.platform.Service.Switch, 'auto-alternate');
+    if (!this.isAutoAlternateControlEnabled() || !this.supportsAutoAlternate()) {
+      if (existing) {
+        this.accessory.removeService(existing);
+      }
+      this.autoAlternateService = undefined;
+      return;
+    }
+
+    const name = `${this.getDiffuserLogLabel()} Auto-Alternate`;
+    this.autoAlternateService = existing
+      || this.accessory.addService(this.platform.Service.Switch, name, 'auto-alternate');
+    this.autoAlternateService.setCharacteristic(this.platform.Characteristic.Name, name);
+    this.autoAlternateService.getCharacteristic(this.platform.Characteristic.On)
+      .onSet(this.setAutoAlternate.bind(this))
+      .onGet(this.getAutoAlternate.bind(this));
+    this.applyAutoAlternateState();
+  }
+
+  private applyAutoAlternateState() {
+    this.autoAlternateService?.updateCharacteristic(
+      this.platform.Characteristic.On,
+      runsBaysConcurrently(this.device.diffusionMode),
+    );
+  }
+
+  private async getAutoAlternate(): Promise<CharacteristicValue> {
+    if (this.isDeviceUnavailable()) {
+      throw new this.platform.api.hap.HapStatusError(
+        this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+      );
+    }
+    return runsBaysConcurrently(this.device.diffusionMode);
+  }
+
+  private async setAutoAlternate(value: CharacteristicValue) {
+    const enabled = Boolean(value);
+    const mode = enabled ? DIFFUSION_MODE_ALTERNATING : DIFFUSION_MODE_SINGLE_BAY;
+    if (this.isDeviceUnavailable()) {
+      this.logUnavailableCommandWarning();
+      throw new this.platform.api.hap.HapStatusError(
+        this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+      );
+    }
+    if (!await this.puraApi.setDiffusionMode(this.device.id, mode)) {
+      this.applyAutoAlternateState();
+      throw new this.platform.api.hap.HapStatusError(
+        this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+      );
+    }
+    // Reflect it immediately rather than waiting for the poll, then reconcile. The mode changes
+    // how bay state is interpreted, so a stale value here misreads the whole device.
+    this.device = { ...this.device, diffusionMode: mode };
+    this.applyAutoAlternateState();
+    this.platform.requestRefreshSoon(2000);
+    this.platform.log.info(
+      `${this.getDiffuserLogLabel()} auto-alternate fragrances turned ${enabled ? 'on' : 'off'}.`,
+    );
   }
 
   private updateCurrentState() {
@@ -1218,6 +1301,7 @@ export class PuraPlatformAccessory {
     const nextOnline = this.normalizeOnlineState(stabilizedDevice.online);
     this.logOnlineStateTransition(previousOnline, nextOnline);
     this.device = stabilizedDevice;
+    this.configureAutoAlternateService();
     if (typeof stabilizedDevice.nightlight?.active === 'boolean') {
       this.pendingNightlightActive = stabilizedDevice.nightlight.active;
     }
@@ -1279,6 +1363,13 @@ export class PuraPlatformAccessory {
               'For best results, please disable it in the Pura app.',
         );
       }
+    }
+
+    // With the auto-alternate switch exposed there is nothing to nag about: the setting is right
+    // there in HomeKit rather than buried in the Pura app.
+    if (this.isAutoAlternateControlEnabled() && this.supportsAutoAlternate()) {
+      this.lastAutoAlternativeOffState = null;
+      return;
     }
 
     const autoAlternativeLikelyOff = this.isAutoAlternativeLikelyOff(device);

@@ -52,6 +52,12 @@
         "type": "boolean",
         "default": false,
         "description": "Enables nightlight controls (On, Brightness, and Color) on the diffuser accessory (Single Tile) for compatible diffusers."
+      },
+      "enableAutoAlternate": {
+        "title": "Enable Auto-Alternate Control",
+        "type": "boolean",
+        "default": false,
+        "description": "Adds a switch for Pura's Auto-alternate fragrances setting on multi-bay diffusers, so it can be changed from HomeKit rather than the Pura app. When it is on the diffuser runs both bays, alternating between them; when off it runs one bay at a time."
       }
     }
   },

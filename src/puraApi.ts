@@ -58,6 +58,10 @@ export const DEVICE_LIST_ENDPOINTS = [
   'v2/users/devices',
 ];
 
+/** Pura's diffusion modes. `oscillation-multi-bay` is the app's "Auto-alternate fragrances" on. */
+export const DIFFUSION_MODE_ALTERNATING = 'oscillation-multi-bay';
+export const DIFFUSION_MODE_SINGLE_BAY = 'standard';
+
 /**
  * Whether a diffusion mode runs both bays at once.
  *
@@ -979,6 +983,28 @@ export class PuraApi {
       apiIntensity,
       controller: 'default',
     };
+  }
+
+  /**
+   * Set the diffusion mode - the app's "Auto-alternate fragrances" setting. This decides whether
+   * the device runs both bays concurrently or one at a time, so it also decides whether bay
+   * exclusivity applies.
+   */
+  async setDiffusionMode(deviceId: string, mode: string): Promise<boolean> {
+    try {
+      const response = await this.makeRequest(
+        'POST',
+        `v3/diffusion/${deviceId}/mode`,
+        { mode },
+        { timeoutMs: 3500 },
+      ) as { success?: boolean };
+      const success = response.success === true;
+      this.log.debug(`Pura diffusion mode response: device=${deviceId} mode=${mode} success=${success}`);
+      return success;
+    } catch (error) {
+      this.log.error(`Failed to set diffusion mode for device ${deviceId}:`, error);
+      return false;
+    }
   }
 
   /**
