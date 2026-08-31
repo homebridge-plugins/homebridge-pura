@@ -146,6 +146,15 @@ assert.ok(
   DEVICE_LIST_ENDPOINTS.includes('v2/users/devices'),
   'the previous endpoint must remain as a fallback',
 );
+// Observed during a Pura outage: users/devices answers 400 getDevicesAndMigrate() and devices
+// answers 404. Trying retired endpoints only delays a failing cycle and buries the real cause.
+for (const retired of ['users/devices', 'devices']) {
+  assert.equal(
+    DEVICE_LIST_ENDPOINTS.includes(retired),
+    false,
+    `${retired} is retired server-side and must not be tried`,
+  );
+}
 
 // --- Nightlight brightness units ---------------------------------------------------------------
 // setNightlight takes a 0-100 percentage and scales it to Pura's 1-10 level. Callers that pass a

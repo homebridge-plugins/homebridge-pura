@@ -42,6 +42,16 @@ unnecessary Cognito refresh on *every* call, with nothing in the logs to indicat
 Everything except the two `v3/` paths is unversioned. "Moving to v3" means adopting two newer
 service paths, not an API migration.
 
+Two older device-list paths are **retired server-side** and should not be used as fallbacks. During
+a Pura outage they answered:
+
+```
+users/devices   400  {"message":"getDevicesAndMigrate() Error"}
+devices         404  Cannot GET /mobile/api/devices
+```
+
+Only `v3/accounts/v2/devices` and `v2/users/devices` are live.
+
 The device list response is keyed by device family rather than being a flat array —
 `{ wall: [...], plus: [...], car: [...] }`. `extractDevices` scans every top-level array, skipping
 `car`, so a new family (a new product line) is picked up without code changes.
@@ -77,6 +87,17 @@ Pura's app exposes **five** positions. They map to numeric levels `1, 3, 5, 7, 1
 
 Writes take the numeric level. pypura types the parameter as `int`.
 
+The coarse string labels are also accepted, but they only reach **three** of the five positions:
+
+| Label | Resulting level |
+| --- | ---: |
+| `subtle` | 1 |
+| `medium` | 5 |
+| `strong` | 10 |
+
+Levels 3 and 7 are unreachable through the labels, so five-position control requires numeric writes.
+Confirmed by driving the HomeKit slider and reading back what the device reported.
+
 ### Reads are scale-dependent and lossy
 
 The two transports disagree, and this is the crux of any five-position control:
@@ -101,6 +122,11 @@ string). Check all sources rather than binding to one.
 
 Numeric values in `1..10` are levels, not percentages — no real device sits at 1–10 percent, so
 that range can be read as levels unambiguously.
+
+### Fragrance remaining
+
+`bay.remaining.percent` is a 0-100 percentage. `bay.lowFragrance` flips to `true` at **10%** -
+observed on a bay crossing from 11 to 10.
 
 ## Timers
 

@@ -41,20 +41,21 @@ export function mapPuraNumericIntensityToHomeKit(intensity: unknown): 20 | 40 | 
 /**
  * Device list endpoints, tried in order.
  *
- * `v3/accounts/v2/devices` is what pypura moved to in August 2026, replacing `v2/users/devices` -
- * the endpoint this plugin used until now - in a change it described as a fix for "compatibility
- * and reliability when loading devices". Note the path still says v2 for the device representation:
- * it is the v3 accounts service returning the same device shape, which is why pypura changed only
- * the URL and no response parsing.
+ * `v3/accounts/v2/devices` is what pypura moved to in August 2026, replacing `v2/users/devices` in a
+ * change it described as a fix for "compatibility and reliability when loading devices". Note the
+ * path still says v2 for the device representation: it is the v3 accounts service returning the
+ * same device shape, which is why pypura changed only the URL and no response parsing.
  *
- * The older paths are retained behind it so a v3 failure degrades to today's behaviour rather than
- * losing every accessory.
+ * `v2/users/devices` is kept behind it so a v3 failure degrades rather than losing every accessory.
+ *
+ * Two older paths used to sit behind those and have been removed: during a Pura outage they were
+ * observed returning `400 {"message":"getDevicesAndMigrate() Error"}` and
+ * `404 Cannot GET /mobile/api/devices` respectively. They are retired server-side, so trying them
+ * only added latency to an already failing cycle and buried the real cause behind a 404.
  */
 export const DEVICE_LIST_ENDPOINTS = [
   'v3/accounts/v2/devices',
   'v2/users/devices',
-  'users/devices',
-  'devices',
 ];
 
 export class PuraApi {
@@ -327,6 +328,9 @@ export class PuraApi {
     this.lastDevicesFetchDegraded = false;
     const endpoints = DEVICE_LIST_ENDPOINTS;
     let lastError: unknown;
+    // Errors from later endpoints say nothing useful about why the request failed, and letting one
+    // of them decide the outcome misreports a transient primary timeout as a hard failure.
+    let primaryError: unknown;
 
     for (let i = 0; i < endpoints.length; i++) {
       const endpoint = endpoints[i];
@@ -345,6 +349,9 @@ export class PuraApi {
       } catch (error) {
         lastError = error;
         const isPrimaryEndpoint = i === 0;
+        if (isPrimaryEndpoint) {
+          primaryError = error;
+        }
         if (this.isTransientNetworkError(error)) {
           this.log.warn(`Pura devices endpoint temporarily unavailable (${endpoint}). Retrying shortly...`);
           await this.delay(1500);
@@ -389,19 +396,21 @@ export class PuraApi {
       }
     }
 
-    if (this.isTransientNetworkError(lastError)) {
+    const reportedError = primaryError ?? lastError;
+
+    if (this.isTransientNetworkError(reportedError)) {
       this.lastDevicesFetchDegraded = true;
       this.log.warn('Pura devices endpoint temporarily unavailable. Returning no device updates this cycle.');
       return [];
     }
 
-    if (this.isThingTypeError(lastError)) {
+    if (this.isThingTypeError(reportedError)) {
       this.lastDevicesFetchDegraded = true;
       this.log.warn('Pura API rejected one or more device thing types. Returning no devices this cycle.');
       return [];
     }
 
-    throw (lastError instanceof Error ? lastError : new Error('Failed to get devices'));
+    throw (reportedError instanceof Error ? reportedError : new Error('Failed to get devices'));
   }
 
   wasLastDevicesFetchDegraded(): boolean {
