@@ -5,6 +5,28 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Pura Smart Diffuser</title>
   <style>
+    /* Inline icons. This page runs inside the Homebridge UI's iframe and cannot depend on the
+       host's icon font: it appears to ship only the glyphs the host itself uses, so fa-eye and
+       fa-spinner render while fa-user-circle does not. These are self-contained, inherit the
+       button's colour via currentColor, and cannot regress when the host changes. */
+    .pura-icon {
+      width: 1em;
+      height: 1em;
+      vertical-align: -0.125em;
+      flex: none;
+    }
+
+    .pura-icon-spin {
+      animation: pura-spin 0.9s linear infinite;
+    }
+
+    @keyframes pura-spin {
+      to { transform: rotate(360deg); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .pura-icon-spin { animation-duration: 2.4s; }
+    }
     html, body {
       margin: 0;
       padding: 0;
@@ -194,7 +216,7 @@
           <div class="password-wrap">
             <input class="form-control form-control-lg" id="password" type="password" autocomplete="current-password" />
             <button class="password-toggle" id="passwordToggle" type="button" aria-label="Show password" title="Show password">
-              <i class="fa fa-eye" aria-hidden="true"></i>
+              <svg class="pura-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.4 8S3.8 3.9 8 3.9 14.6 8 14.6 8 12.2 12.1 8 12.1 1.4 8 1.4 8z"/><circle cx="8" cy="8" r="1.9"/></svg>
             </button>
           </div>
         </div>
@@ -297,7 +319,7 @@
 
       const setTestButtonDefault = () => {
         els.testBtn.className = 'btn test-theme-lock';
-        els.testBtn.innerHTML = '<i class="fa fa-user-circle me-2" aria-hidden="true"></i>' + TEST_BUTTON_TEXT;
+        els.testBtn.innerHTML = '<svg class="pura-icon me-2" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.75"/><circle cx="8" cy="6.4" r="2.15"/><path d="M3.9 13.2a4.6 4.6 0 0 1 8.2 0"/></svg>' + TEST_BUTTON_TEXT;
         const canTest = canAttemptCredentialTest();
         els.testBtn.disabled = !canTest;
         if (els.testHint) {
@@ -314,13 +336,13 @@
 
       const setTestButtonTesting = () => {
         els.testBtn.className = 'btn test-theme-lock';
-        els.testBtn.innerHTML = '<i class="fa fa-spinner fa-spin me-2" aria-hidden="true"></i>' + TESTING_BUTTON_TEXT;
+        els.testBtn.innerHTML = '<svg class="pura-icon pura-icon-spin me-2" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.5" opacity="0.25"/><path d="M8 1.5a6.5 6.5 0 0 1 6.5 6.5"/></svg>' + TESTING_BUTTON_TEXT;
         els.testBtn.disabled = true;
       };
 
       const setTestButtonSuccess = () => {
         els.testBtn.className = 'btn btn-outline-success test-success-lock';
-        els.testBtn.innerHTML = '<i class="fa fa-check-circle me-2" aria-hidden="true"></i>Success';
+        els.testBtn.innerHTML = '<svg class="pura-icon me-2" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.75"/><path d="M5 8.3l2.2 2.2L11 6.2"/></svg>Success';
         els.testBtn.disabled = true;
         if (els.testHint) {
           els.testHint.classList.remove('test-hint-error');
@@ -332,7 +354,7 @@
 
       const setTestButtonFailed = () => {
         els.testBtn.className = 'btn btn-outline-danger test-fail-lock';
-        els.testBtn.innerHTML = '<i class="fa fa-times-circle me-2" aria-hidden="true"></i>Failed';
+        els.testBtn.innerHTML = '<svg class="pura-icon me-2" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.75"/><path d="M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4"/></svg>Failed';
         els.testBtn.disabled = !canAttemptCredentialTest();
       };
 
@@ -517,8 +539,8 @@
             const showing = els.password.type === 'text';
             els.password.type = showing ? 'password' : 'text';
             els.passwordToggle.innerHTML = showing
-              ? '<i class="fa fa-eye" aria-hidden="true"></i>'
-              : '<i class="fa fa-eye-slash" aria-hidden="true"></i>';
+              ? '<svg class="pura-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.4 8S3.8 3.9 8 3.9 14.6 8 14.6 8 12.2 12.1 8 12.1 1.4 8 1.4 8z"/><circle cx="8" cy="8" r="1.9"/></svg>'
+              : '<svg class="pura-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.2 4.2A6.6 6.6 0 0 1 8 3.9C12.2 3.9 14.6 8 14.6 8a11 11 0 0 1-2.3 2.7M9.7 11.8a6.7 6.7 0 0 1-1.7.3C3.8 12.1 1.4 8 1.4 8a11 11 0 0 1 2.8-3.1"/><path d="M6.7 6.7a1.9 1.9 0 0 0 2.6 2.6"/><path d="M2.4 2.4l11.2 11.2"/></svg>';
             els.passwordToggle.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
             els.passwordToggle.setAttribute('title', showing ? 'Show password' : 'Hide password');
           });
