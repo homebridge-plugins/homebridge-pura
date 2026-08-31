@@ -489,6 +489,32 @@ for (const key of ['controller', 'deviceActiveState']) {
   assert.equal(apply({ bay2: { id: 2, remainingPercent: 0 } }).bay2.remainingPercent, 0, 'a reported zero survives the merge');
 }
 
+// --- Fragrance level reporting ------------------------------------------------------------------
+// Home renders nothing for FilterMaintenance, so the level is published as a battery instead. The
+// percentage has to survive an unreported remaining, and low has to follow Pura's own flag as well
+// as a bay that cannot diffuse at all.
+{
+  const { PuraPlatformAccessory } = await import('../dist/platformAccessory.js');
+  const { getFragranceLifeLevel, getFragranceLowStatus, isBayUsable } = PuraPlatformAccessory.prototype;
+  const LOW = { BATTERY_LEVEL_LOW: 1, BATTERY_LEVEL_NORMAL: 0 };
+  const ctxFor = (bay1) => ({
+    device: { bay1 },
+    isBayUsable,
+    platform: { Characteristic: { StatusLowBattery: LOW } },
+  });
+  const level = (bay1) => getFragranceLifeLevel.call(ctxFor(bay1), 1);
+  const low = (bay1) => getFragranceLowStatus.call(ctxFor(bay1), 1);
+
+  assert.equal(level({ remainingPercent: 24 }), 24, 'the remaining percentage is the battery level');
+  assert.equal(level({ remainingPercent: undefined }), 0, 'an unreported remaining reads as zero rather than throwing');
+  assert.equal(level({ remainingPercent: 137 }), 100, 'an out-of-range percentage is clamped');
+
+  assert.equal(low({ remainingPercent: 24, lowFragrance: false }), LOW.BATTERY_LEVEL_NORMAL, '24% is not low');
+  assert.equal(low({ remainingPercent: 10, lowFragrance: true }), LOW.BATTERY_LEVEL_LOW, 'the low-fragrance flag drives low');
+  assert.equal(low({ vialId: '' }), LOW.BATTERY_LEVEL_LOW, 'an empty bay reads low');
+  assert.equal(low({ remainingPercent: 0 }), LOW.BATTERY_LEVEL_LOW, 'so does a spent vial');
+}
+
 // --- Vial identity vs the cache -------------------------------------------------------------------
 // The cache exists to survive silence, not to contradict the device. An empty vialId is Pura saying
 // the bay is empty, and a different id is a different vial - carrying the old fragrance into either

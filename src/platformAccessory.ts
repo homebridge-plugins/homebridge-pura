@@ -508,17 +508,25 @@ export class PuraPlatformAccessory {
   }
 
   /**
-   * Publish each bay's remaining fragrance as a FilterMaintenance service.
+   * Publish each bay's remaining fragrance as a Battery service.
    *
-   * A scent vial is a consumable replaced on a cycle, which is what FilterMaintenance models, and
-   * FilterChangeIndication lines up with Pura's own low-fragrance flag - it flips at 10%. A Battery
-   * service would render a tidier percentage but sets StatusLowBattery, so iOS would raise
-   * low-battery warnings for a vial on a mains-powered diffuser on every refill cycle.
+   * FilterMaintenance models a replaceable consumable exactly, and was the first choice for that
+   * reason - but the Home app renders nothing for it. It surfaces filter state only inside an air
+   * purifier, which a diffuser is not, and adopting that service would drag in a required
+   * Auto/Manual control that means nothing per bay.
+   *
+   * Battery is the service Home does render a percentage for. The cost is StatusLowBattery: a vial
+   * crossing Pura's own low threshold reads as a low battery on a mains-powered device. That is the
+   * accepted trade for the level actually being visible, and it is only reached by opting in.
    */
   private configureFragranceLevelServices() {
     for (const bay of [1, 2] as const) {
       const subtype = `bay-${bay}-fragrance`;
-      const existing = this.accessory.getServiceById(this.platform.Service.FilterMaintenance, subtype);
+      const stale = this.accessory.getServiceById(this.platform.Service.FilterMaintenance, subtype);
+      if (stale) {
+        this.accessory.removeService(stale);
+      }
+      const existing = this.accessory.getServiceById(this.platform.Service.Battery, subtype);
       const source = bay === 1 ? this.device.bay1 : this.device.bay2;
       if (!this.isFragranceLevelEnabled() || !source) {
         if (existing) {
@@ -529,21 +537,22 @@ export class PuraPlatformAccessory {
       }
       const name = `${this.getBayServiceName(bay)} Fragrance`;
       const service = existing
-        || this.accessory.addService(this.platform.Service.FilterMaintenance, name, subtype);
+        || this.accessory.addService(this.platform.Service.Battery, name, subtype);
       this.setServiceName(service, name);
-      // HAP models filter maintenance as a linked service of the thing it belongs to, so hang it off
-      // the control this bay already has. Whether the Home app renders it at all is a separate
-      // question - it is known to surface filter state only inside an air purifier - but an
-      // unlinked service has no chance, and other HomeKit clients read the link.
+      // Hang it off the control this bay already has, so a client that groups linked services shows
+      // the level against the right bay rather than against the diffuser as a whole.
       const parent = this.bayServices[bay] ?? this.service;
       if (parent && !parent.linkedServices.includes(service)) {
         parent.addLinkedService(service);
       }
-      service.getCharacteristic(this.platform.Characteristic.FilterChangeIndication)
-        .onGet(() => this.getFragranceChangeIndication(bay));
-      service.addOptionalCharacteristic(this.platform.Characteristic.FilterLifeLevel);
-      service.getCharacteristic(this.platform.Characteristic.FilterLifeLevel)
+      service.getCharacteristic(this.platform.Characteristic.BatteryLevel)
         .onGet(() => this.getFragranceLifeLevel(bay));
+      service.getCharacteristic(this.platform.Characteristic.StatusLowBattery)
+        .onGet(() => this.getFragranceLowStatus(bay));
+      service.setCharacteristic(
+        this.platform.Characteristic.ChargingState,
+        this.platform.Characteristic.ChargingState.NOT_CHARGEABLE,
+      );
       this.fragranceLevelServices[bay] = service;
     }
     this.applyFragranceLevelState();
@@ -555,23 +564,21 @@ export class PuraPlatformAccessory {
       if (!service) {
         continue;
       }
+      service.updateCharacteristic(this.platform.Characteristic.BatteryLevel, this.getFragranceLifeLevel(bay));
       service.updateCharacteristic(
-        this.platform.Characteristic.FilterChangeIndication,
-        this.getFragranceChangeIndication(bay),
+        this.platform.Characteristic.StatusLowBattery,
+        this.getFragranceLowStatus(bay),
       );
-      const level = this.getFragranceLifeLevel(bay);
-      if (level !== undefined) {
-        service.updateCharacteristic(this.platform.Characteristic.FilterLifeLevel, level);
-      }
     }
   }
 
-  private getFragranceChangeIndication(bay: 1 | 2): CharacteristicValue {
+  /** Low once Pura says so - its own flag flips at 10% - or once the bay cannot diffuse at all. */
+  private getFragranceLowStatus(bay: 1 | 2): CharacteristicValue {
     const source = bay === 1 ? this.device.bay1 : this.device.bay2;
-    const needsChanging = !this.isBayUsable(bay) || source?.lowFragrance === true;
-    return needsChanging
-      ? this.platform.Characteristic.FilterChangeIndication.CHANGE_FILTER
-      : this.platform.Characteristic.FilterChangeIndication.FILTER_OK;
+    const low = !this.isBayUsable(bay) || source?.lowFragrance === true;
+    return low
+      ? this.platform.Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW
+      : this.platform.Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL;
   }
 
   private getFragranceLifeLevel(bay: 1 | 2): number {
@@ -582,6 +589,7 @@ export class PuraPlatformAccessory {
     }
     return Math.max(0, Math.min(100, Math.round(remaining)));
   }
+
 
   private updateCurrentState() {
     const activeBay = this.getActiveBay();

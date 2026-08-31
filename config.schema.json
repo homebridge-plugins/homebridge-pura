@@ -63,7 +63,7 @@
         "title": "Show Fragrance Remaining",
         "type": "boolean",
         "default": false,
-        "description": "Reports how much fragrance each bay has left, as a filter-life service in HomeKit. Flags a bay for replacement when Pura marks it low, which happens at 10%."
+        "description": "Reports how much fragrance each bay has left, shown in HomeKit as a battery level. Home has no display for a fragrance vial, so this borrows the one it does show a percentage for - a bay that Pura marks low, at 10%, will read as a low battery."
       },
       "enableAutoAlternate": {
         "title": "Enable Auto-Alternate Control",
