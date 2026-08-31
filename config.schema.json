@@ -59,12 +59,6 @@
         "default": false,
         "description": "Enables nightlight controls (On, Brightness, and Color) on the diffuser accessory (Single Tile) for compatible diffusers."
       },
-      "enableFragranceLevel": {
-        "title": "Show Fragrance Remaining",
-        "type": "boolean",
-        "default": false,
-        "description": "Reports how much fragrance is left, shown in HomeKit as a battery level. Home has no display for a fragrance vial and shows only one battery per accessory, so this reports the bay with the least left - it will read as a low battery once Pura marks that bay low, at 10%."
-      },
       "enableAutoAlternate": {
         "title": "Enable Auto-Alternate Control",
         "type": "boolean",

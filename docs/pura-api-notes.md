@@ -272,6 +272,24 @@ routinely with a full vial in and must not be read as empty.
 `vialId` is also the right cache key for anything remembered per bay: a changed id is a new vial, so
 a remembered fragrance name must not carry across it.
 
+## Fragrance remaining cannot be shown in the Home app
+
+Tried three ways during 1.8.0's alphas and abandoned. Recorded so nobody spends the time again:
+
+| Service | What Home does |
+| --- | --- |
+| `FilterMaintenance` (per bay, linked to the bay's control) | Renders **nothing**. Home surfaces filter state only inside an air purifier. Eve and Controller for HomeKit do show it. |
+| `Battery` (per bay) | Renders **one** figure for the whole accessory — both bay tiles showed the same number, whichever service Home picked. |
+| `Battery` (one, lowest seated bay) | Works, but says nothing about *which* bay. |
+| `AirPurifier` for each bay | Not attempted. It is the one place Home shows filter state, but it makes a diffuser an "air purifier" to Home and Siri and drags in a required Auto/Manual control with no per-bay meaning — and it may still show only a replace flag rather than a percentage. |
+
+The remaining option that does render per bay is putting the percentage in the service name
+(`Volcano 24%`), which works — `ConfiguredName` updates propagate, see below — but degrades Siri
+matching and fights a user who renames a tile.
+
+`remaining.percent` and `lowFragrance` are still parsed: a bay reporting 0% is one of the two signals
+that it cannot diffuse. They are simply not published as a HomeKit service.
+
 ## HomeKit naming (not Pura, but equally expensive to re-derive)
 
 **The Home app does follow a `ConfiguredName` update on an existing service.** This was the open

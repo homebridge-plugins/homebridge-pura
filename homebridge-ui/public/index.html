@@ -262,14 +262,6 @@
           </div>
         </div>
 
-        <div class="form-check form-switch ms-1 mb-4">
-          <input class="form-check-input" id="enableFragranceLevel" type="checkbox" role="switch" aria-describedby="fragranceLevelHelp" />
-          <label class="form-check-label" for="enableFragranceLevel">Show Fragrance Remaining</label>
-          <div id="fragranceLevelHelp" class="form-text">
-            Reports how much fragrance is left, shown in HomeKit as a battery level. Home has no display for a fragrance vial and shows only one battery per accessory, so this reports the bay with the least left - it will read as a low battery once Pura marks that bay low, at 10%.
-          </div>
-        </div>
-
         <div class="form-check form-switch ms-1">
           <input class="form-check-input" id="enableAutoAlternate" type="checkbox" role="switch" aria-describedby="autoAlternateHelp" />
           <label class="form-check-label" for="enableAutoAlternate">Enable Auto-Alternate Control</label>
@@ -324,7 +316,6 @@
         enableBayControl: document.getElementById('enableBayControl'),
         enableNightlightAccessory: document.getElementById('enableNightlightAccessory'),
         enableAutoAlternate: document.getElementById('enableAutoAlternate'),
-        enableFragranceLevel: document.getElementById('enableFragranceLevel'),
         testBtn: document.getElementById('testBtn'),
         testHint: document.getElementById('testHint'),
         status: statusEl,
@@ -495,7 +486,6 @@
           enableBayControl: false,
           enableNightlightAccessory: false,
           enableAutoAlternate: false,
-          enableFragranceLevel: false,
         };
       };
 
@@ -510,7 +500,6 @@
           enableBayControl: !!els.enableBayControl.checked,
           enableNightlightAccessory: !!els.enableNightlightAccessory.checked,
           enableAutoAlternate: !!els.enableAutoAlternate.checked,
-          enableFragranceLevel: !!els.enableFragranceLevel.checked,
         };
         await homebridge.updatePluginConfig([config]);
       };
@@ -545,7 +534,6 @@
         els.enableBayControl.checked = !!current.enableBayControl;
         els.enableNightlightAccessory.checked = !!current.enableNightlightAccessory;
         els.enableAutoAlternate.checked = !!current.enableAutoAlternate;
-        els.enableFragranceLevel.checked = !!current.enableFragranceLevel;
         initialCredentialKey = getCredentialKey();
 
         setUiStatus('');
@@ -555,7 +543,6 @@
           els.forceNightlightOff,
           els.enableFanService,
           els.enableAutoAlternate,
-          els.enableFragranceLevel,
           els.enableBayControl,
         ]) {
           field.addEventListener('change', async () => {

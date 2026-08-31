@@ -17,7 +17,6 @@ export class PuraPlatformAccessory {
   private service!: Service;
   private bayServices: Partial<Record<1 | 2, Service>> = {};
   private lastBayServiceNames: Partial<Record<1 | 2, string>> = {};
-  private fragranceLevelService?: Service;
   private nightlightService?: Service;
   private autoAlternateService?: Service;
   private device: PuraDevice;
@@ -136,7 +135,7 @@ export class PuraPlatformAccessory {
 
     this.configureNightlightService();
     this.configureAutoAlternateService();
-    this.configureFragranceLevelServices();
+    this.removeFragranceLevelServices();
     this.updateCurrentState();
     this.updateFaultState();
     this.logRecommendationHints(this.device);
@@ -503,106 +502,33 @@ export class PuraPlatformAccessory {
     return source?.remainingPercent !== 0;
   }
 
-  private isFragranceLevelEnabled(): boolean {
-    return Boolean((this.platform.config as PuraConfig).enableFragranceLevel ?? false);
-  }
-
   /**
-   * Publish remaining fragrance as a single Battery service.
+   * Strip the fragrance-level services tried during 1.8.0's alphas.
    *
-   * Three services were tried before this one. FilterMaintenance models a replaceable consumable
-   * exactly and the Home app renders nothing for it. Home surfaces filter state only inside an air
-   * purifier, and adopting that service would make every bay tile an "air purifier" with a required
-   * Auto/Manual control that has no meaning per bay. Battery is the service Home does show a
-   * percentage for - but only one per accessory: two of them rendered the same number on both bays.
+   * Showing how much fragrance a bay has left was attempted three ways and abandoned: the Home app
+   * renders nothing for FilterMaintenance, and it shows one Battery per accessory, so two bays
+   * reported the same figure on both tiles. Reaching the one place Home does show filter state
+   * would mean presenting each bay as an air purifier, which a diffuser is not.
    *
-   * So this reports one figure for the diffuser, the lowest of its seated bays, which is the one
-   * that needs attention. Per-bay percentages are not something Home can display; the bay tiles
-   * carry their fragrance names, and the Pura app has the breakdown.
+   * Remaining and low-fragrance are still parsed - a bay reporting 0% is one of the two signals
+   * that it cannot diffuse - they are just not published as their own service.
    *
-   * The cost is StatusLowBattery: a vial past Pura's own low threshold reads as a low battery on a
-   * mains-powered device. Accepted, because a level nobody can see is worth less than one labelled
-   * oddly, and it is only reached by opting in.
+   * Only alpha builds ever created these, so this can go once 1.8.0 has been out a while.
    */
-  private configureFragranceLevelServices() {
-    // Per-bay services from the first attempt at this, left on cached accessories.
-    for (const bay of [1, 2] as const) {
-      const subtype = `bay-${bay}-fragrance`;
-      for (const type of [this.platform.Service.FilterMaintenance, this.platform.Service.Battery]) {
-        const stale = this.accessory.getServiceById(type, subtype);
-        if (stale) {
-          this.accessory.removeService(stale);
-        }
+  private removeFragranceLevelServices() {
+    const stale = [
+      [this.platform.Service.Battery, 'fragrance'],
+      [this.platform.Service.Battery, 'bay-1-fragrance'],
+      [this.platform.Service.Battery, 'bay-2-fragrance'],
+      [this.platform.Service.FilterMaintenance, 'bay-1-fragrance'],
+      [this.platform.Service.FilterMaintenance, 'bay-2-fragrance'],
+    ] as const;
+    for (const [type, subtype] of stale) {
+      const service = this.accessory.getServiceById(type, subtype);
+      if (service) {
+        this.accessory.removeService(service);
       }
     }
-
-    const existing = this.accessory.getServiceById(this.platform.Service.Battery, 'fragrance');
-    if (!this.isFragranceLevelEnabled() || !this.getSeatedBays().length) {
-      if (existing) {
-        this.accessory.removeService(existing);
-      }
-      this.fragranceLevelService = undefined;
-      return;
-    }
-    const service = existing
-      || this.accessory.addService(this.platform.Service.Battery, 'Fragrance', 'fragrance');
-    this.setServiceName(service, 'Fragrance');
-    service.getCharacteristic(this.platform.Characteristic.BatteryLevel)
-      .onGet(() => this.getFragranceLifeLevel());
-    service.getCharacteristic(this.platform.Characteristic.StatusLowBattery)
-      .onGet(() => this.getFragranceLowStatus());
-    service.setCharacteristic(
-      this.platform.Characteristic.ChargingState,
-      this.platform.Characteristic.ChargingState.NOT_CHARGEABLE,
-    );
-    this.fragranceLevelService = service;
-    this.applyFragranceLevelState();
-  }
-
-  private applyFragranceLevelState() {
-    const service = this.fragranceLevelService;
-    if (!service) {
-      return;
-    }
-    service.updateCharacteristic(this.platform.Characteristic.BatteryLevel, this.getFragranceLifeLevel());
-    service.updateCharacteristic(this.platform.Characteristic.StatusLowBattery, this.getFragranceLowStatus());
-  }
-
-  /**
-   * Bays with a vial in them.
-   *
-   * A bay with no vial is excluded rather than counted as 0%: someone deliberately running one bay
-   * would otherwise sit at a permanent zero and a standing low warning. A seated but spent vial is
-   * included - that is exactly what the indicator is for.
-   */
-  private getSeatedBays(): Array<1 | 2> {
-    return ([1, 2] as const).filter((bay) => {
-      const source = bay === 1 ? this.device.bay1 : this.device.bay2;
-      return Boolean(source) && source?.vialId !== '';
-    });
-  }
-
-  /** Low once Pura says so - its own flag flips at 10% - or once a seated vial is spent. */
-  private getFragranceLowStatus(): CharacteristicValue {
-    const seated = this.getSeatedBays();
-    const low = seated.length === 0 || seated.some((bay) => {
-      const source = bay === 1 ? this.device.bay1 : this.device.bay2;
-      return source?.lowFragrance === true || source?.remainingPercent === 0;
-    });
-    return low
-      ? this.platform.Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW
-      : this.platform.Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL;
-  }
-
-  /** The lowest seated bay - the one that needs replacing first. */
-  private getFragranceLifeLevel(): number {
-    const levels = this.getSeatedBays()
-      .map((bay) => (bay === 1 ? this.device.bay1 : this.device.bay2)?.remainingPercent)
-      .filter((percent): percent is number => typeof percent === 'number' && Number.isFinite(percent));
-    if (levels.length === 0) {
-      return 0;
-    }
-    return Math.max(0, Math.min(100, Math.round(Math.min(...levels))));
   }
 
 
@@ -2166,7 +2092,7 @@ export class PuraPlatformAccessory {
     this.device = stabilizedDevice;
     this.configureAutoAlternateService();
     this.refreshBayServiceNames();
-    this.configureFragranceLevelServices();
+    this.removeFragranceLevelServices();
     if (typeof stabilizedDevice.nightlight?.active === 'boolean') {
       this.pendingNightlightActive = stabilizedDevice.nightlight.active;
     }

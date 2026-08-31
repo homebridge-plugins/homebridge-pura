@@ -13,7 +13,6 @@ export interface PuraConfig extends PlatformConfig {
   enableBayControl?: boolean;
   enableNightlightAccessory?: boolean;
   enableAutoAlternate?: boolean;
-  enableFragranceLevel?: boolean;
 }
 
 export interface PuraDevice {

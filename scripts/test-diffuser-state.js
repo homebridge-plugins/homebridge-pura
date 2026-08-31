@@ -489,47 +489,6 @@ for (const key of ['controller', 'deviceActiveState']) {
   assert.equal(apply({ bay2: { id: 2, remainingPercent: 0 } }).bay2.remainingPercent, 0, 'a reported zero survives the merge');
 }
 
-// --- Fragrance level reporting ------------------------------------------------------------------
-// Home renders nothing for FilterMaintenance and shows only one battery per accessory - two of them
-// reported the same number on both bays. So one figure for the diffuser: the lowest seated bay.
-{
-  const { PuraPlatformAccessory } = await import('../dist/platformAccessory.js');
-  const { getFragranceLifeLevel, getFragranceLowStatus, getSeatedBays } = PuraPlatformAccessory.prototype;
-  const LOW = { BATTERY_LEVEL_LOW: 1, BATTERY_LEVEL_NORMAL: 0 };
-  const ctxFor = (bay1, bay2) => ({
-    device: { bay1, bay2 },
-    getSeatedBays,
-    platform: { Characteristic: { StatusLowBattery: LOW } },
-  });
-  const level = (bay1, bay2) => getFragranceLifeLevel.call(ctxFor(bay1, bay2));
-  const low = (bay1, bay2) => getFragranceLowStatus.call(ctxFor(bay1, bay2));
-
-  const full = { vialId: 'VIAL-B', remainingPercent: 100, lowFragrance: false };
-  const part = { vialId: 'VIAL-A', remainingPercent: 24, lowFragrance: false };
-
-  assert.equal(level(part, full), 24, 'the lowest seated bay is what gets reported');
-  assert.equal(level(full, part), 24, 'whichever bay it is');
-  assert.equal(low(part, full), LOW.BATTERY_LEVEL_NORMAL, 'and 24% is not low');
-
-  // An empty bay is excluded rather than counted as zero - running one bay on purpose must not sit
-  // at a permanent zero with a standing low warning.
-  assert.equal(level(part, { vialId: '' }), 24, 'an empty bay does not drag the level to zero');
-  assert.equal(low(part, { vialId: '' }), LOW.BATTERY_LEVEL_NORMAL, 'nor raise a low warning');
-  assert.equal(level(part, undefined), 24, 'a bay the payload never mentions is the same');
-
-  // A seated but spent vial is exactly what the indicator is for.
-  assert.equal(level(part, { vialId: 'VIAL-C', remainingPercent: 0 }), 0, 'a spent vial reads zero');
-  assert.equal(low(part, { vialId: 'VIAL-C', remainingPercent: 0 }), LOW.BATTERY_LEVEL_LOW, 'and low');
-
-  assert.equal(low(part, { ...full, lowFragrance: true }), LOW.BATTERY_LEVEL_LOW, 'the low-fragrance flag drives low');
-  assert.equal(level({ vialId: '' }, { vialId: '' }), 0, 'no vials at all reads zero');
-  assert.equal(low({ vialId: '' }, { vialId: '' }), LOW.BATTERY_LEVEL_LOW, 'and low');
-
-  // An unreported remaining is unknown, not zero.
-  assert.equal(level({ vialId: 'VIAL-A' }, full), 100, 'a bay with no remaining reported is skipped');
-  assert.equal(level({ vialId: 'VIAL-A' }, { vialId: 'VIAL-B' }), 0, 'nothing reported anywhere falls back to zero');
-}
-
 // --- Vial identity vs the cache -------------------------------------------------------------------
 // The cache exists to survive silence, not to contradict the device. An empty vialId is Pura saying
 // the bay is empty, and a different id is a different vial - carrying the old fragrance into either
