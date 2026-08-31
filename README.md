@@ -9,11 +9,12 @@ By default this plugin exposes a single on/off switch per diffuser. It’s desig
 You can optionally enable:
 - Intensity Control: fan-style accessory with Subtle/Medium/Strong intensity levels.
 - Nightlight Control: supports on/off, Brightness (snapped to Pura's 10-step brightness levels), and color for compatible diffusers.
+- Bay Control: a separate tile per fragrance bay, named after the scent in it.
 - Auto-Alternate Control: a switch for Pura's Auto-alternate fragrances setting on multi-bay diffusers.
 
 ## Supported Diffusers
 This plugin is designed for the following diffusers. Every model gets an on/off
-control by default. Intensity and nightlight controls are opt-in — see
+control by default. Everything else is opt-in, see
 [Configuration Options](#configuration-options).
 
 | | Diffuser | Fragrance bays | Intensity control | Nightlight control |
@@ -32,8 +33,8 @@ generic model name in HomeKit until its hardware version is known. If you own on
 [report](https://github.com/homebridge-plugins/homebridge-pura/issues) of the `hwVersion` from a
 debug log would let us label it correctly.
 
-Other Pura hardware that reports itself through the same API — including the Pura 3 and the Pura
-Car — is picked up automatically and gets on/off and intensity control, but has likewise not been
+Other Pura hardware that reports itself through the same API, including the Pura 3 and the Pura
+Car, is picked up automatically and gets on/off and intensity control, but has likewise not been
 verified against a physical device.
 
 ## Installation
@@ -61,7 +62,9 @@ Add the following platform to your `config.json`:
       "password": "your-pura-password",
       "forceNightlightOff": false,
       "enableFanService": false,
-      "enableNightlightAccessory": false
+      "enableNightlightAccessory": false,
+      "enableBayControl": false,
+      "enableAutoAlternate": false
     }
   ]
 }
@@ -74,7 +77,8 @@ Add the following platform to your `config.json`:
 - **forceNightlightOff**: Pura turns the nightlight on/off with the diffuser. If enabled, the plugin sends a nightlight-off command right after turning on a diffuser. (default: false)
 - **enableFanService (Enable Intensity Control)**: Replaces the on/off switch with a fan accessory to control intensity (Subtle, Medium, Strong). For multi-bay diffusers, HomeKit intensity changes are applied across available bays to keep auto-alternate behavior consistent. (default: false)
 - **enableNightlightAccessory**: Enables nightlight controls (On/Brightness/Color) for compatible diffusers. (default: false)
-- **enableAutoAlternate**: Adds a switch for Pura's Auto-alternate fragrances setting on multi-bay diffusers, so it can be changed from HomeKit rather than the Pura app. On runs both bays, alternating between them; off runs one bay at a time. (default: false)
+- **enableBayControl**: Replaces the single diffuser tile with one tile per fragrance bay, so each bay can be turned on and set independently. Bays are named after the scent in them (see [Bay Names](#bay-names)). Only useful on multi-bay diffusers. (default: false)
+- **enableAutoAlternate**: Adds a switch for Pura's Auto-alternate fragrances setting on multi-bay diffusers, so it can be changed from HomeKit rather than the Pura app. On, the diffuser rotates between the bays over time; off, it stays on the one bay you pick. Either way only one bay diffuses at a time. (default: false)
 
 ## Usage
 
@@ -91,10 +95,45 @@ Switching accessory types will require recreating HomeKit scenes and automations
 
 If `enableNightlightAccessory` is set to `true`, compatible diffusers expose nightlight controls.
 
+### Bay Control
+
+With `enableBayControl` set to `true`, a multi-bay diffuser shows one tile per bay instead of one
+tile for the diffuser. Each bay can be turned on and, with intensity control also enabled, set to
+its own level.
+
+A diffuser runs one bay at a time, so turning on a bay turns the other off. That is true whether or
+not Auto-alternate is on: alternating means the device rotates between the bays over time, not that
+both diffuse at once. Turning a bay on from HomeKit does not change the Auto-alternate setting.
+
+A bay with no vial in it reads as off and refuses to turn on, with a note in the log saying why. A
+bay whose fragrance Pura reports as spent still works, because the diffuser goes on running it.
+
+### Bay Names
+
+Bay tiles are named after the fragrance loaded in them, and follow a vial swap:
+
+| Bays | Tile names |
+| --- | --- |
+| Different scents | `Volcano`, `Salt` |
+| The same scent in both | `Bay 1: Volcano`, `Bay 2: Volcano` |
+| One bay empty | `Volcano`, `Bay 2` |
+| Both empty | `Bay 1`, `Bay 2` |
+
+The bay number appears only when the scent alone would not tell the bays apart. That keeps voice
+control exact where it can be: "turn on Volcano" matches the tile when the scents differ, and is
+ambiguous anyway when they do not.
+
+If you rename a bay tile yourself in the Home app, your name stays until the next time that bay's
+fragrance changes, at which point the plugin renames it again. HomeKit does not tell a plugin that
+a user has renamed something, so there is no way to detect and respect it. This is a consequence of
+keeping names in step with what is loaded rather than a bug, and it only applies with
+`enableBayControl` turned on.
+
 ### Controls
 
 - **Power (default mode)**: Turn the diffuser on/off using the switch accessory
 - **Intensity Control (optional mode)**: Use the fan-style accessory and set intensity to Subtle, Medium, or Strong
+- **Bay Control (optional)**: Turn each fragrance bay on or off, and set its intensity, from its own tile
 - **Nightlight Control (optional)**:
   - On/Off
   - Brightness (snapped to Pura's 10-step brightness levels)
@@ -107,6 +146,7 @@ The plugin will automatically:
 - Create one diffuser accessory per device:
   - Switch by default
   - Intensity control accessory when `enableFanService=true`
+  - One tile per fragrance bay when `enableBayControl=true`
 - Optionally add nightlight controls on compatible models when enabled
 - Update device status via realtime updates with a 5-minute polling fallback (15s when realtime is down)
 - Handle authentication and token refresh (including periodic Cognito refresh polling)
@@ -114,7 +154,10 @@ The plugin will automatically:
 ## Recommended Usage
 
 - Use this plugin in lieu of Pura schedules or away mode.
-- Enable **Auto-alternate fragrances** in the Pura app to ensure equal scent distribution.
+- Enable **Auto-alternate fragrances** to spread wear evenly across both bays. With
+  `enableAutoAlternate` you can toggle it from HomeKit instead of the Pura app.
+- Turn on `enableBayControl` if you want to choose which scent is running. Leave it off to keep a
+  single tile per diffuser.
 
 ## Troubleshooting
 
