@@ -274,7 +274,9 @@ routinely with a full vial in and must not be read as empty.
 
 **`remaining.percent === 0` is not one of them.** Remaining is Pura's estimate from `wearingTime`,
 not a measurement, and the device diffuses straight through zero: a Pura Mini was observed with
-`remaining.percent: 0`, `lowFragrance: true`, `active: true` and a live `activeAt`. Treating zero as
+`remaining.percent: 0`, `lowFragrance: true`, `active: true` and a live `activeAt`. The Pura app
+shows that bay as **"Replace"** and goes on diffusing it — zero is Pura's advice to the owner, not a
+statement that the bay cannot run. Treating zero as
 unusable showed that bay as off in HomeKit while it ran, and left no way to stop it — a tile reading
 off is only ever offered "turn on", which the same check then refuses.
 
